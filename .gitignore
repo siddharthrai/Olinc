@@ -1,0 +1,8 @@
+*.d
+*.o
+.deps
+cache-sim
+optimal
+reader
+writer
+*.gz
