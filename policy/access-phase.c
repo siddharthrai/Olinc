@@ -4,7 +4,7 @@
 
 #define BLOCK_SIZE  (64)
 #define PAGE_SIZE   (4096)
-#define PHASE_BITS  (10)
+#define PHASE_BITS  (12)
 #define PHASE_SIZE  (1 << PHASE_BITS)
 #define LBSIZE      (3)
 #define BYTEBIT     (8)
@@ -192,7 +192,7 @@ ub4 get_phase_reuse_ratio(access_phase *phase, ub1 stream_in,
   assert((sizeof(ub4) * BYTEBIT) >= CTR_W);
 
   reuse_ratio = 0;
-  ret_rrpv    = 2;
+  ret_rrpv    = 3;
 
   /* Insert blocks into accumulator table */
   tag_hash  = (address / BLOCK_SIZE) % phase->entry_count;
@@ -203,27 +203,46 @@ ub4 get_phase_reuse_ratio(access_phase *phase, ub1 stream_in,
     phase->query_table[tag_hash]++;
   }
 
-#define NORM_CONST (3)
-
   hit   = SAT_CTR_VAL(phase->hit_table[tag_hash]);
   fill  = SAT_CTR_VAL(phase->fill_table[tag_hash]);
+
   if (fill)
   {
     reuse_ratio =  hit / fill;
   }
 
+#if 0
+#define NORM_CONST  (2)
+
   if (hit && (phase->hit_max - phase->hit_min) > (phase->hit_max >> 2))
-#if 0
-  if (hit)
-#endif
   {
-    ret_rrpv = (((phase->hit_max - hit) * NORM_CONST) / (phase->hit_max - phase->hit_min));
-#if 0
-    ret_rrpv = 0;
-#endif
+    if (phase->hit_max - phase->hit_min)
+    {
+      ret_rrpv = (((phase->hit_max - hit) * NORM_CONST) / (phase->hit_max - phase->hit_min));
+    }
+    else
+    {
+      assert(phase->hit_max && phase->hit_min);
+      ret_rrpv = 3;
+    }
   }
   
 #undef NORM_CONST
+#endif
+
+#define REUSE_TH (1)
+
+  if (phase->src_stream != phase->tgt_stream)
+  {
+    if (hit && reuse_ratio > REUSE_TH)
+    {
+      ret_rrpv = 0;
+    }
+    else
+    {
+      ret_rrpv = 3;
+    }
+  }
 
   return ret_rrpv;
 }
@@ -275,8 +294,9 @@ void end_phase(access_phase *phase)
   {
     SAT_CTR_HLF(phase->hit_table[i]);
     SAT_CTR_HLF(phase->fill_table[i]);
-
+#if 0
     memset(&(phase->query_table[i]), 0, sizeof(ub8));
+#endif
   }
 
   phase->fill_min   = 0x0ffff;

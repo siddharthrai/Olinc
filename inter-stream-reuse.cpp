@@ -9,13 +9,13 @@ void InterStreamReuse::StartCbk()
 }
 
 /* Cache access begin callback */
-void InterStreamReuse::CacheAccessBeginCbk(memory_trace info)
+void InterStreamReuse::CacheAccessBeginCbk(memory_trace info, ub8 set_idx, ub8 access, ub8 rplc)
 {
   if (use_va == FALSE)
   {
     if (info.address)
     {
-      address_map->addAddress(info.stream, info.address);
+      address_map->addAddress(info.stream, info.address, set_idx, access, rplc);
       region_table->addBlock(info.stream, info.address);
     }
   }
@@ -23,14 +23,14 @@ void InterStreamReuse::CacheAccessBeginCbk(memory_trace info)
   {
     if (info.vtl_addr)
     {
-      address_map->addAddress(info.stream, info.vtl_addr);
+      address_map->addAddress(info.stream, info.vtl_addr, set_idx, access, rplc);
       region_table->addBlock(info.stream, info.vtl_addr);
     }
   }
 }
 
 /* Cache access end callback */
-void InterStreamReuse::CacheAccessEndCbk(memory_trace info)
+void InterStreamReuse::CacheAccessEndCbk(memory_trace info, ub8 set_idx, ub8 rplc)
 {
   if (use_va == FALSE)
   {
@@ -50,7 +50,7 @@ void InterStreamReuse::CacheAccessEndCbk(memory_trace info)
 
 /* Cache access hit callback */
 void InterStreamReuse::CacheAccessHitCbk(memory_trace info, 
-    cache_access_status status)
+    cache_access_status status, ub8 set_idx, ub8 access, ub8 rplc)
 {
   if (info.stream != status.stream)
   {
@@ -59,8 +59,9 @@ void InterStreamReuse::CacheAccessHitCbk(memory_trace info,
     {
       if (info.address)
       {
-        address_map->addAddress(info.stream, info.address);
-        address_map->removeAddress(status.stream, info.address);
+        address_map->addAddress(info.stream, info.address, set_idx, access, rplc);
+        address_map->removeAddress(status.stream, info.stream, info.address, set_idx, rplc);
+
         region_table->addBlock(info.stream, info.address);
       }
     }
@@ -68,8 +69,9 @@ void InterStreamReuse::CacheAccessHitCbk(memory_trace info,
     {
       if (info.vtl_addr)
       {
-        address_map->addAddress(info.stream, info.vtl_addr);
-        address_map->removeAddress(status.stream, info.vtl_addr);
+        address_map->addAddress(info.stream, info.vtl_addr, set_idx, access, rplc);
+        address_map->removeAddress(status.stream, info.stream, info.vtl_addr, set_idx, rplc);
+
         region_table->addBlock(info.stream, info.vtl_addr);
       }
     }
@@ -94,19 +96,19 @@ void InterStreamReuse::CacheAccessHitCbk(memory_trace info,
 }
 
 /* Cache access miss callback */
-void InterStreamReuse::CacheAccessMissCbk(memory_trace info)
+void InterStreamReuse::CacheAccessMissCbk(memory_trace info, ub8 set_idx, ub8 rplc)
 {
 }
 
 /* Cache access replace callback */
 void InterStreamReuse::CacheAccessReplaceCbk(memory_trace info, 
-    cache_access_status status)
+    cache_access_status status, ub8 set_idx, ub8 access, ub8 rplc)
 {
   if (use_va == FALSE)
   {
     if (status.tag)
     {
-      address_map->removeAddress(status.stream, status.tag);
+      address_map->removeAddress(status.stream, info.stream, status.tag, set_idx, rplc);
       region_table->removeBlock(status.stream, status.tag);
     }
   }
@@ -114,7 +116,7 @@ void InterStreamReuse::CacheAccessReplaceCbk(memory_trace info,
   {
     if (status.vtl_addr)
     {
-      address_map->removeAddress(status.stream, status.vtl_addr);
+      address_map->removeAddress(status.stream, info.stream, status.vtl_addr, set_idx, rplc);
       region_table->removeBlock(status.stream, status.vtl_addr);
     }
   }

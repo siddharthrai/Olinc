@@ -17,8 +17,8 @@
  * USA.
  */
 
-#ifndef MEM_SYSTEM_GSPCM_H
-#define	MEM_SYSTEM_GSPCM_H
+#ifndef MEM_SYSTEM_SRRIPDBP_H
+#define	MEM_SYSTEM_SRRIPDBP_H
 
 #ifdef __cplusplus
 # define EXPORT_C extern "C"
@@ -30,62 +30,65 @@
 #include "../common/sat-counter.h"
 #include "cache-block.h"
 #include "policy.h"
-#include "srripm.h"
+#include "srrip.h"
 
 /* Head node of a list, which corresponds to a particular RRPV */
-typedef struct cache_list_head_gspcm_t
+typedef struct cache_list_head_srripdbp_t
 {
   ub4 rrpv;
   struct cache_block_t *head;
-}gspcm_list;
+}srripdbp_list;
 
-#define GSPCM_DATA_MAX_RRPV(data)   ((data)->max_rrpv)
-#define GSPCM_DATA_THRESHOLD(data)  ((data)->threshold)
-#define GSPCM_DATA_BLOCKS(data)     ((data)->blocks)
-#define GSPCM_DATA_VALID_HEAD(data) ((data)->valid_head)
-#define GSPCM_DATA_VALID_TAIL(data) ((data)->valid_tail)
-#define GSPCM_DATA_FREE_HEAD(data)  ((data)->free_head)
-#define GSPCM_DATA_FREE_TAIL(data)  ((data)->free_tail)
+#define SRRIPDBP_DATA_MAX_RRPV(data)   ((data)->max_rrpv)
+#define SRRIPDBP_DATA_THRESHOLD(data)  ((data)->threshold)
+#define SRRIPDBP_DATA_BLOCKS(data)     ((data)->blocks)
+#define SRRIPDBP_DATA_VALID_HEAD(data) ((data)->valid_head)
+#define SRRIPDBP_DATA_VALID_TAIL(data) ((data)->valid_tail)
+#define SRRIPDBP_DATA_FREE_HEAD(data)  ((data)->free_head)
+#define SRRIPDBP_DATA_FREE_TAIL(data)  ((data)->free_tail)
 
 /* RRIP specific data */
-typedef struct cache_policy_gspcm_data_t
+typedef struct cache_policy_srripdbp_data_t
 {
   cache_policy_t  following;                    /* Policy set is following */
 
   ub4        max_rrpv;                          /* Maximum RRPV */
   ub4        threshold;                         /* Eviction threshold */
-  gspcm_list *valid_head;                        /* Valid block head */
-  gspcm_list *valid_tail;                        /* Valid block tail */
+  srripdbp_list *valid_head;                        /* Valid block head */
+  srripdbp_list *valid_tail;                        /* Valid block tail */
 
   struct cache_block_t *blocks;                 /* Actual blocks */
   struct cache_block_t *free_head;              /* Free list head */
   struct cache_block_t *free_tail;              /* Free list tail */
   
-  srripm_data srrip_policy_data;                /* If set is following srripm */
-}gspcm_data;
+  srrip_data srrip_policy_data;                 /* If set is following srrip */
+}srripdbp_data;
 
-typedef struct cache_policy_gspcm_gdata_t
+typedef struct cache_policy_srripdbp_gdata_t
 {
-  /* Eight counter to be used for GSPC reuse probability learning */
-  struct saturating_counter_t tex_e0_fill_ctr;              /* Texture epoch 0 fill */
-  struct saturating_counter_t tex_e0_hit_ctr;               /* Texture epoch 0 hits */
-  struct saturating_counter_t tex_e1_fill_ctr;              /* Texture epoch 1 fill */
-  struct saturating_counter_t tex_e1_hit_ctr;               /* Texture epoch 1 hits */
-  struct saturating_counter_t z_e0_fill_ctr;                /* Depth fill */
-  struct saturating_counter_t z_e0_hit_ctr;                 /* Depth hits */
-  struct saturating_counter_t rt_prod_ctr;                  /* Render target produced */
-  struct saturating_counter_t rt_cons_ctr;                  /* Render target consumed */
-  struct saturating_counter_t bt_prod_ctr;                  /* Render target produced */
-  struct saturating_counter_t bt_cons_ctr;                  /* Render target consumed */
-  struct saturating_counter_t acc_all_ctr;                  /* Total accesses */
-  struct saturating_counter_t blk_fill[TST + MAX_CORES];    /* Filled blocks */
-  struct saturating_counter_t blk_no_reuse[TST + MAX_CORES];/* Block not reused */
-  struct saturating_counter_t blk_reuse[TST + MAX_CORES];   /* Block reused */
-  ub8    total_blocks[TST + MAX_CORES];                     /* Blocks in sampled sets */
-  ub8    total_access[TST + MAX_CORES];                     /* Accesses */
-  ub8    prev_bt_prod;                                      /* Previous BT counter */
-  ub8    prev_bt_cons;                                      /* Previous BT counter */
-}gspcm_gdata;
+  /* Eight counter to be used for SRRIPDBP reuse probability learning */
+  struct saturating_counter_t tex_e0_fill_ctr;  /* Texture epoch 0 fill */
+  struct saturating_counter_t tex_e0_hit_ctr;   /* Texture epoch 0 hits */
+  struct saturating_counter_t tex_e1_fill_ctr;  /* Texture epoch 1 fill */
+  struct saturating_counter_t tex_e1_hit_ctr;   /* Texture epoch 1 hits */
+  struct saturating_counter_t z_e0_fill_ctr;    /* Depth fill */
+  struct saturating_counter_t z_e0_hit_ctr;     /* Depth hits */
+  struct saturating_counter_t o_e0_fill_ctr;    /* Other fill */
+  struct saturating_counter_t o_e0_hit_ctr;     /* Other hits */
+  struct saturating_counter_t rt_prod_ctr;      /* Render target produced */
+  struct saturating_counter_t rt_cons_ctr;      /* Render target consumed */
+  struct saturating_counter_t bt_prod_ctr;      /* Render target produced */
+  struct saturating_counter_t bt_cons_ctr;      /* Render target consumed */
+  struct saturating_counter_t acc_all_ctr;      /* Total accesses */
+  ub8    texture_0_hit;                         /* # Texture epoch 0 hits */
+  ub8    texture_1_pred;                        /* # Texture 1 hit predicted */
+  ub8    texture_1_hit;                         /* # Texture epoch 1 hits */
+  ub8    texture_2_pred;                        /* # Texture 2 hits predicted */
+  ub8    texture_more_hit;                      /* # Texture more than two hits */
+  ub8    texture_1_real;                        /* # Texture 1 hit predicted */
+  ub8    texture_2_real;                        /* # Texture 1 hit predicted */
+  ub8    texture_3_real;                        /* # Texture 1 hit predicted */
+}srripdbp_gdata;
 
 /*
  *
@@ -109,8 +112,8 @@ typedef struct cache_policy_gspcm_gdata_t
  * NOTES
  */
 
-void cache_init_gspcm(long long int set_indx, struct cache_params *params, 
-  gspcm_data *policy_data, gspcm_gdata *global_data);
+void cache_init_srripdbp(long long int set_indx, struct cache_params *params, 
+  srripdbp_data *policy_data, srripdbp_gdata *global_data);
 
 /*
  *
@@ -131,7 +134,7 @@ void cache_init_gspcm(long long int set_indx, struct cache_params *params,
  *  Nothing
  */
 
-void cache_free_gspcm(gspcm_data *policy_data, gspcm_gdata *global_data);
+void cache_free_srripdbp(srripdbp_data *policy_data, srripdbp_gdata *global_data);
 
 /*
  *
@@ -153,7 +156,7 @@ void cache_free_gspcm(gspcm_data *policy_data, gspcm_gdata *global_data);
  *  Pointer to the block 
  */
 
-struct cache_block_t * cache_find_block_gspcm(gspcm_data *policy_data, long long tag);
+struct cache_block_t * cache_find_block_srripdbp(srripdbp_data *policy_data, long long tag);
 
 /*
  *
@@ -179,7 +182,7 @@ struct cache_block_t * cache_find_block_gspcm(gspcm_data *policy_data, long long
  *  Nothing
  */
 
-void cache_fill_block_gspcm(gspcm_data *policy_data, gspcm_gdata *global_data, 
+void cache_fill_block_srripdbp(srripdbp_data *policy_data, srripdbp_gdata *global_data, 
   int way, long long tag, enum cache_block_state_t state, int strm,
   memory_trace *info);
 
@@ -203,8 +206,7 @@ void cache_fill_block_gspcm(gspcm_data *policy_data, gspcm_gdata *global_data,
  *
  */
 
-int  cache_replace_block_gspcm(gspcm_data *policy_data, 
-    gspcm_gdata *global_data, memory_trace *info);
+int  cache_replace_block_srripdbp(srripdbp_data *policy_data, srripdbp_gdata *global_data);
 
 /*
  *
@@ -229,7 +231,7 @@ int  cache_replace_block_gspcm(gspcm_data *policy_data,
  *
  */
 
-void cache_access_block_gspcm(gspcm_data *policy_data, gspcm_gdata *global_data,
+void cache_access_block_srripdbp(srripdbp_data *policy_data, srripdbp_gdata *global_data,
   int way, int strm, memory_trace *info);
 
 /*
@@ -254,7 +256,7 @@ void cache_access_block_gspcm(gspcm_data *policy_data, gspcm_gdata *global_data,
  *  Complete block info
  */
 
-struct cache_block_t cache_get_block_gspcm(gspcm_data *policy_data, gspcm_gdata *global_data, 
+struct cache_block_t cache_get_block_srripdbp(srripdbp_data *policy_data, srripdbp_gdata *global_data, 
   int way, long long *tag_ptr, enum cache_block_state_t *state_ptr, 
   int *stream);
 
@@ -281,7 +283,7 @@ struct cache_block_t cache_get_block_gspcm(gspcm_data *policy_data, gspcm_gdata 
  *  Nothing
  */
 
-void cache_set_block_gspcm(gspcm_data *policy_data, gspcm_gdata *global_data, 
+void cache_set_block_srripdbp(srripdbp_data *policy_data, srripdbp_gdata *global_data, 
   int way, long long tag, enum cache_block_state_t state, ub1 stream,
   memory_trace *info);
 
@@ -305,7 +307,8 @@ void cache_set_block_gspcm(gspcm_data *policy_data, gspcm_gdata *global_data,
  *
  */
 
-int cache_get_fill_rrpv_gspcm(gspcm_data *policy_data, gspcm_gdata *global_data, int strm);
+int cache_get_fill_rrpv_srripdbp(srripdbp_data *policy_data, 
+    srripdbp_gdata *global_data, int strm, memory_trace *info);
 
 /*
  *
@@ -326,7 +329,7 @@ int cache_get_fill_rrpv_gspcm(gspcm_data *policy_data, gspcm_gdata *global_data,
  *  Replacement RRPV
  */
 
-int cache_get_replacement_rrpv_gspcm(gspcm_data *policy_data);
+int cache_get_replacement_rrpv_srripdbp(srripdbp_data *policy_data);
 
 /*
  *
@@ -347,7 +350,7 @@ int cache_get_replacement_rrpv_gspcm(gspcm_data *policy_data);
  *  New RRPV
  */
 
-int cache_get_new_rrpv_gspcm(gspcm_data *policy_data, gspcm_gdata *global_data, 
+int cache_get_new_rrpv_srripdbp(srripdbp_data *policy_data, srripdbp_gdata *global_data, 
   int way, int strm);
 
 /*
@@ -358,12 +361,12 @@ int cache_get_new_rrpv_gspcm(gspcm_data *policy_data, gspcm_gdata *global_data,
  *
  * DESCRIPTION
  *  
- *  Update GSPC spesific fill counters 
+ *  Update SRRIPDBP spesific fill counters 
  *
  * PARAMETERS
  *  
  *  policy_data (IN)  - Cache Set
- *  global_data (OUT) - GSPC specific cache wide data
+ *  global_data (OUT) - SRRIPDBP specific cache wide data
  *  way         (IN)  - Block way
  *  strm        (IN)  - Access stream
  *
@@ -371,8 +374,8 @@ int cache_get_new_rrpv_gspcm(gspcm_data *policy_data, gspcm_gdata *global_data,
  *  Nothing
  */
 
-void cache_update_fill_counter_gspcm(srripm_data *policy_data, 
-  gspcm_gdata *global_data, int way, int strm);
+void cache_update_fill_counter_srripdbp(srrip_data *policy_data, 
+  srripdbp_gdata *global_data, int way, int strm);
 
 /*
  *
@@ -382,12 +385,12 @@ void cache_update_fill_counter_gspcm(srripm_data *policy_data,
  *
  * DESCRIPTION
  *  
- *  Update GSPC specific hit counter 
+ *  Update SRRIPDBP specific hit counter 
  *
  * PARAMETERS
  *  
  *  policy_data (IN)  - Cache Set
- *  global_data (OUT) - GSPC specific cache wide data
+ *  global_data (OUT) - SRRIPDBP specific cache wide data
  *  way         (IN)  - Block way
  *  strm        (IN)  - Access stream
  *
@@ -396,8 +399,8 @@ void cache_update_fill_counter_gspcm(srripm_data *policy_data,
  *  Nothing
  */
 
-void cache_update_hit_counter_gspcm(srripm_data *policy_data,
-  gspcm_gdata *global_data, int way, int strm);
+void cache_update_hit_counter_srripdbp(srrip_data *policy_data,
+  srripdbp_gdata *global_data, int way, int strm);
 
 #undef EXPORT_C
 #endif	/* MEM_SYSTEM_CACHE_H */

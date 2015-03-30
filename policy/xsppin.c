@@ -24,7 +24,7 @@
 #include "libmhandle/mhandle.h"
 #include "common/intermod-common.h"
 #include "common/List.h"
-#include "pasrrip.h"
+#include "xsppin.h"
 #include "sap.h"
 
 #define CACHE_SET(cache, set)   (&((cache)->sets[set]))
@@ -41,7 +41,7 @@ do                                                            \
   (block)->state    = (state_in);                             \
 }while(0)
 
-#define CACHE_PASRRIP_INCREMENT_RRPV(head_ptr, tail_ptr, rrpv)\
+#define CACHE_XSPPIN_INCREMENT_RRPV(head_ptr, tail_ptr, rrpv)\
 do                                                            \
 {                                                             \
     int dif = 0;                                              \
@@ -89,12 +89,12 @@ do                                                            \
 {                                                             \
   if ((block)->stream == CS && strm != CS)                    \
   {                                                           \
-    pa_cs_blocks--;                                           \
+    xsppin_cs_blocks--;                                       \
   }                                                           \
                                                               \
   if (strm == CS && (block)->stream != CS)                    \
   {                                                           \
-    pa_cs_blocks++;                                           \
+    xsppin_cs_blocks++;                                       \
   }                                                           \
                                                               \
   (block)->stream = strm;                                     \
@@ -111,12 +111,12 @@ do                                                            \
 do                                                                                          \
 {                                                                                           \
         /* Check: free list must be non empty as it contains the current block. */          \
-        assert(PASRRIP_DATA_FREE_HEAD(set) && PASRRIP_DATA_FREE_HEAD(set));                     \
+        assert(XSPPIN_DATA_FREE_HEAD(set) && XSPPIN_DATA_FREE_HEAD(set));                     \
                                                                                             \
         /* Check: current block must be in invalid state */                                 \
         assert((blk)->state == cache_block_invalid);                                        \
                                                                                             \
-        CACHE_REMOVE_FROM_SQUEUE(blk, PASRRIP_DATA_FREE_HEAD(set), PASRRIP_DATA_FREE_TAIL(set));\
+        CACHE_REMOVE_FROM_SQUEUE(blk, XSPPIN_DATA_FREE_HEAD(set), XSPPIN_DATA_FREE_TAIL(set));    \
                                                                                             \
         (blk)->next = NULL;                                                                 \
         (blk)->prev = NULL;                                                                 \
@@ -127,10 +127,10 @@ do                                                                              
         (blk)->prefetch = 0;                                                                \
 }while(0);
 
-int pa_cs_blocks = 0;
+int xsppin_cs_blocks = 0;
 
-void cache_init_pasrrip(int set_idx, struct cache_params *params, pasrrip_data *policy_data,
-    pasrrip_gdata *global_data)
+void cache_init_xsppin(int set_idx, struct cache_params *params, xsppin_data *policy_data,
+    xsppin_gdata *global_data)
 {
   /* Ensure valid arguments */
   assert(params);
@@ -141,66 +141,66 @@ void cache_init_pasrrip(int set_idx, struct cache_params *params, pasrrip_data *
 #define MEM_ALLOC(size) ((rrip_list *)xcalloc(size, sizeof(rrip_list)))
 
   /* Create per rrpv buckets */
-  PASRRIP_DATA_VALID_HEAD(policy_data) = MEM_ALLOC(MAX_RRPV + 1);
-  PASRRIP_DATA_VALID_TAIL(policy_data) = MEM_ALLOC(MAX_RRPV + 1);
+  XSPPIN_DATA_VALID_HEAD(policy_data) = MEM_ALLOC(MAX_RRPV + 1);
+  XSPPIN_DATA_VALID_TAIL(policy_data) = MEM_ALLOC(MAX_RRPV + 1);
 
 #undef MEM_ALLOC  
 
-  assert(PASRRIP_DATA_VALID_HEAD(policy_data));
-  assert(PASRRIP_DATA_VALID_TAIL(policy_data));
+  assert(XSPPIN_DATA_VALID_HEAD(policy_data));
+  assert(XSPPIN_DATA_VALID_TAIL(policy_data));
 
   /* Set max RRPV for the set */
-  PASRRIP_DATA_MAX_RRPV(policy_data)  = MAX_RRPV;
-  PASRRIP_DATA_SET_INDEX(policy_data) = set_idx;
+  XSPPIN_DATA_MAX_RRPV(policy_data)  = MAX_RRPV;
+  XSPPIN_DATA_SET_INDEX(policy_data) = set_idx;
 
   /* Ways for the set */
-  PASRRIP_DATA_WAYS(policy_data) = params->ways;
+  XSPPIN_DATA_WAYS(policy_data) = params->ways;
 
   /* Initialize head nodes */
   for (int i = 0; i <= MAX_RRPV; i++)
   {
-    PASRRIP_DATA_VALID_HEAD(policy_data)[i].rrpv = i;
-    PASRRIP_DATA_VALID_HEAD(policy_data)[i].head = NULL;
-    PASRRIP_DATA_VALID_TAIL(policy_data)[i].head = NULL;
+    XSPPIN_DATA_VALID_HEAD(policy_data)[i].rrpv = i;
+    XSPPIN_DATA_VALID_HEAD(policy_data)[i].head = NULL;
+    XSPPIN_DATA_VALID_TAIL(policy_data)[i].head = NULL;
   }
 
   /* Create array of blocks */
-  PASRRIP_DATA_BLOCKS(policy_data) = 
+  XSPPIN_DATA_BLOCKS(policy_data) = 
     (struct cache_block_t *)xcalloc(params->ways, sizeof (struct cache_block_t));
 
 #define MEM_ALLOC(size) ((list_head_t *)xcalloc(size, sizeof(list_head_t)))
 
-  PASRRIP_DATA_FREE_HLST(policy_data) = MEM_ALLOC(1);
-  assert(PASRRIP_DATA_FREE_HLST(policy_data));
+  XSPPIN_DATA_FREE_HLST(policy_data) = MEM_ALLOC(1);
+  assert(XSPPIN_DATA_FREE_HLST(policy_data));
 
-  PASRRIP_DATA_FREE_TLST(policy_data) = MEM_ALLOC(1);
-  assert(PASRRIP_DATA_FREE_TLST(policy_data));
+  XSPPIN_DATA_FREE_TLST(policy_data) = MEM_ALLOC(1);
+  assert(XSPPIN_DATA_FREE_TLST(policy_data));
 
 #undef MEM_ALLOC
 
   /* Initialize array of blocks */
-  PASRRIP_DATA_FREE_HEAD(policy_data) = &(PASRRIP_DATA_BLOCKS(policy_data)[0]);
-  PASRRIP_DATA_FREE_TAIL(policy_data) = &(PASRRIP_DATA_BLOCKS(policy_data)[params->ways - 1]);
+  XSPPIN_DATA_FREE_HEAD(policy_data) = &(XSPPIN_DATA_BLOCKS(policy_data)[0]);
+  XSPPIN_DATA_FREE_TAIL(policy_data) = &(XSPPIN_DATA_BLOCKS(policy_data)[params->ways - 1]);
 
   for (int way = 0; way < params->ways; way++)
   {
-    (&PASRRIP_DATA_BLOCKS(policy_data)[way])->way   = way;
-    (&PASRRIP_DATA_BLOCKS(policy_data)[way])->state = cache_block_invalid;
-    (&PASRRIP_DATA_BLOCKS(policy_data)[way])->next  = way ?
-      (&PASRRIP_DATA_BLOCKS(policy_data)[way - 1]) : NULL;
-    (&PASRRIP_DATA_BLOCKS(policy_data)[way])->prev  = way < params->ways - 1 ? 
-      (&PASRRIP_DATA_BLOCKS(policy_data)[way + 1]) : NULL;
+    (&XSPPIN_DATA_BLOCKS(policy_data)[way])->way   = way;
+    (&XSPPIN_DATA_BLOCKS(policy_data)[way])->state = cache_block_invalid;
+    (&XSPPIN_DATA_BLOCKS(policy_data)[way])->next  = way ?
+      (&XSPPIN_DATA_BLOCKS(policy_data)[way - 1]) : NULL;
+    (&XSPPIN_DATA_BLOCKS(policy_data)[way])->prev  = way < params->ways - 1 ? 
+      (&XSPPIN_DATA_BLOCKS(policy_data)[way + 1]) : NULL;
   }
   
   /* Set current and default fill policy to SRRIP */
-  PASRRIP_DATA_CFPOLICY(policy_data) = cache_policy_pasrrip;
-  PASRRIP_DATA_DFPOLICY(policy_data) = cache_policy_pasrrip;
-  PASRRIP_DATA_CAPOLICY(policy_data) = cache_policy_pasrrip;
-  PASRRIP_DATA_DAPOLICY(policy_data) = cache_policy_pasrrip;
-  PASRRIP_DATA_CRPOLICY(policy_data) = cache_policy_pasrrip;
-  PASRRIP_DATA_DRPOLICY(policy_data) = cache_policy_pasrrip;
+  XSPPIN_DATA_CFPOLICY(policy_data) = cache_policy_xsppin;
+  XSPPIN_DATA_DFPOLICY(policy_data) = cache_policy_xsppin;
+  XSPPIN_DATA_CAPOLICY(policy_data) = cache_policy_xsppin;
+  XSPPIN_DATA_DAPOLICY(policy_data) = cache_policy_xsppin;
+  XSPPIN_DATA_CRPOLICY(policy_data) = cache_policy_xsppin;
+  XSPPIN_DATA_DRPOLICY(policy_data) = cache_policy_xsppin;
   
-  assert(PASRRIP_DATA_MAX_RRPV(policy_data) != 0);
+  assert(XSPPIN_DATA_MAX_RRPV(policy_data) != 0);
   
   /* Allcate CT block hash table */
   if (!global_data->ct_blocks)
@@ -263,7 +263,7 @@ void cache_init_pasrrip(int set_idx, struct cache_params *params, pasrrip_data *
 
     for (ub4 i = 0; i < TST; i++)
     {
-      global_data->per_stream_frrpv[i] = xcalloc(1, sizeof(ub8) * PASRRIP_DATA_MAX_RRPV(policy_data));
+      global_data->per_stream_frrpv[i] = xcalloc(1, sizeof(ub8) * XSPPIN_DATA_MAX_RRPV(policy_data));
       assert(global_data->per_stream_frrpv[i]);
     }
   }
@@ -277,26 +277,26 @@ void cache_init_pasrrip(int set_idx, struct cache_params *params, pasrrip_data *
 }
 
 /* Free all blocks, sets, head and tail buckets */
-void cache_free_pasrrip(pasrrip_data *policy_data)
+void cache_free_xsppin(xsppin_data *policy_data)
 {
   /* Free all data blocks */
-  free(PASRRIP_DATA_BLOCKS(policy_data));
+  free(XSPPIN_DATA_BLOCKS(policy_data));
 
   /* Free valid head buckets */
-  if (PASRRIP_DATA_VALID_HEAD(policy_data))
+  if (XSPPIN_DATA_VALID_HEAD(policy_data))
   {
-    free(PASRRIP_DATA_VALID_HEAD(policy_data));
+    free(XSPPIN_DATA_VALID_HEAD(policy_data));
   }
 
   /* Free valid tail buckets */
-  if (PASRRIP_DATA_VALID_TAIL(policy_data))
+  if (XSPPIN_DATA_VALID_TAIL(policy_data))
   {
-    free(PASRRIP_DATA_VALID_TAIL(policy_data));
+    free(XSPPIN_DATA_VALID_TAIL(policy_data));
   }
 }
 
-struct cache_block_t * cache_find_block_pasrrip(pasrrip_data *policy_data, 
-    pasrrip_gdata *global_data, long long tag, memory_trace *info)
+struct cache_block_t * cache_find_block_xsppin(xsppin_data *policy_data, 
+    xsppin_gdata *global_data, long long tag, memory_trace *info)
 {
   int     max_rrpv;
   struct  cache_block_t *head;
@@ -307,7 +307,7 @@ struct cache_block_t * cache_find_block_pasrrip(pasrrip_data *policy_data,
 
   for (int rrpv = 0; rrpv <= max_rrpv; rrpv++)
   {
-    head = PASRRIP_DATA_VALID_HEAD(policy_data)[rrpv].head;
+    head = XSPPIN_DATA_VALID_HEAD(policy_data)[rrpv].head;
 
     for (node = head; node; node = node->prev)
     {
@@ -449,6 +449,7 @@ end:
     printf("CB:%ld BB:%ld ZB: %ld\n", global_data->ct_block_count, 
       global_data->bt_block_count, global_data->zt_block_count);
 
+#if 0
     printf("PC: %ld PB: %ld PZ: %ld\n", global_data->ct_predicted, global_data->bt_predicted,
         global_data->zt_predicted);
 
@@ -457,12 +458,14 @@ end:
 
     printf("UC: %ld UB: %ld UZ: %ld\n", global_data->ct_used, global_data->bt_used,
         global_data->zt_used);
-
+#endif
     printf("UPC: %ld UPB %ld UPZ %ld\n", global_data->ct_use_possible, global_data->bt_use_possible, 
         global_data->zt_use_possible);
 
+#if 0
     printf("EC: %ld EB: %ld EZ: %ld\n", global_data->ct_evict, global_data->bt_evict,
         global_data->zt_evict);
+#endif
 
     memset(policy_data->fills, 0, sizeof(ub8) * TST);
     memset(global_data->per_stream_fill, 0, sizeof(ub8) * TST);
@@ -486,7 +489,7 @@ end:
   return node;
 }
 
-void cache_fill_block_pasrrip(pasrrip_data *policy_data, pasrrip_gdata *global_data, 
+void cache_fill_block_xsppin(xsppin_data *policy_data, xsppin_gdata *global_data, 
     int way, long long tag, enum cache_block_state_t state, int strm, 
     memory_trace *info)
 {
@@ -498,7 +501,7 @@ void cache_fill_block_pasrrip(pasrrip_data *policy_data, pasrrip_gdata *global_d
   assert(state != cache_block_invalid);
 
   /* Obtain SRRIP specific data */
-  block = &(PASRRIP_DATA_BLOCKS(policy_data)[way]);
+  block = &(XSPPIN_DATA_BLOCKS(policy_data)[way]);
   
   assert(block->stream == 0);
 
@@ -512,11 +515,12 @@ void cache_fill_block_pasrrip(pasrrip_data *policy_data, pasrrip_gdata *global_d
 #endif
   if (info)
   {
-    rrpv = cache_get_fill_rrpv_pasrrip(policy_data, global_data, info, NULL);
+    rrpv = cache_get_fill_rrpv_xsppin(policy_data, global_data, info, NULL);
 
     if (info->stream == CS)
     {
-      rrpv = cache_get_fill_rrpv_pasrrip(policy_data, global_data, info, &(block->is_ct_block));
+      add_region_block(CS, info->stream, info->vtl_addr);
+      rrpv = cache_get_fill_rrpv_xsppin(policy_data, global_data, info, &(block->is_ct_block));
 
       if (block->is_ct_block)
       {
@@ -532,7 +536,8 @@ void cache_fill_block_pasrrip(pasrrip_data *policy_data, pasrrip_gdata *global_d
 
     if (info->stream == BS)
     {
-      rrpv = cache_get_fill_rrpv_pasrrip(policy_data, global_data, info, &(block->is_bt_block));
+      add_region_block(BS, info->stream, info->vtl_addr);
+      rrpv = cache_get_fill_rrpv_xsppin(policy_data, global_data, info, &(block->is_bt_block));
 
       if (block->is_bt_block)
       {
@@ -548,7 +553,8 @@ void cache_fill_block_pasrrip(pasrrip_data *policy_data, pasrrip_gdata *global_d
 
     if (info->stream == ZS)
     {
-      rrpv = cache_get_fill_rrpv_pasrrip(policy_data, global_data, info, &(block->is_zt_block));
+      add_region_block(ZS, info->stream, info->vtl_addr);
+      rrpv = cache_get_fill_rrpv_xsppin(policy_data, global_data, info, &(block->is_zt_block));
 
       if (block->is_zt_block)
       {
@@ -564,7 +570,7 @@ void cache_fill_block_pasrrip(pasrrip_data *policy_data, pasrrip_gdata *global_d
   }
   else
   {
-    rrpv = PASRRIP_DATA_MAX_RRPV(policy_data);
+    rrpv = XSPPIN_DATA_MAX_RRPV(policy_data);
   }
 
   /* If block is not bypassed */
@@ -584,17 +590,17 @@ void cache_fill_block_pasrrip(pasrrip_data *policy_data, pasrrip_gdata *global_d
     block->epoch  = 0;
     block->access = 0;
 
-    assert(rrpv <= PASRRIP_DATA_MAX_RRPV(policy_data));
+    assert(rrpv <= XSPPIN_DATA_MAX_RRPV(policy_data));
     global_data->per_stream_frrpv[info->stream][rrpv] += 1;
 
 #if 0
-    block->access = (PASRRIP_DATA_MAX_RRPV(policy_data) - rrpv);
+    block->access = (XSPPIN_DATA_MAX_RRPV(policy_data) - rrpv);
 
     /* Modulate RRPV based on fill count */
-#define NUM(p, i)   ((p->max_fills - p->fills[i->stream]) * PASRRIP_DATA_MAX_RRPV(p))
+#define NUM(p, i)   ((p->max_fills - p->fills[i->stream]) * XSPPIN_DATA_MAX_RRPV(p))
 #define DNM(p)      (p->max_fills - p->min_fills)
 
-    if (rrpv != PASRRIP_DATA_MAX_RRPV(policy_data))
+    if (rrpv != XSPPIN_DATA_MAX_RRPV(policy_data))
     {
       if (policy_data->fills[info->stream] && (policy_data->max_fills - policy_data->min_fills))
       {
@@ -608,14 +614,14 @@ void cache_fill_block_pasrrip(pasrrip_data *policy_data, pasrrip_gdata *global_d
 
     /* Insert block into the corresponding RRPV queue */
     CACHE_APPEND_TO_QUEUE(block, 
-        PASRRIP_DATA_VALID_HEAD(policy_data)[rrpv], 
-        PASRRIP_DATA_VALID_TAIL(policy_data)[rrpv]);
+        XSPPIN_DATA_VALID_HEAD(policy_data)[rrpv], 
+        XSPPIN_DATA_VALID_TAIL(policy_data)[rrpv]);
   }
 
-  PASRRIP_DATA_CFPOLICY(policy_data) = PASRRIP_DATA_DFPOLICY(policy_data);
+  XSPPIN_DATA_CFPOLICY(policy_data) = XSPPIN_DATA_DFPOLICY(policy_data);
 }
 
-int cache_replace_block_pasrrip(pasrrip_data *policy_data, pasrrip_gdata *global_data)
+int cache_replace_block_xsppin(xsppin_data *policy_data, xsppin_gdata *global_data)
 {
   struct cache_block_t *block;
   int    rrpv;
@@ -624,84 +630,53 @@ int cache_replace_block_pasrrip(pasrrip_data *policy_data, pasrrip_gdata *global
   unsigned int min_wayid = ~(0);
 
   /* Try to find an invalid block always from head of the free list. */
-  for (block = PASRRIP_DATA_FREE_HEAD(policy_data); block; block = block->prev)
+  for (block = XSPPIN_DATA_FREE_HEAD(policy_data); block; block = block->prev)
   {
     if (block->way < min_wayid)
       min_wayid = block->way;
   }
   
   /* Obtain RRPV from where to replace the block */
-  rrpv = cache_get_replacement_rrpv_pasrrip(policy_data);
+  rrpv = cache_get_replacement_rrpv_xsppin(policy_data);
 
   /* Ensure rrpv is with in max_rrpv bound */
-  assert(rrpv >= 0 && rrpv <= PASRRIP_DATA_MAX_RRPV(policy_data));
+  assert(rrpv >= 0 && rrpv <= XSPPIN_DATA_MAX_RRPV(policy_data));
 
   if (min_wayid == ~(0))
   {
     /* If there is no block with required RRPV, increment RRPV of all the blocks
      * until we get one with the required RRPV */
-#if 0
-    if (PASRRIP_DATA_VALID_HEAD(policy_data)[rrpv].head == NULL)
+    if (XSPPIN_DATA_VALID_HEAD(policy_data)[rrpv].head == NULL)
     {
-      CACHE_PASRRIP_INCREMENT_RRPV(PASRRIP_DATA_VALID_HEAD(policy_data), 
-          PASRRIP_DATA_VALID_TAIL(policy_data), rrpv);
+      CACHE_XSPPIN_INCREMENT_RRPV(XSPPIN_DATA_VALID_HEAD(policy_data), 
+          XSPPIN_DATA_VALID_TAIL(policy_data), rrpv);
     }
-#endif
 
 #define XSTRM_BLOCK(b)  ((b)->is_bt_block == TRUE || (b)->is_ct_block == TRUE || (b)->is_zt_block == TRUE)
 
-    switch (PASRRIP_DATA_CRPOLICY(policy_data))
+    switch (XSPPIN_DATA_CRPOLICY(policy_data))
     {
-      case cache_policy_pasrrip:
-        for (block = PASRRIP_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
+      case cache_policy_xsppin:
+
+        for (block = XSPPIN_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
         {
-          if (!block->busy && !(XSTRM_BLOCK(block)) && block->way < min_wayid)
+          if (!block->busy && !XSTRM_BLOCK(block) && block->way < min_wayid)
             min_wayid = block->way;
-#if 0
-          if (!block->busy && block->access == 0 && block->way < min_wayid)
-            min_wayid = block->way;
-#endif
         }
-
-        if (min_wayid == ~(0))
-        {
-          if (PASRRIP_DATA_VALID_HEAD(policy_data)[rrpv].head == NULL)
-          {
-            CACHE_PASRRIP_INCREMENT_RRPV(PASRRIP_DATA_VALID_HEAD(policy_data), 
-                PASRRIP_DATA_VALID_TAIL(policy_data), rrpv);
-          }
-
-          for (block = PASRRIP_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
-          {
-            if (!block->busy && !(XSTRM_BLOCK(block)) && block->way < min_wayid)
-              min_wayid = block->way;
-#if 0
-            if (!block->busy && block->access == 0 && block->way < min_wayid)
-              min_wayid = block->way;
-#endif
-          }
-        }
-
+        
         if (min_wayid == ~0)
         {
-          for (block = PASRRIP_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
+          for (block = XSPPIN_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
           {
             if (!block->busy && block->way < min_wayid)
               min_wayid = block->way;
           }
         }
-#if 0
-        for (block = PASRRIP_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
-        {
-          if (!block->busy && block->way < min_wayid)
-            min_wayid = block->way;
-        }
-#endif
         break;
 
       case cache_policy_cpulast:
         /* First try to find a GPU block */
-        for (block = PASRRIP_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
+        for (block = XSPPIN_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
         {
           if (!block->busy && (block->way < min_wayid && block->stream < TST))
             min_wayid = block->way;
@@ -710,7 +685,7 @@ int cache_replace_block_pasrrip(pasrrip_data *policy_data, pasrrip_gdata *global
         /* If there so no GPU replacement candidate, replace CPU block */
         if (min_wayid == ~(0))
         {
-          for (block = PASRRIP_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
+          for (block = XSPPIN_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
           {
             if (!block->busy && (block->way < min_wayid))
               min_wayid = block->way;
@@ -723,11 +698,12 @@ int cache_replace_block_pasrrip(pasrrip_data *policy_data, pasrrip_gdata *global
     }
 
 #undef XSTRM_BLOCK
+
   }
   
   if (min_wayid != ~(0))
   {
-    block = &(PASRRIP_DATA_BLOCKS(policy_data)[min_wayid]);
+    block = &(XSPPIN_DATA_BLOCKS(policy_data)[min_wayid]);
 
     if (block->is_ct_block)
     {
@@ -749,7 +725,7 @@ int cache_replace_block_pasrrip(pasrrip_data *policy_data, pasrrip_gdata *global
   return (min_wayid != ~(0)) ? min_wayid : -1;
 }
 
-void cache_access_block_pasrrip(pasrrip_data *policy_data, pasrrip_gdata *global_data, int way, 
+void cache_access_block_xsppin(xsppin_data *policy_data, xsppin_gdata *global_data, int way, 
     int strm, memory_trace *info)
 {
   struct cache_block_t *blk   = NULL;
@@ -759,7 +735,7 @@ void cache_access_block_pasrrip(pasrrip_data *policy_data, pasrrip_gdata *global
   int old_rrpv;
   int new_rrpv;
 
-  blk  = &(PASRRIP_DATA_BLOCKS(policy_data)[way]);
+  blk  = &(XSPPIN_DATA_BLOCKS(policy_data)[way]);
   prev = blk->prev;
   next = blk->next;
 
@@ -767,65 +743,28 @@ void cache_access_block_pasrrip(pasrrip_data *policy_data, pasrrip_gdata *global
   assert(blk->tag >= 0);
   assert(blk->state != cache_block_invalid);
 
-  switch (PASRRIP_DATA_CAPOLICY(policy_data))
+  switch (XSPPIN_DATA_CAPOLICY(policy_data))
   {
-    case cache_policy_pasrrip:
+    case cache_policy_xsppin:
       /* Update RRPV and epoch only for read hits */
 #if 0
       if (info && info->fill == TRUE)
 #endif
         if (info)
         {
-#if 0
-          if (blk->access)
-          {
-            blk->access--;
-          }
-#endif
           /* Get old RRPV from the block */
           old_rrpv = (((rrip_list *)(blk->data))->rrpv);
 
           /* Get new RRPV using policy specific function */
-          new_rrpv = cache_get_new_rrpv_pasrrip(policy_data, global_data, old_rrpv, info);
-#if 0
-          blk->access +=  PASRRIP_DATA_MAX_RRPV(policy_data) - new_rrpv;
+          new_rrpv = cache_get_new_rrpv_xsppin(policy_data, global_data, old_rrpv, info);
 
-          if (blk->access == 0)
-          {
-            new_rrpv = PASRRIP_DATA_MAX_RRPV(policy_data);
-          }
-#endif
-
-#if 0
-          if (blk->is_ct_block == TRUE && info->stream == TS)
-          {
-            new_rrpv = PASRRIP_DATA_MAX_RRPV(policy_data);
-          }
-#endif
-
-#if 0
-          /* Modulate RRPV based on fill count */
-#define NUM(p, i)   ((p->max_fills - p->fills[i->stream]) * PASRRIP_DATA_MAX_RRPV(p))
-#define DNM(p)      (p->max_fills - p->min_fills)
-
-          if (new_rrpv != PASRRIP_DATA_MAX_RRPV(policy_data))
-          {
-            if (policy_data->fills[info->stream] && (policy_data->max_fills - policy_data->min_fills))
-            {
-              new_rrpv = (NUM(policy_data, info) / DNM(policy_data));
-            }
-          }
-
-#undef NUM
-#undef DNM
-#endif
           /* Update block queue if block got new RRPV */
           if (new_rrpv != old_rrpv)
           {
-            CACHE_REMOVE_FROM_QUEUE(blk, PASRRIP_DATA_VALID_HEAD(policy_data)[old_rrpv],
-                PASRRIP_DATA_VALID_TAIL(policy_data)[old_rrpv]);
-            CACHE_APPEND_TO_QUEUE(blk, PASRRIP_DATA_VALID_HEAD(policy_data)[new_rrpv], 
-                PASRRIP_DATA_VALID_TAIL(policy_data)[new_rrpv]);
+            CACHE_REMOVE_FROM_QUEUE(blk, XSPPIN_DATA_VALID_HEAD(policy_data)[old_rrpv],
+                XSPPIN_DATA_VALID_TAIL(policy_data)[old_rrpv]);
+            CACHE_APPEND_TO_QUEUE(blk, XSPPIN_DATA_VALID_HEAD(policy_data)[new_rrpv], 
+                XSPPIN_DATA_VALID_TAIL(policy_data)[new_rrpv]);
           }
 
           if (info && blk->stream == info->stream)
@@ -841,9 +780,6 @@ void cache_access_block_pasrrip(pasrrip_data *policy_data, pasrrip_gdata *global
       CACHE_UPDATE_BLOCK_STREAM(blk, strm);
 
       blk->dirty   = (info && info->dirty) ? 1 : 0;
-#if 0
-      blk->access += 1;
-#endif
 
       if (blk->is_ct_block)
       {
@@ -888,47 +824,45 @@ void cache_access_block_pasrrip(pasrrip_data *policy_data, pasrrip_gdata *global
   }
 }
 
-int cache_get_fill_rrpv_pasrrip(pasrrip_data *policy_data, 
-    pasrrip_gdata *global_data, memory_trace *info, ub1 *is_x_block)
+int cache_get_fill_rrpv_xsppin(xsppin_data *policy_data, 
+    xsppin_gdata *global_data, memory_trace *info, ub1 *is_x_block)
 {
   int new_rrpv;
   int tmp_rrpv;
+  int x_rrpv;
 
-#if 0
   if ((global_data->bm_ctr)++ == 0)
   {
-    new_rrpv = PASRRIP_DATA_MAX_RRPV(policy_data) - 1;  
+    x_rrpv = 0;
   }
   else
   {
-    new_rrpv = PASRRIP_DATA_MAX_RRPV(policy_data);
+    x_rrpv = 0;
   }
 
   if (global_data->bm_ctr == global_data->bm_thr)
   {
     global_data->bm_ctr = 0;
   }
-#endif
 
-  new_rrpv = PASRRIP_DATA_MAX_RRPV(policy_data) - 1;  
+  new_rrpv = XSPPIN_DATA_MAX_RRPV(policy_data) - 1;  
 
-  switch (PASRRIP_DATA_CFPOLICY(policy_data))
+  switch (XSPPIN_DATA_CFPOLICY(policy_data))
   {
     case cache_policy_lru:
       return 0;
 
     case cache_policy_lip:
-      return PASRRIP_DATA_MAX_RRPV(policy_data);
+      return XSPPIN_DATA_MAX_RRPV(policy_data);
 
-    case cache_policy_pasrrip:
+    case cache_policy_xsppin:
       if (info->stream == CS)
       {
-        new_rrpv = add_region_block(CS, info->stream, info->vtl_addr);
         tmp_rrpv = get_xstream_reuse_ratio(CS, TS, info->vtl_addr);
 
-        if (tmp_rrpv != PASRRIP_DATA_MAX_RRPV(policy_data) && tmp_rrpv <= new_rrpv)
+        if (tmp_rrpv != XSPPIN_DATA_MAX_RRPV(policy_data))
         {
-          new_rrpv = tmp_rrpv;
+          new_rrpv = x_rrpv;
 
           if (is_x_block)
           {
@@ -940,12 +874,11 @@ int cache_get_fill_rrpv_pasrrip(pasrrip_data *policy_data,
       {
         if (info->stream == BS)
         {
-          new_rrpv = add_region_block(BS, info->stream, info->vtl_addr);
           tmp_rrpv = get_xstream_reuse_ratio(BS, TS, info->vtl_addr);
 
-          if (tmp_rrpv != PASRRIP_DATA_MAX_RRPV(policy_data) && tmp_rrpv <= new_rrpv)
+          if (tmp_rrpv != XSPPIN_DATA_MAX_RRPV(policy_data))
           {
-            new_rrpv = tmp_rrpv;
+            new_rrpv = x_rrpv;
 
             if (is_x_block)
             {
@@ -957,40 +890,15 @@ int cache_get_fill_rrpv_pasrrip(pasrrip_data *policy_data,
         {
           if (info->stream == ZS)
           {
-            new_rrpv = add_region_block(ZS, info->stream, info->vtl_addr);
             tmp_rrpv = get_xstream_reuse_ratio(ZS, TS, info->vtl_addr);
 
-            if (tmp_rrpv != PASRRIP_DATA_MAX_RRPV(policy_data) && tmp_rrpv <= new_rrpv)
+            if (tmp_rrpv != XSPPIN_DATA_MAX_RRPV(policy_data))
             {
-              new_rrpv = tmp_rrpv;
+              new_rrpv = x_rrpv;
 
               if (is_x_block)
               {
                 *is_x_block = TRUE;
-              }
-            }
-          }
-          else
-          {
-            if (info->stream == TS)
-            {
-              new_rrpv = add_region_block(CS, info->stream, info->vtl_addr);
-              tmp_rrpv = add_region_block(BS, info->stream, info->vtl_addr);
-              if (tmp_rrpv < new_rrpv)
-              {
-                new_rrpv = tmp_rrpv;
-              }
-
-              tmp_rrpv = add_region_block(ZS, info->stream, info->vtl_addr);
-              if (tmp_rrpv < new_rrpv)
-              {
-                new_rrpv = tmp_rrpv;
-              }
-
-              tmp_rrpv = add_region_block(TS, info->stream, info->vtl_addr);
-              if (tmp_rrpv < new_rrpv)
-              {
-                new_rrpv = tmp_rrpv;
               }
             }
           }
@@ -1009,170 +917,40 @@ int cache_get_fill_rrpv_pasrrip(pasrrip_data *policy_data,
   }
 }
 
-int cache_get_replacement_rrpv_pasrrip(pasrrip_data *policy_data)
+int cache_get_replacement_rrpv_xsppin(xsppin_data *policy_data)
 {
-  return PASRRIP_DATA_MAX_RRPV(policy_data);
+  return XSPPIN_DATA_MAX_RRPV(policy_data);
 }
 
-int cache_get_new_rrpv_pasrrip(pasrrip_data *policy_data, pasrrip_gdata *global_data, int old_rrpv, 
+int cache_get_new_rrpv_xsppin(xsppin_data *policy_data, xsppin_gdata *global_data, int old_rrpv, 
     memory_trace *info)
 {
   int new_rrpv;
   int reuse_ratio;
-
-#define ACCESS_TH (4) 
   
-  if ((global_data->bm_ctr)++ == 0)
-  {
-    new_rrpv = PASRRIP_DATA_MAX_RRPV(policy_data) - 1;  
-  }
-  else
-  {
-    new_rrpv = PASRRIP_DATA_MAX_RRPV(policy_data);
-  }
-  
-  if (global_data->bm_ctr == global_data->bm_thr)
-  {
-    global_data->bm_ctr = 0;
-  }
-
   /* If access is from the texture stream */
   if (info->stream == TS)
   {
     sb4 tmp_rrpv;
+
     /* Lookup BT region */
-#if 0
-    reuse_ratio = add_region_block(BS, info->stream, info->vtl_addr);
-#endif
-    new_rrpv = add_region_block(BS, info->stream, info->vtl_addr);
+    add_region_block(BS, info->stream, info->vtl_addr);
 
-    tmp_rrpv = add_region_block(CS, info->stream, info->vtl_addr);
-    if (tmp_rrpv < new_rrpv)
-    {
-      new_rrpv = tmp_rrpv;
-    }
+    add_region_block(CS, info->stream, info->vtl_addr);
 
-    tmp_rrpv = add_region_block(TS, info->stream, info->vtl_addr);
-    if (tmp_rrpv < new_rrpv)
-    {
-      new_rrpv = tmp_rrpv;
-    }
-
-    tmp_rrpv = add_region_block(ZS, info->stream, info->vtl_addr);
-    if (tmp_rrpv < new_rrpv)
-    {
-      new_rrpv = tmp_rrpv;
-    }
-
-#if 0
-#if 0
-    if (reuse_ratio < ACCESS_TH)
-#endif
-    if (new_rrpv > 0)
-    {
-      /* Lookup CT region */
-#if 0
-      reuse_ratio = add_region_block(CS, info->stream, info->vtl_addr);
-#endif
-      new_rrpv = add_region_block(CS, info->stream, info->vtl_addr);
-#if 0
-      if (reuse_ratio < ACCESS_TH)
-#endif
-      if (new_rrpv > 0)
-      {
-        new_rrpv = add_region_block(TS, info->stream, info->vtl_addr);
-#if 0
-        /* Lookup TT region */
-        reuse_ratio = add_region_block(TS, info->stream, info->vtl_addr);
-
-        if (reuse_ratio < ACCESS_TH)
-        {
-          new_rrpv = PASRRIP_DATA_MAX_RRPV(policy_data);
-        }
-        else
-        {
-          new_rrpv = PASRRIP_DATA_MAX_RRPV(policy_data) - 1;
-        }
-#endif
-      }
-#if 0
-      else
-      {
-        new_rrpv = PASRRIP_DATA_MAX_RRPV(policy_data) - 1;
-      }
-#endif
-    }
-#if 0
-    else
-    {
-      new_rrpv = PASRRIP_DATA_MAX_RRPV(policy_data)- 1;
-    }
-#endif
-#endif
+    add_region_block(ZS, info->stream, info->vtl_addr);
   }
 
-  if (info->stream == BS)
-  {
-    new_rrpv = add_region_block(BS, info->stream, info->vtl_addr);
-#if 0
-    reuse_ratio = add_region_block(BS, info->stream, info->vtl_addr);
-
-    if (reuse_ratio < ACCESS_TH)
-    {
-      new_rrpv = PASRRIP_DATA_MAX_RRPV(policy_data); 
-    }
-    else
-    {
-      new_rrpv = PASRRIP_DATA_MAX_RRPV(policy_data)- 1;
-    }
-#endif
-  }
-
-  if (info->stream == CS)
-  {
-    new_rrpv = add_region_block(CS, info->stream, info->vtl_addr);
-#if 0
-    reuse_ratio = add_region_block(CS, info->stream, info->vtl_addr);
-
-    if (reuse_ratio < ACCESS_TH)
-    {
-      new_rrpv = PASRRIP_DATA_MAX_RRPV(policy_data);
-    }
-    else
-    {
-      new_rrpv = PASRRIP_DATA_MAX_RRPV(policy_data)- 1;
-    }
-#endif
-  }
-
-  if (info->stream == ZS)
-  {
-    new_rrpv = add_region_block(ZS, info->stream, info->vtl_addr);
-#if 0
-    reuse_ratio = add_region_block(ZS, info->stream, info->vtl_addr);
-
-    if (reuse_ratio < ACCESS_TH)
-    {
-      new_rrpv = PASRRIP_DATA_MAX_RRPV(policy_data);
-    }
-    else
-    {
-      new_rrpv = PASRRIP_DATA_MAX_RRPV(policy_data) - 1;
-    }
-#endif
-  }
-#undef ACCESS_TH 
-
-  return new_rrpv;
+  return 0;
 }
 
 /* Update state of block. */
-void cache_set_block_pasrrip(pasrrip_data *policy_data, int way, long long tag,
+void cache_set_block_xsppin(xsppin_data *policy_data, int way, long long tag,
   enum cache_block_state_t state, ub1 stream, memory_trace *info)
 {
   struct cache_block_t *block;
 
-  block = &(PASRRIP_DATA_BLOCKS(policy_data))[way];
+  block = &(XSPPIN_DATA_BLOCKS(policy_data))[way];
 
   /* Check: tag matches with the block's tag. */
   assert(block->tag == tag);
@@ -1198,15 +976,15 @@ void cache_set_block_pasrrip(pasrrip_data *policy_data, int way, long long tag,
   int old_rrpv = (((rrip_list *)(block->data))->rrpv);
 
   /* Remove block from valid list and insert into free list */
-  CACHE_REMOVE_FROM_QUEUE(block, PASRRIP_DATA_VALID_HEAD(policy_data)[old_rrpv],
-      PASRRIP_DATA_VALID_TAIL(policy_data)[old_rrpv]);
-  CACHE_APPEND_TO_SQUEUE(block, PASRRIP_DATA_FREE_HEAD(policy_data), 
-      PASRRIP_DATA_FREE_TAIL(policy_data));
+  CACHE_REMOVE_FROM_QUEUE(block, XSPPIN_DATA_VALID_HEAD(policy_data)[old_rrpv],
+      XSPPIN_DATA_VALID_TAIL(policy_data)[old_rrpv]);
+  CACHE_APPEND_TO_SQUEUE(block, XSPPIN_DATA_FREE_HEAD(policy_data), 
+      XSPPIN_DATA_FREE_TAIL(policy_data));
 }
 
 
 /* Get tag and state of a block. */
-struct cache_block_t cache_get_block_pasrrip(pasrrip_data *policy_data, int way,
+struct cache_block_t cache_get_block_xsppin(xsppin_data *policy_data, int way,
   long long *tag_ptr, enum cache_block_state_t *state_ptr, int *stream_ptr)
 {
   assert(policy_data);
@@ -1214,15 +992,15 @@ struct cache_block_t cache_get_block_pasrrip(pasrrip_data *policy_data, int way,
   assert(state_ptr);
   assert(stream_ptr);
 
-  PTR_ASSIGN(tag_ptr, (PASRRIP_DATA_BLOCKS(policy_data)[way]).tag);
-  PTR_ASSIGN(state_ptr, (PASRRIP_DATA_BLOCKS(policy_data)[way]).state);
-  PTR_ASSIGN(stream_ptr, (PASRRIP_DATA_BLOCKS(policy_data)[way]).stream);
+  PTR_ASSIGN(tag_ptr, (XSPPIN_DATA_BLOCKS(policy_data)[way]).tag);
+  PTR_ASSIGN(state_ptr, (XSPPIN_DATA_BLOCKS(policy_data)[way]).state);
+  PTR_ASSIGN(stream_ptr, (XSPPIN_DATA_BLOCKS(policy_data)[way]).stream);
 
-  return PASRRIP_DATA_BLOCKS(policy_data)[way];
+  return XSPPIN_DATA_BLOCKS(policy_data)[way];
 }
 
 /* Get tag and state of a block. */
-int cache_count_block_pasrrip(pasrrip_data *policy_data, ub1 strm)
+int cache_count_block_xsppin(xsppin_data *policy_data, ub1 strm)
 {
   int     max_rrpv;
   int     count;
@@ -1237,7 +1015,7 @@ int cache_count_block_pasrrip(pasrrip_data *policy_data, ub1 strm)
 
   for (int rrpv = 0; rrpv <= max_rrpv; rrpv++)
   {
-    head = PASRRIP_DATA_VALID_HEAD(policy_data)[rrpv].head;
+    head = XSPPIN_DATA_VALID_HEAD(policy_data)[rrpv].head;
 
     for (node = head; node; node = node->prev)
     {
@@ -1251,27 +1029,27 @@ int cache_count_block_pasrrip(pasrrip_data *policy_data, ub1 strm)
 }
 
 /* Set policy for next fill */
-void cache_set_current_fill_policy_pasrrip(pasrrip_data *policy_data, cache_policy_t policy)
+void cache_set_current_fill_policy_xsppin(xsppin_data *policy_data, cache_policy_t policy)
 {
   assert(policy == cache_policy_lru || policy == cache_policy_lip || 
          policy == cache_policy_bypass);
 
-  PASRRIP_DATA_CFPOLICY(policy_data) = policy;
+  XSPPIN_DATA_CFPOLICY(policy_data) = policy;
 }
 
 /* Set policy for next access */
-void cache_set_current_access_policy_pasrrip(pasrrip_data *policy_data, cache_policy_t policy)
+void cache_set_current_access_policy_xsppin(xsppin_data *policy_data, cache_policy_t policy)
 {
   assert(policy == cache_policy_lru || policy == cache_policy_lip || 
          policy == cache_policy_bypass);
 
-  PASRRIP_DATA_CAPOLICY(policy_data) = policy;
+  XSPPIN_DATA_CAPOLICY(policy_data) = policy;
 }
 
 /* Set policy for next replacment */
-void cache_set_current_replacement_policy_pasrrip(pasrrip_data *policy_data, cache_policy_t policy)
+void cache_set_current_replacement_policy_xsppin(xsppin_data *policy_data, cache_policy_t policy)
 {
   assert(policy == cache_policy_cpulast);
 
-  PASRRIP_DATA_CRPOLICY(policy_data) = policy;
+  XSPPIN_DATA_CRPOLICY(policy_data) = policy;
 }

@@ -17,8 +17,8 @@
  * USA.
  */
 
-#ifndef MEM_SYSTEM_PASRRIP_H
-#define	MEM_SYSTEM_PASRRIP_H
+#ifndef MEM_SYSTEM_XSPPIN_H
+#define	MEM_SYSTEM_XSPPIN_H
 
 #include "../common/intermod-common.h"
 #include "../common/sat-counter.h"
@@ -29,31 +29,31 @@
 #include "stream-region.h"
 
 /* Head node of a list, which corresponds to a particular RRPV */
-typedef struct cache_list_head_pasrrip_t
+typedef struct cache_list_head_xsppin_t
 {
   ub4 rrpv;
   struct cache_block_t *head;
-}pasrrip_list;
+}xsppin_list;
 
-#define PASRRIP_DATA_CFPOLICY(data)   ((data)->current_fill_policy)
-#define PASRRIP_DATA_DFPOLICY(data)   ((data)->default_fill_policy)
-#define PASRRIP_DATA_CAPOLICY(data)   ((data)->current_access_policy)
-#define PASRRIP_DATA_DAPOLICY(data)   ((data)->default_access_policy)
-#define PASRRIP_DATA_CRPOLICY(data)   ((data)->current_replacement_policy)
-#define PASRRIP_DATA_DRPOLICY(data)   ((data)->default_replacement_policy)
-#define PASRRIP_DATA_SET_INDEX(data)  ((data)->set_idx)
-#define PASRRIP_DATA_MAX_RRPV(data)   ((data)->max_rrpv)
-#define PASRRIP_DATA_WAYS(data)       ((data)->ways)
-#define PASRRIP_DATA_BLOCKS(data)     ((data)->blocks)
-#define PASRRIP_DATA_VALID_HEAD(data) ((data)->valid_head)
-#define PASRRIP_DATA_VALID_TAIL(data) ((data)->valid_tail)
-#define PASRRIP_DATA_FREE_HLST(data)  ((data)->free_head)
-#define PASRRIP_DATA_FREE_TLST(data)  ((data)->free_tail)
-#define PASRRIP_DATA_FREE_HEAD(data)  ((data)->free_head->head)
-#define PASRRIP_DATA_FREE_TAIL(data)  ((data)->free_tail->head)
+#define XSPPIN_DATA_CFPOLICY(data)   ((data)->current_fill_policy)
+#define XSPPIN_DATA_DFPOLICY(data)   ((data)->default_fill_policy)
+#define XSPPIN_DATA_CAPOLICY(data)   ((data)->current_access_policy)
+#define XSPPIN_DATA_DAPOLICY(data)   ((data)->default_access_policy)
+#define XSPPIN_DATA_CRPOLICY(data)   ((data)->current_replacement_policy)
+#define XSPPIN_DATA_DRPOLICY(data)   ((data)->default_replacement_policy)
+#define XSPPIN_DATA_SET_INDEX(data)  ((data)->set_idx)
+#define XSPPIN_DATA_MAX_RRPV(data)   ((data)->max_rrpv)
+#define XSPPIN_DATA_WAYS(data)       ((data)->ways)
+#define XSPPIN_DATA_BLOCKS(data)     ((data)->blocks)
+#define XSPPIN_DATA_VALID_HEAD(data) ((data)->valid_head)
+#define XSPPIN_DATA_VALID_TAIL(data) ((data)->valid_tail)
+#define XSPPIN_DATA_FREE_HLST(data)  ((data)->free_head)
+#define XSPPIN_DATA_FREE_TLST(data)  ((data)->free_tail)
+#define XSPPIN_DATA_FREE_HEAD(data)  ((data)->free_head->head)
+#define XSPPIN_DATA_FREE_TAIL(data)  ((data)->free_tail->head)
 
 /* RRIP specific data */
-typedef struct cache_policy_pasrrip_data_t
+typedef struct cache_policy_xsppin_data_t
 {
   cache_policy_t current_fill_policy;         /* If non-default fill policy is enforced */
   cache_policy_t default_fill_policy;         /* Default fill policy */
@@ -74,10 +74,10 @@ typedef struct cache_policy_pasrrip_data_t
   ub8            max_fills;                   /* Per-stream maximum fills */
   ub8            min_fills;                   /* Per-stream minimum fills */
   struct cache_block_t *blocks;               /* Actual blocks */
-}pasrrip_data;
+}xsppin_data;
 
-/* PASRRIP cache wide data */
-typedef struct cache_policy_pasrrip_gdata_t
+/* XSPPIN cache wide data */
+typedef struct cache_policy_xsppin_gdata_t
 {
   ub4 bm_ctr;                                 /* Current value of a counter */
   ub4 bm_thr;                                 /* Bimodal threshold */
@@ -108,7 +108,7 @@ typedef struct cache_policy_pasrrip_gdata_t
   struct cs_qnode *ct_blocks;                 /* Hash table of all CT blocks */ 
   struct cs_qnode *bt_blocks;                 /* Hash table of all BT blocks */ 
   struct cs_qnode *zt_blocks;                 /* Hash table of all ZT blocks */ 
-}pasrrip_gdata;
+}xsppin_gdata;
 
 /*
  *
@@ -132,8 +132,8 @@ typedef struct cache_policy_pasrrip_gdata_t
  * NOTES
  */
 
-void cache_init_pasrrip(int set, struct cache_params *params, pasrrip_data *policy_data,
-    pasrrip_gdata *global_data);
+void cache_init_xsppin(int set, struct cache_params *params, xsppin_data *policy_data,
+    xsppin_gdata *global_data);
 
 /*
  *
@@ -154,7 +154,7 @@ void cache_init_pasrrip(int set, struct cache_params *params, pasrrip_data *poli
  *  Nothing
  */
 
-void cache_free_pasrrip(pasrrip_data *policy_data);
+void cache_free_xsppin(xsppin_data *policy_data);
 
 /*
  *
@@ -177,8 +177,8 @@ void cache_free_pasrrip(pasrrip_data *policy_data);
  *  Pointer to the block 
  */
 
-struct cache_block_t* cache_find_block_pasrrip(pasrrip_data *policy_data, 
-    pasrrip_gdata *global_data, long long tag, memory_trace *info);
+struct cache_block_t* cache_find_block_xsppin(xsppin_data *policy_data, 
+    xsppin_gdata *global_data, long long tag, memory_trace *info);
 
 /*
  *
@@ -205,8 +205,8 @@ struct cache_block_t* cache_find_block_pasrrip(pasrrip_data *policy_data,
  *  Nothing
  */
 
-void cache_fill_block_pasrrip(pasrrip_data *policy_data, 
-    pasrrip_gdata *global_data, int way, long long tag, 
+void cache_fill_block_xsppin(xsppin_data *policy_data, 
+    xsppin_gdata *global_data, int way, long long tag, 
     enum cache_block_state_t state, int strm, memory_trace *info);
 
 /*
@@ -229,7 +229,7 @@ void cache_fill_block_pasrrip(pasrrip_data *policy_data,
  *
  */
 
-int  cache_replace_block_pasrrip(pasrrip_data *policy_data, pasrrip_gdata *global_data);
+int  cache_replace_block_xsppin(xsppin_data *policy_data, xsppin_gdata *global_data);
 
 /*
  *
@@ -254,7 +254,7 @@ int  cache_replace_block_pasrrip(pasrrip_data *policy_data, pasrrip_gdata *globa
  *
  */
 
-void cache_access_block_pasrrip(pasrrip_data *policy_data, pasrrip_gdata *global_data, 
+void cache_access_block_xsppin(xsppin_data *policy_data, xsppin_gdata *global_data, 
     int way, int strm, memory_trace *info);
 
 /*
@@ -279,7 +279,7 @@ void cache_access_block_pasrrip(pasrrip_data *policy_data, pasrrip_gdata *global
  *  Complete block info
  */
 
-struct cache_block_t cache_get_block_pasrrip(pasrrip_data *policy_data, int way, 
+struct cache_block_t cache_get_block_xsppin(xsppin_data *policy_data, int way, 
   long long *tag_ptr, enum cache_block_state_t *state_ptr, int *stream_ptr);
 
 /*
@@ -306,7 +306,7 @@ struct cache_block_t cache_get_block_pasrrip(pasrrip_data *policy_data, int way,
  *  Nothing
  */
 
-void cache_set_block_pasrrip(pasrrip_data *policy_data, int way, long long tag,
+void cache_set_block_xsppin(xsppin_data *policy_data, int way, long long tag,
   enum cache_block_state_t state, ub1 stream, memory_trace *info);
 
 /*
@@ -329,8 +329,8 @@ void cache_set_block_pasrrip(pasrrip_data *policy_data, int way, long long tag,
  *
  */
 
-int cache_get_fill_rrpv_pasrrip(pasrrip_data *policy_data, 
-    pasrrip_gdata *global_data, memory_trace *info, ub1 *is_x_block);
+int cache_get_fill_rrpv_xsppin(xsppin_data *policy_data, 
+    xsppin_gdata *global_data, memory_trace *info, ub1 *is_x_block);
 
 /*
  *
@@ -351,7 +351,7 @@ int cache_get_fill_rrpv_pasrrip(pasrrip_data *policy_data,
  *  Replacement RRPV
  */
 
-int cache_get_replacement_rrpv_pasrrip(pasrrip_data *policy_data);
+int cache_get_replacement_rrpv_xsppin(xsppin_data *policy_data);
 
 /*
  *
@@ -372,7 +372,7 @@ int cache_get_replacement_rrpv_pasrrip(pasrrip_data *policy_data);
  *  New RRPV
  */
 
-int cache_get_new_rrpv_pasrrip(pasrrip_data *policy_data, pasrrip_gdata *global_data,
+int cache_get_new_rrpv_xsppin(xsppin_data *policy_data, xsppin_gdata *global_data,
     int old_rrpv, memory_trace *info);
 
 /*
@@ -395,7 +395,7 @@ int cache_get_new_rrpv_pasrrip(pasrrip_data *policy_data, pasrrip_gdata *global_
  *  Block count
  */
 
-int cache_count_block_pasrrip(pasrrip_data *policy_data, ub1 strm);
+int cache_count_block_xsppin(xsppin_data *policy_data, ub1 strm);
 
 /*
  *
@@ -417,7 +417,7 @@ int cache_count_block_pasrrip(pasrrip_data *policy_data, ub1 strm);
  *  Nothing
  */
 
-void cache_set_current_fill_policy_pasrrip(pasrrip_data *policy_data, cache_policy_t policy);
+void cache_set_current_fill_policy_xsppin(xsppin_data *policy_data, cache_policy_t policy);
 
 /*
  *
@@ -439,7 +439,7 @@ void cache_set_current_fill_policy_pasrrip(pasrrip_data *policy_data, cache_poli
  *  Nothing
  */
 
-void cache_set_current_access_policy_pasrrip(pasrrip_data *policy_data, cache_policy_t policy);
+void cache_set_current_access_policy_xsppin(xsppin_data *policy_data, cache_policy_t policy);
 
 /*
  *
@@ -461,6 +461,6 @@ void cache_set_current_access_policy_pasrrip(pasrrip_data *policy_data, cache_po
  *  Nothing
  */
 
-void cache_set_current_replacement_policy_pasrrip(pasrrip_data *policy_data, cache_policy_t policy);
+void cache_set_current_replacement_policy_xsppin(xsppin_data *policy_data, cache_policy_t policy);
 
 #endif	/* MEM_SYSTEM_CACHE_H */

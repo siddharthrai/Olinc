@@ -153,6 +153,7 @@ typedef struct
 #define CACHE_NLVL(x)     ((x)->cachesim_cache_next_lvl)
 #define CACHE_PLVL(x)     ((x)->cachesim_cache_prev_lvl)
 #define CACHE_AFRQ(x)     ((x)->cachesim_afrq)
+#define CACHE_EVCT(x)     ((x)->cachesim_evct)
 #define CACHE_MAX_RRPV(x) ((x)->cachesim_max_rrpv)
 
 #define CACHE_SNDCNT(x)   ((x)->cachesim_snd_cnt)
@@ -195,8 +196,11 @@ struct cachesim_cache
   /* Cache tag array */ 
   cachesim_cacheline *cachesim_cache_cacheline;
 
-  /* structure to track set usage */
+  /* Structure to track set usage */
   ub8 *cachesim_afrq;
+
+  /* Structure to track evictions */
+  ub8 *cachesim_evct;
 
   /* keeps pointer to next level of cache */
   struct cachesim_cache *cachesim_cache_next_lvl; 

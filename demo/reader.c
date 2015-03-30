@@ -56,8 +56,7 @@ int main(int argc, char **argv)
     {
 #if 0
       printf("VTL Address %lx\n", trace.vtl_addr);
-#endif
-      
+#endif      
       if (trace.dbuf == FALSE)
       {
         if (trace.stream == CS)
@@ -148,11 +147,12 @@ int main(int argc, char **argv)
           }
         }
       }
-#if 0
-      if (trace.stream == CS)
+
+      if (trace.spill && trace.stream == ZS)
       {
-        printf("CS write \n"); 
+        printf("zS spill \n"); 
       }
+#if 0
       if (trace.stream == BS)
       {
         printf("BS write \n"); 

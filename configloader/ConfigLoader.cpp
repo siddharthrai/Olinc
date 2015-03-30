@@ -550,9 +550,49 @@ bool ConfigLoader::parseCachePolicy(char *paramName, char *id, enum cache_policy
         }
         
         /*  Return boolean parameter.  */
+        if (!strcmp(auxStr, "SRRIPSAGE"))
+        {
+          val = cache_policy_srripsage;
+
+          goto end;
+        }
+
+        /*  Return boolean parameter.  */
+        if (!strcmp(auxStr, "SRRIPDBP"))
+        {
+          val = cache_policy_srripdbp;
+
+          goto end;
+        }
+
+        /*  Return boolean parameter.  */
+        if (!strcmp(auxStr, "XSPDBP"))
+        {
+          val = cache_policy_xspdbp;
+
+          goto end;
+        }
+        
+        /*  Return boolean parameter.  */
         if (!strcmp(auxStr, "PASRRIP"))
         {
           val = cache_policy_pasrrip;
+
+          goto end;
+        }
+        
+        /*  Return boolean parameter.  */
+        if (!strcmp(auxStr, "XSP"))
+        {
+          val = cache_policy_xsp;
+
+          goto end;
+        }
+        
+        /*  Return boolean parameter.  */
+        if (!strcmp(auxStr, "XSPPIN"))
+        {
+          val = cache_policy_xsppin;
 
           goto end;
         }

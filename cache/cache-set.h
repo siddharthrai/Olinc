@@ -12,7 +12,12 @@
 #include "srrip.h"
 #include "srripm.h"
 #include "srript.h"
+#include "srripdbp.h"
+#include "srripsage.h"
 #include "pasrrip.h"
+#include "xsp.h"
+#include "xsppin.h"
+#include "xspdbp.h"
 #include "brrip.h"
 #include "drrip.h"
 #include "gspc.h"
@@ -37,7 +42,12 @@
 #define CACHE_SET_DATA_SRRIP(cache_set)     (&(((cache_set)->policy_data).srrip))
 #define CACHE_SET_DATA_SRRIPM(cache_set)    (&(((cache_set)->policy_data).srripm))
 #define CACHE_SET_DATA_SRRIPT(cache_set)    (&(((cache_set)->policy_data).srript))
+#define CACHE_SET_DATA_SRRIPDBP(cache_set)  (&(((cache_set)->policy_data).srripdbp))
+#define CACHE_SET_DATA_SRRIPSAGE(cache_set) (&(((cache_set)->policy_data).srripsage))
 #define CACHE_SET_DATA_PASRRIP(cache_set)   (&(((cache_set)->policy_data).pasrrip))
+#define CACHE_SET_DATA_XSP(cache_set)       (&(((cache_set)->policy_data).xsp))
+#define CACHE_SET_DATA_XSPPIN(cache_set)    (&(((cache_set)->policy_data).xsppin))
+#define CACHE_SET_DATA_XSPDBP(cache_set)    (&(((cache_set)->policy_data).xspdbp))
 #define CACHE_SET_DATA_BRRIP(cache_set)     (&(((cache_set)->policy_data).brrip))
 #define CACHE_SET_DATA_DRRIP(cache_set)     (&(((cache_set)->policy_data).drrip))
 #define CACHE_SET_DATA_LIP(cache_set)       (&(((cache_set)->policy_data).lip))
@@ -67,7 +77,12 @@ struct cache_set_t
     srrip_data      srrip;
     srripm_data     srripm;
     srript_data     srript;
+    srripdbp_data   srripdbp;
+    srripsage_data  srripsage;
     pasrrip_data    pasrrip;
+    xsp_data        xsp;
+    xsppin_data     xsppin;
+    xspdbp_data     xspdbp;
     brrip_data      brrip;
     drrip_data      drrip;
     lip_data        lip;

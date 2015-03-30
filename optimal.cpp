@@ -14,13 +14,17 @@ using namespace std;
 ub8 htblused = 0; /* entries in hash table */
 
 /* get state of cache line */
-#define BLCKALIGN(addr) ((addr >> CACHE_BLCKOFFSET) << CACHE_BLCKOFFSET)
-#define PHT_SIZE        (1 << 20)
-#define MAX_RDIS        (2048)
-#define MAX_REUSE       (64)
-#define MAX_TRANS       (64)
-
-#define BMP_ENTRIES     (4)
+#define USE_INTER_STREAM_CALLBACK (TRUE)
+#define BLCKALIGN(addr)           ((addr >> CACHE_BLCKOFFSET) << CACHE_BLCKOFFSET)
+#define MAX_NAME                  (100)
+#define PHT_SIZE                  (1 << 20)
+#define MAX_RDIS                  (2048)
+#define MAX_REUSE                 (64)
+#define MAX_TRANS                 (64)
+#define PHASE_BITS                (12)
+#define PHASE_SIZE                (1 << PHASE_BITS)
+#define BMP_ENTRIES               (4)
+#define IS_SPILL_ALLOCATED(s)     ((s) == CS || (s) == BS || (s) == PS)
 
 /* Data structures for reuse distances */
 map<ub8, ub8>   *htmap;                     /* Hash-table for reuse distance */
@@ -46,9 +50,13 @@ ub8 rrpv_trans_hist[TST + 1][MAX_TRANS + 1];/* RRPV transition histogram */
 vector<cachesim_cacheline*> *phy_way;      
 
 InterStreamReuse *reuse_ct_cbk;      /* Callback for CT reuse */
+InterStreamReuse *reuse_cc_cbk;      /* Callback for CC reuse */
 InterStreamReuse *reuse_bt_cbk;      /* Callback for BT reuse */
+InterStreamReuse *reuse_bb_cbk;      /* Callback for BB reuse */
 InterStreamReuse *reuse_zt_cbk;      /* Callback for ZT reuse */
+InterStreamReuse *reuse_zz_cbk;      /* Callback for ZZ reuse */
 InterStreamReuse *reuse_cb_cbk;      /* Callback for CB reuse */
+InterStreamReuse *reuse_tt_cbk;      /* Callback for II reuse */
 
 NumericStatistic <ub8> *all_access;  /* Input stream access */
 
@@ -802,7 +810,7 @@ cache_access_status cachesim_match(cachesim_cache *cache, ub8 addr)
     ret.op          = line->op;
 
     assert(ret.rdis >= ret.prdis);
-    
+    assert(ret.tag == addr);
     return ret; 
   }
   
@@ -845,29 +853,36 @@ cache_access_status cachesim_opt_replace_or_add(
   /* If replacement candidate is found */
   if (line->valid) 
   {
-    /* Find cache line in cache set */
-    rpl_line = (cachesim_cacheline *)(set_itr->second);
-    assert(rpl_line); 
+    if (info.spill == FALSE || (info.spill == TRUE && IS_SPILL_ALLOCATED(info.stream)))
+    {
+      /* Find cache line in cache set */
+      rpl_line = (cachesim_cacheline *)(set_itr->second);
+      assert(rpl_line); 
 
-    /* Ensure replacement candidate has largest reuse distance */
-    assert(rpl_line == line);
+      /* Ensure replacement candidate has largest reuse distance */
+      assert(rpl_line == line);
 
-    ret.fate        = CACHE_ACCESS_RPLC;
-    ret.tag         = rpl_line->tag;
-    ret.vtl_addr    = rpl_line->vtl_addr;
-    ret.way         = rpl_line->way;
-    ret.stream      = rpl_line->stream;
-    ret.pc          = rpl_line->pc;
-    ret.fillpc      = rpl_line->fillpc;
-    ret.dirty       = rpl_line->dirty;
-    ret.epoch       = rpl_line->epoch;
-    ret.access      = rpl_line->access;
-    ret.is_bt_block = rpl_line->is_bt_block;
-    ret.is_ct_block = rpl_line->is_ct_block;
-    ret.op          = rpl_line->op;
+      ret.fate        = CACHE_ACCESS_RPLC;
+      ret.tag         = rpl_line->tag;
+      ret.vtl_addr    = rpl_line->vtl_addr;
+      ret.way         = rpl_line->way;
+      ret.stream      = rpl_line->stream;
+      ret.pc          = rpl_line->pc;
+      ret.fillpc      = rpl_line->fillpc;
+      ret.dirty       = rpl_line->dirty;
+      ret.epoch       = rpl_line->epoch;
+      ret.access      = rpl_line->access;
+      ret.is_bt_block = rpl_line->is_bt_block;
+      ret.is_ct_block = rpl_line->is_ct_block;
+      ret.op          = rpl_line->op;
 
-    /* Replace the block  */ 
-    cache_set[indx].erase(set_itr);
+      /* Replace the block  */ 
+      cache_set[indx].erase(set_itr);
+    }
+    else
+    {
+      ret.fate  = CACHE_ACCESS_MISS;
+    }
   }
   else
   {
@@ -921,28 +936,31 @@ cache_access_status cachesim_opt_replace_or_add(
     }
   }
 
-  /* Insert new block into cache set */
-  std::pair<std::map<ub8, ub8>::iterator, bool> block_itr;
-  block_itr = cache_set[indx].insert(pair<ub8, ub8>(BLCKALIGN(addr), (ub8)line));
-  
-  assert(block_itr.second == true);
+  /* Reinstall the new block if it is not bypassed */
+  if (info.fill == TRUE || (info.spill == TRUE && IS_SPILL_ALLOCATED(info.stream)))
+  {
+    /* Insert new block into cache set */
+    std::pair<std::map<ub8, ub8>::iterator, bool> block_itr;
+    block_itr = cache_set[indx].insert(pair<ub8, ub8>(BLCKALIGN(addr), (ub8)line));
 
-  /* Reinstall the new block */
-  line->valid       = TRUE;
-  line->rdis        = rdis;
-  line->tag         = BLCKALIGN(addr);
-  line->vtl_addr    = BLCKALIGN(info.vtl_addr);
-  line->stream      = info.stream;
-  line->pc          = info.pc;
-  line->fillpc      = info.pc;
-  line->dirty       = (info.spill) ? 1 : 0;
-  line->epoch       = 0;
-  line->access      = 0;
-  line->rrpv        = CACHE_MAX_RRPV(cache) - 1;
-  line->is_bt_block = FALSE;
-  line->is_ct_block = FALSE;
-  line->op          = block_op_fill;
-  
+    assert(block_itr.second == true);
+
+    line->valid       = TRUE;
+    line->rdis        = rdis;
+    line->tag         = BLCKALIGN(addr);
+    line->vtl_addr    = BLCKALIGN(info.vtl_addr);
+    line->stream      = info.stream;
+    line->pc          = info.pc;
+    line->fillpc      = info.pc;
+    line->dirty       = (info.spill) ? 1 : 0;
+    line->epoch       = 0;
+    line->access      = 0;
+    line->rrpv        = CACHE_MAX_RRPV(cache) - 1;
+    line->is_bt_block = FALSE;
+    line->is_ct_block = FALSE;
+    line->op          = block_op_fill;
+  }
+
   /* Update expected block count based on bit vector */
   if (info.pc)
   {
@@ -955,7 +973,6 @@ cache_access_status cachesim_opt_replace_or_add(
      * the list  */
     if (pc_table_itr != pc_table.end());
     {
-
       stall_data = (pc_data *)(pc_table_itr->second);
       assert(stall_data);
       assert(stall_data->bmp_fifo);
@@ -1034,10 +1051,17 @@ cache_access_status cachesim_incl_cache(
   gettimeofday(&st, NULL);
   
   /* Issue callback for reuse */
-  reuse_ct_cbk->CacheAccessBeginCbk(info);
-  reuse_bt_cbk->CacheAccessBeginCbk(info);
-  reuse_zt_cbk->CacheAccessBeginCbk(info);
-  reuse_cb_cbk->CacheAccessBeginCbk(info);
+  if (USE_INTER_STREAM_CALLBACK)
+  {
+    reuse_ct_cbk->CacheAccessBeginCbk(info, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
+    reuse_cc_cbk->CacheAccessBeginCbk(info, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
+    reuse_bt_cbk->CacheAccessBeginCbk(info, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
+    reuse_bb_cbk->CacheAccessBeginCbk(info, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
+    reuse_zt_cbk->CacheAccessBeginCbk(info, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
+    reuse_zz_cbk->CacheAccessBeginCbk(info, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
+    reuse_cb_cbk->CacheAccessBeginCbk(info, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
+    reuse_tt_cbk->CacheAccessBeginCbk(info, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
+  }
 
   /* Do the tag matching */
   ret = cachesim_match(cache, addr);
@@ -1187,12 +1211,21 @@ cache_access_status cachesim_incl_cache(
     if (ret.fate == CACHE_ACCESS_RPLC)
     {
       block_data *current_block_data;
+      
+      CACHE_EVCT(cache)[indx]++;
 
       /* Issue callback for reuse */
-      reuse_ct_cbk->CacheAccessReplaceCbk(info, ret);
-      reuse_bt_cbk->CacheAccessReplaceCbk(info, ret);
-      reuse_zt_cbk->CacheAccessReplaceCbk(info, ret);
-      reuse_cb_cbk->CacheAccessReplaceCbk(info, ret);
+      if (USE_INTER_STREAM_CALLBACK)
+      {
+        reuse_ct_cbk->CacheAccessReplaceCbk(info, ret, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
+        reuse_cc_cbk->CacheAccessReplaceCbk(info, ret, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
+        reuse_bt_cbk->CacheAccessReplaceCbk(info, ret, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
+        reuse_bb_cbk->CacheAccessReplaceCbk(info, ret, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
+        reuse_zt_cbk->CacheAccessReplaceCbk(info, ret, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
+        reuse_zz_cbk->CacheAccessReplaceCbk(info, ret, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
+        reuse_cb_cbk->CacheAccessReplaceCbk(info, ret, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
+        reuse_tt_cbk->CacheAccessReplaceCbk(info, ret, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
+      }
     
       if (ret.fillpc)
       {
@@ -1258,10 +1291,17 @@ cache_access_status cachesim_incl_cache(
   else
   {
     /* Issue callback for reuse */
-    reuse_ct_cbk->CacheAccessHitCbk(info, ret);
-    reuse_bt_cbk->CacheAccessHitCbk(info, ret);
-    reuse_zt_cbk->CacheAccessHitCbk(info, ret);
-    reuse_cb_cbk->CacheAccessHitCbk(info, ret);
+    if (USE_INTER_STREAM_CALLBACK)
+    {
+      reuse_ct_cbk->CacheAccessHitCbk(info, ret, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
+      reuse_cc_cbk->CacheAccessHitCbk(info, ret, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
+      reuse_bt_cbk->CacheAccessHitCbk(info, ret, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
+      reuse_bb_cbk->CacheAccessHitCbk(info, ret, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
+      reuse_zt_cbk->CacheAccessHitCbk(info, ret, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
+      reuse_zz_cbk->CacheAccessHitCbk(info, ret, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
+      reuse_cb_cbk->CacheAccessHitCbk(info, ret, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
+      reuse_tt_cbk->CacheAccessHitCbk(info, ret, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
+    }
 
     block = (cachesim_cacheline *)(phy_way[indx][ret.way]);
     assert(block);
@@ -2768,11 +2808,16 @@ int initParams(int argc, char **argv, SimParameters *sim_params, sb1 **trc_file_
 int main(int argc, char **argv)
 {
   ub8  rdis;
-  ub8  inscnt = 0 ;
+  ub8  inscnt;
   ub8  address;
   ub8  bt_blocks;
   ub8  bt_access;
-  sb1 *trc_file_name;
+  ub8  fills[TST];
+  ub8  blocks[TST];
+  ub8  hits[TST];
+  ub8  replacement[TST];
+  ub8  total_access;
+  sb1  *trc_file_name;
 
   gzifstream    trc_strm;
   gzofstream    stats_stream;
@@ -2790,7 +2835,13 @@ int main(int argc, char **argv)
 
   /* Verify bit-ness */
   assert(sizeof(ub8) == 8 && sizeof(ub4) == 4);
-  
+
+  /* Clear per-stream fill and hit arrays */
+  CLRSTRUCT(fills); 
+  CLRSTRUCT(hits); 
+  CLRSTRUCT(blocks); 
+  CLRSTRUCT(replacement); 
+
   /* Initialize simulation params */
   initParams(argc, argv, &sim_params, &trc_file_name);
 
@@ -2798,40 +2849,49 @@ int main(int argc, char **argv)
   initStatistics();
 
   sm = &StatisticsManager::instance(); 
-  
+
   /* Instantiate reuse callback */
-  reuse_ct_cbk = new InterStreamReuse(CS, TS, sim_params.lcP.useVa);
-  reuse_bt_cbk = new InterStreamReuse(BS, TS, sim_params.lcP.useVa);
-  reuse_zt_cbk = new InterStreamReuse(ZS, TS, sim_params.lcP.useVa);
-  reuse_cb_cbk = new InterStreamReuse(CS, BS, sim_params.lcP.useVa);
+  if (USE_INTER_STREAM_CALLBACK)
+  {
+    reuse_ct_cbk = new InterStreamReuse(CS, TS, sim_params.lcP.useVa);
+    reuse_cc_cbk = new InterStreamReuse(CS, CS, sim_params.lcP.useVa);
+    reuse_bt_cbk = new InterStreamReuse(BS, TS, sim_params.lcP.useVa);
+    reuse_bb_cbk = new InterStreamReuse(BS, BS, sim_params.lcP.useVa);
+    reuse_zt_cbk = new InterStreamReuse(ZS, TS, sim_params.lcP.useVa);
+    reuse_zz_cbk = new InterStreamReuse(ZS, ZS, sim_params.lcP.useVa);
+    reuse_cb_cbk = new InterStreamReuse(CS, BS, sim_params.lcP.useVa);
+    reuse_tt_cbk = new InterStreamReuse(TS, TS, sim_params.lcP.useVa);
+  }
 
   /* Open statistics stream */
   openStatisticsStream(&sim_params, stats_stream);
-  
+
   CLRSTRUCT(l2cache); 
   CLRSTRUCT(l3cache); 
 
-  inscnt    = 0;
-  bt_blocks = 0;
-  bt_access = 0;
+  inscnt        = 0;
+  bt_blocks     = 0;
+  bt_access     = 0;
+  inscnt        = 0;
+  total_access  = 0;
 
   assert(sim_params.lcP.minCacheSize == sim_params.lcP.maxCacheSize);
   assert(sim_params.lcP.minCacheWays == sim_params.lcP.maxCacheWays);
 
   set_cache_params(&sim_params, &l3cache);
-  
+
   params.stream = sim_params.lcP.stream;
 
   printf("L3 ways %d L3 size %d L3 cache lines %d\n", 
       CACHE_WAYS(&l3cache), CACHE_SIZE(&l3cache) >> 10, CACHE_LCNT(&l3cache));
-  
+
   phy_way = new vector <cachesim_cacheline *>[CACHE_LCNT(&l3cache)];
 
   for (ub8 i = 0; i < CACHE_LCNT(&l3cache); i++) 
   {
     phy_way[i].resize(CACHE_WAYS(&l3cache), NULL);
   }
-  
+
   /* Create lookup map for each set of the cache */
   cache_set = new map <ub8, ub8>[CACHE_LCNT(&l3cache)];
   assert(cache_set);
@@ -2839,7 +2899,7 @@ int main(int argc, char **argv)
   /* Create sequence number array for each set */
   sn_set    = new ub8[CACHE_LCNT(&l3cache)];
   assert(sn_set);
-  
+
   for (ub8 i = 0; i < CACHE_LCNT(&l3cache); i++) 
   {
     for (ub8 k = 0; k < CACHE_WAYS(&l3cache); k++) 
@@ -2855,16 +2915,20 @@ int main(int argc, char **argv)
       phy_way[i][k]     = cache_line;
     }
   }
-  
+
   /* Set sequence number to 0 */
   memset(sn_set, 0, sizeof(ub8) * CACHE_LCNT(&l3cache));
-  
+
   /* Initialize global sequence number counter */
   sn_glbl = 0;
 
   /* Create ways to keep reuse distance */
   CACHE_AFRQ(&l3cache) = new ub8[CACHE_LCNT(&l3cache)];
   CLRSTRUCT(*CACHE_AFRQ(&l3cache));
+
+  /* Create ways to keep reuse distance */
+  CACHE_EVCT(&l3cache) = new ub8[CACHE_LCNT(&l3cache)];
+  CLRSTRUCT(*CACHE_EVCT(&l3cache));
 
   /* Set next and previous level of hierarchy */
   CACHE_PLVL(&l3cache) = NULL;
@@ -2877,13 +2941,13 @@ int main(int argc, char **argv)
     perror("allocating hthead_info failed ");
     assert(hthead_info);
   }
-  
+
   /* Initialize info */
   memset(hthead_info, 0, sizeof(sizeof(ub8) * HTBLSIZE));
-  
+
   htmap = new map<ub8, ub8>[HTBLSIZE];
   assert(htmap);
-  
+
   /* Build map to get reuse distance */
   cachesim_createmap(&l3cache, trc_file_name, &params);
 
@@ -2894,10 +2958,17 @@ int main(int argc, char **argv)
     assert (trc_strm.is_open());
 
     /* Start callback */
-    reuse_ct_cbk->StartCbk();
-    reuse_bt_cbk->StartCbk();
-    reuse_zt_cbk->StartCbk();
-    reuse_cb_cbk->StartCbk();
+    if (USE_INTER_STREAM_CALLBACK)
+    {
+      reuse_ct_cbk->StartCbk();
+      reuse_cc_cbk->StartCbk();
+      reuse_bt_cbk->StartCbk();
+      reuse_bb_cbk->StartCbk();
+      reuse_zt_cbk->StartCbk();
+      reuse_zz_cbk->StartCbk();
+      reuse_cb_cbk->StartCbk();
+      reuse_tt_cbk->StartCbk();
+    }
 
     /* Read entire trace file and run the simulation */
     while (!trc_strm.eof())
@@ -2909,27 +2980,27 @@ int main(int argc, char **argv)
       if (!trc_strm.eof())
       {
 #if 0
-          info.address  = trace_info.address;
-          info.stream   = trace_info.stream;
-          info.fill     = trace_info.fill;
-          info.spill    = trace_info.spill;
+        info.address  = trace_info.address;
+        info.stream   = trace_info.stream;
+        info.fill     = trace_info.fill;
+        info.spill    = trace_info.spill;
 #endif
 
 #define MAX_CORES (128)
 
         if (params.stream == NN || ((params.stream == OS) && 
-            (info.stream == XS || info.stream == DS ||
-            info.stream == BS || info.stream == NS ||
-            info.stream == HS)) || params.stream == info.stream)
+              (info.stream == XS || info.stream == DS ||
+               info.stream == BS || info.stream == NS ||
+               info.stream == HS)) || params.stream == info.stream)
         {
           cachesim_qnode    *list_head;
           cache_access_info *access_info;
-          
+
           address = info.address;
 
           access_info = cachesim_get_access_info(info.address);
           assert(access_info);
-          
+
           /* Get address list head out of access info */
           list_head = (cachesim_qnode *)(access_info->list_head);
           assert(list_head);
@@ -2941,65 +3012,66 @@ int main(int argc, char **argv)
           cache_access_status ret = 
             cachesim_incl_cache(&l3cache, address, info, rdis);
 
-          /* Update reuse distances */
-          if (info.spill == TRUE)
+          /* Update hit counter */
+          if (ret.fate == CACHE_ACCESS_HIT)
           {
-            /* For blitter color and depth measure reuse distance on fill */
-            if (info.stream == BS || info.stream == CS || info.stream == ZS ||
-                (info.stream >= PS && info.stream <= PS + MAX_CORES - 1))
-            {
+            hits[info.stream]++;
+          }
+
+          /* For blitter color and depth measure reuse distance on fill */
+          if (info.stream == BS || info.stream == CS || info.stream == ZS ||
+              (info.stream >= PS && info.stream <= PS + MAX_CORES - 1))
+          {
 #define CT_BLOCK(info)  (info.stream == CS && info.dbuf == FALSE)
 #define BT_BLOCK(info)  (info.stream == BS)
 
-              /* For all CPU cores use PS as stream index */
-              ub1 stream_indx = (info.stream >= PS) ? PS : info.stream;
-              
-              /* If not the first access */
-              if (access_info->first_seq != 0)
-              {
-                assert(last_rdis != (ub8)(~(0)) && access_info->last_seq >= access_info->first_seq);
-                
-                /* Get difference of sequence numbers (intervening accesses) */
-                ub8 index = access_info->last_seq - access_info->first_seq;
-                
-                /* Clamp index to MAX_RDIS */
-                index = (index < MAX_RDIS) ? index : MAX_RDIS; 
-                rdis_hist[stream_indx][index][0] += 1;
-                rdis_hist[stream_indx][index][1] += access_info->access_count;
-                
-                /* Clamp reuse count to max reuse tracked */
-                index = (access_info->access_count < MAX_REUSE) ? 
-                  access_info->access_count : MAX_REUSE;
-                reuse_hist[stream_indx][index] += 1;
-              }
-              else
-              {
+            /* For all CPU cores use PS as stream index */
+            ub1 stream_indx = (info.stream >= PS) ? PS : info.stream;
+
+            /* If not the first access */
+            if (access_info->first_seq != 0 || access_info->last_seq != 0)
+            {
+              assert(last_rdis != (ub8)(~(0)) && access_info->last_seq >= access_info->first_seq);
+
+              /* Get difference of sequence numbers (intervening accesses) */
+              ub8 index = access_info->last_seq - access_info->first_seq;
+
+              /* Clamp index to MAX_RDIS */
+              index = (index < MAX_RDIS) ? index : MAX_RDIS; 
+              rdis_hist[stream_indx][index][0] += 1;
+              rdis_hist[stream_indx][index][1] += access_info->access_count;
+
+              /* Clamp reuse count to max reuse tracked */
+              index = (access_info->access_count < MAX_REUSE) ?  access_info->access_count : MAX_REUSE;
+              reuse_hist[stream_indx][index] += 1;
+            }
+            else
+            {
 #define NOREUSE (0)
 
-                access_info->stream       = info.stream;
-                access_info->access_count = NOREUSE;
-                access_info->first_seq    = last_rdis;
-                access_info->last_seq     = last_rdis;
+              access_info->stream       = info.stream;
+              access_info->access_count = NOREUSE;
+              access_info->first_seq    = last_rdis;
+              access_info->last_seq     = last_rdis;
 
 #undef NOREUSE
-              }
-              
-              if (access_info->is_ct_block == FALSE && info.stream == CS && 
-                  info.dbuf == FALSE)
-              {
-                (*t_ctblocks)++;
-              }
+            }
 
-              if (access_info->is_bt_block == FALSE && info.stream == BS)
-              {
-                (*t_btblocks)++;
-              }
+            if (access_info->is_ct_block == FALSE && info.stream == CS && 
+                info.dbuf == FALSE)
+            {
+              (*t_ctblocks)++;
+            }
 
-              access_info->is_ct_block  = CT_BLOCK(info) ? TRUE : FALSE;
-              access_info->is_bt_block  = (info.stream == BS) ? TRUE : FALSE;
+            if (access_info->is_bt_block == FALSE && info.stream == BS)
+            {
+              (*t_btblocks)++;
+            }
+
+            access_info->is_ct_block  = CT_BLOCK(info) ? TRUE : FALSE;
+            access_info->is_bt_block  = (info.stream == BS) ? TRUE : FALSE;
 
 #undef CT_BLOCK
-            }
           }
 
           if (info.fill == TRUE)
@@ -3065,7 +3137,7 @@ int main(int argc, char **argv)
                 {
                   updateEpochEvictCountersForRead(ret);
                 }
-
+#if 0
                 /* For blitter color and depth measure reuse distance on fill */
                 if (info.stream == BS || info.stream == CS || info.stream == ZS
                     || info.stream == TS || (info.stream >= PS && info.stream <= PS + MAX_CORES - 1))
@@ -3077,45 +3149,10 @@ int main(int argc, char **argv)
                   access_info->is_bt_block  = FALSE;
                   access_info->is_ct_block  = FALSE;
                   access_info->access_count = 0;
-                  access_info->first_seq    = last_rdis;
-                  access_info->last_seq     = last_rdis;
+                  access_info->first_seq    = 0;
+                  access_info->last_seq     = 0;
                 }
-
-                /* For blitter color and depth measure reuse distance on fill */
-                if (ret.stream == BS || ret.stream == CS || ret.stream == ZS || ret.stream == TS || 
-                    (ret.stream == PS && ret.stream <= PS + MAX_CORES - 1))
-                {
-                  ub8 index;         /* Histogram bucket index */
-                  ub1 stream_indx;   /* Stream number */
-
-                  cache_access_info *access_info = cachesim_get_access_info(ret.tag);
-                  assert(access_info);
-
-                  assert(last_rdis != (ub8)(~(0)) && access_info->last_seq >= access_info->first_seq);
-
-                  index       = access_info->last_seq - access_info->first_seq;
-                  index       = (index < MAX_RDIS) ? index : MAX_RDIS; 
-                  stream_indx = (ret.stream >= PS) ? PS : ret.stream;
-
-                  /* Update Reuse distance histogram */
-                  rdis_hist[stream_indx][index][0] += 1;
-                  rdis_hist[stream_indx][index][1] += access_info->access_count;
-
-                  /* Update reuse count histogram */
-                  index = (access_info->access_count < MAX_REUSE) ? access_info->access_count : MAX_REUSE;
-                  reuse_hist[stream_indx][index] += 1;
-
-#define NOACCESS  (0)
-#define NOSEQ     (0)
-                  access_info->stream       = NN;
-                  access_info->is_bt_block  = FALSE;
-                  access_info->is_ct_block  = FALSE;
-                  access_info->access_count = NOACCESS;
-                  access_info->first_seq    = NOSEQ;
-                  access_info->last_seq     = NOSEQ;
-#undef NOACCESS
-#undef NOSEQ
-                }
+#endif
               }
             }
             else
@@ -3134,7 +3171,7 @@ int main(int argc, char **argv)
 
               /* Update reuse distance statistics */
               if (info.stream == TS && 
-                (ret.is_bt_block == TRUE || ret.is_ct_block == TRUE))
+                  (ret.is_bt_block == TRUE || ret.is_ct_block == TRUE))
               {
                 ub8 rdis_diff;
 
@@ -3153,7 +3190,7 @@ int main(int argc, char **argv)
 
                   /* For BT transition increment total reuse distance */
                   t_btrdist->inc(rdis_diff);
-                  
+
                   /* Update max reuse distance */
                   if (t_mxbtrdist->getValue(1) < rdis_diff)
                   {
@@ -3177,7 +3214,7 @@ int main(int argc, char **argv)
 
                   /* For BT transition increment total reuse distance */
                   t_ctrdist->inc(rdis_diff);
-                  
+
                   /* Update max reuse distance */
                   if (t_mxctrdist->getValue(1) < rdis_diff)
                   {
@@ -3218,8 +3255,6 @@ int main(int argc, char **argv)
                 }
               }
             }
-
-            (access_info->access_count)++;
 
             if (info.stream >= PS && info.stream <= PS + MAX_CORES - 1)
             {
@@ -3276,6 +3311,11 @@ int main(int argc, char **argv)
 
           if (ret.fate == CACHE_ACCESS_MISS || ret.fate == CACHE_ACCESS_RPLC)
           {
+            blocks[info.stream]++;
+
+            /* Update fill counter */
+            fills[info.stream]++;
+
             if (info.stream >= PS && info.stream <= PS + MAX_CORES - 1)
             {
               (*p_miss)++;
@@ -3341,6 +3381,12 @@ int main(int argc, char **argv)
 
             if (ret.fate == CACHE_ACCESS_RPLC)
             { 
+              assert(blocks[ret.stream] > 0);
+              blocks[ret.stream]--;
+
+              /* Update replacement counter */
+              replacement[ret.stream]++;
+
               /* Update C, Z, T epoch counters */
               if (ret.stream == CS || ret.stream == ZS || ret.stream == TS)
               {
@@ -3636,7 +3682,7 @@ int main(int argc, char **argv)
                   }
                 }
               }
-              
+
               /* If return block was never accessed */
               if (ret.access == 0)
               {
@@ -3685,7 +3731,7 @@ int main(int argc, char **argv)
               }
 
               if ((ret.is_bt_block == TRUE  || ret.is_ct_block == TRUE) &&
-                (ret.stream == TS || ret.stream == CS))
+                  (ret.stream == TS || ret.stream == CS))
               {
 
                 if (ret.is_bt_block)
@@ -3742,11 +3788,51 @@ int main(int argc, char **argv)
                   }
                 }
               }
+
+              /* For blitter, color and depth measure reuse distance on fill */
+#if 0
+              if (ret.stream == BS || ret.stream == CS || ret.stream == ZS || ret.stream == TS || 
+                  (ret.stream == PS && ret.stream <= PS + MAX_CORES - 1))
+#endif
+              {
+                ub8 index;         /* Histogram bucket index */
+                ub1 stream_indx;   /* Stream number */
+
+                cache_access_info *ret_access_info = cachesim_get_access_info(ret.tag);
+                assert(ret_access_info);
+                assert(ret.access == ret_access_info->access_count);
+                assert(last_rdis != (ub8)(~(0)) && ret_access_info->last_seq >= ret_access_info->first_seq);
+
+                index       = ret_access_info->last_seq - ret_access_info->first_seq;
+                index       = (index < MAX_RDIS) ? index : MAX_RDIS; 
+                stream_indx = (ret.stream >= PS) ? PS : ret.stream;
+
+                /* Update Reuse distance histogram */
+                rdis_hist[stream_indx][index][0] += 1;
+                rdis_hist[stream_indx][index][1] += ret_access_info->access_count;
+
+                /* Update reuse count histogram */
+                index = (ret_access_info->access_count < MAX_REUSE) ? ret_access_info->access_count : MAX_REUSE;
+                reuse_hist[stream_indx][index] += 1;
+
+#define NOACCESS  (0)
+#define NOSEQ     (0)
+                ret_access_info->stream       = NN;
+                ret_access_info->is_bt_block  = FALSE;
+                ret_access_info->is_ct_block  = FALSE;
+                ret_access_info->access_count = NOACCESS;
+                ret_access_info->first_seq    = NOSEQ;
+                ret_access_info->last_seq     = NOSEQ;
+#undef NOACCESS
+#undef NOSEQ
+              }
             }
           }
           else
           {
             assert(ret.fate == CACHE_ACCESS_HIT);
+
+            (access_info->access_count)++;
 
             /* Update C, Z, T epoch counters */
             if (info.stream == ret.stream && 
@@ -3758,6 +3844,10 @@ int main(int argc, char **argv)
             /* Update stats for incoming stream */
             if (info.stream != ret.stream)
             {
+              assert(blocks[ret.stream] > 0);
+              blocks[ret.stream]--;
+              blocks[info.stream]++;
+
               if (info.stream >= PS && info.stream <= PS + MAX_CORES - 1)
               {
                 (*p_xhit)++;
@@ -3828,7 +3918,7 @@ int main(int argc, char **argv)
                     {
                       case CS:
                         (*t_cthit)++;
-                        
+
                         if (ret.is_ct_block == TRUE)
                         {
                           (*t_ctdhit)++;
@@ -3988,9 +4078,9 @@ int main(int argc, char **argv)
 
             access_info = cachesim_get_access_info(BLCKALIGN(info.address));
             assert(access_info);
-            
+
             rrpv_trans_indx = (access_info->rrpv_trans < MAX_TRANS) ? 
-                              access_info->rrpv_trans : MAX_TRANS;
+              access_info->rrpv_trans : MAX_TRANS;
             stream_indx     = (info.stream >= PS) ? PS : info.stream;
 
             rrpv_trans_hist[stream_indx][rrpv_trans_indx] += 1;
@@ -4042,7 +4132,7 @@ int main(int argc, char **argv)
 
                 if (info.spill == TRUE && info.dbuf == FALSE)
                 {
-                    (*c_dwrite)++;
+                  (*c_dwrite)++;
                 }
                 break;
 
@@ -4050,7 +4140,7 @@ int main(int argc, char **argv)
                 (*z_access)++;
                 if (info.spill == TRUE && info.dbuf == FALSE)
                 {
-                    (*z_dwrite)++;
+                  (*z_dwrite)++;
                 }
                 break;
 
@@ -4108,13 +4198,26 @@ int main(int argc, char **argv)
 
             /* Dump values every 1M instruction */
             sm->dumpValues(CS_KBYTES(CACHE_SIZE(&l3cache)), 0, CH, stats_stream);
-            
+
             periodicReset();
           }
 
 #undef CS_KBYTES
 #undef CH
-
+          if (++total_access >= PHASE_SIZE)
+          {
+#if 0
+            printf("CF:%ld ZF:%ld TF:%ld IF:%ld BF:%ld\n", fills[CS], 
+                fills[ZS], fills[TS], fills[IS], fills[BS]);
+            printf("CH:%ld ZH:%ld TH:%ld IH:%ld BH:%ld\n", hits[CS], 
+                hits[ZS], hits[TS], hits[IS], hits[BS]);
+            printf("CR:%ld ZR:%ld TR:%ld IR:%ld BR:%ld\n", replacement[CS],
+                replacement[ZS], replacement[TS], replacement[IS], replacement[BS]);
+            printf("CB:%ld ZB:%ld TB:%ld IB:%ld BB:%ld\n", blocks[CS], 
+                blocks[ZS], blocks[TS], blocks[IS], blocks[BS]);
+#endif
+            total_access = 0;  
+          }
         }
       }
       else
@@ -4136,24 +4239,35 @@ int main(int argc, char **argv)
     trc_strm.close();
 
     /* Start callback */
-    reuse_ct_cbk->ExitCbk();
-    reuse_bt_cbk->ExitCbk();
-    reuse_zt_cbk->ExitCbk();
-    reuse_cb_cbk->ExitCbk();
+    if (USE_INTER_STREAM_CALLBACK)
+    {
+      reuse_ct_cbk->ExitCbk();
+      reuse_cc_cbk->ExitCbk();
+      reuse_bt_cbk->ExitCbk();
+      reuse_bb_cbk->ExitCbk();
+      reuse_zt_cbk->ExitCbk();
+      reuse_zz_cbk->ExitCbk();
+      reuse_cb_cbk->ExitCbk();
+      reuse_tt_cbk->ExitCbk();
+    }
 
     /* Free InterStreamReuse object */
-    delete reuse_ct_cbk;
-    delete reuse_bt_cbk;
-    delete reuse_zt_cbk;
-
-#if 0
-    delete reuse_cb_cbk;
-#endif
+    if (USE_INTER_STREAM_CALLBACK)
+    {
+      delete reuse_ct_cbk;
+      delete reuse_cc_cbk;
+      delete reuse_bt_cbk;
+      delete reuse_bb_cbk;
+      delete reuse_zt_cbk;
+      delete reuse_zz_cbk;
+      delete reuse_cb_cbk;
+      delete reuse_tt_cbk;
+    }
 
     /* Close statistics stream */
     closeStatisticsStream(stats_stream);
   }
-  
+
   ub8 access_count_avg;
   ub8 total_bt_access;
   ub8 total_rdis;
@@ -4216,7 +4330,7 @@ int main(int argc, char **argv)
   {
     cache_set[i].clear();
   }
-  
+
   /* Free all memory allocated for cache blocks */
   for (ub8 i = 0; i < CACHE_LCNT(&l3cache); i++)
   {
@@ -4461,3 +4575,6 @@ void cachesim_fini()
 #undef BLCKALIGN
 #undef HASHTINDXMASK
 #undef INVALIDATE_SHARERS
+#undef PHASE_BITS
+#undef PHASE_SIZE
+#undef IS_SPILL_ALLOCATED

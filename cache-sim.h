@@ -46,8 +46,8 @@ struct cachesim_cache
 typedef struct cachesim_cache cachesim_cache;
 
 /* Returns true for cache hit */
-//#define ADDR_NDX(cache, addr) (CACHE_AND(addr, CACHE_IMSK(cache)) >> CACHE_BLCKOFFSET)
-#define ADDR_NDX(cache, addr) ((addr >> CACHE_BLCKOFFSET) % cache->cache->num_sets)
+#define ADDR_NDX(cache, addr) (CACHE_AND(addr, CACHE_IMSK(cache)) >> CACHE_BLCKOFFSET)
+//#define ADDR_NDX(c, a) (((a) >> CACHE_BLCKOFFSET) % (c)->cache->num_sets)
 
 cache_access_status  cachesim_incl_cache(cachesim_cache *cache, ub8 addr, ub8 rdis, 
   ub1 policy, ub1 stream);

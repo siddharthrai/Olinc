@@ -1,8 +1,8 @@
 CXX      =g++
-CXXFLAGS =-O0 -funroll-all-loops -funroll-loops -Wall -g
+CXXFLAGS =-O3 -funroll-all-loops -funroll-loops -Wall -g
 
 CC      = gcc
-CCFLAGS = -O0 -funroll-all-loops -funroll-loops -std=c99 -Wall -g
+CCFLAGS = -O3 -funroll-all-loops -funroll-loops -std=c99 -Wall -g
 
 DEPDIR = .deps
 BINDIR = bin

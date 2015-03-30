@@ -51,6 +51,11 @@ extern struct str_map_t cache_block_state_map;
 #define CACHE_SAP_GDATA(cache)        (&(cache->policy_data.sap))
 #define CACHE_SDP_GDATA(cache)        (&(cache->policy_data.sdp))
 #define CACHE_PASRRIP_GDATA(cache)    (&(cache->policy_data.pasrrip))
+#define CACHE_SRRIPDBP_GDATA(cache)   (&(cache->policy_data.srripdbp))
+#define CACHE_SRRIPSAGE_GDATA(cache)  (&(cache->policy_data.srripsage))
+#define CACHE_XSP_GDATA(cache)        (&(cache->policy_data.xsp))
+#define CACHE_XSPPIN_GDATA(cache)     (&(cache->policy_data.xsppin))
+#define CACHE_XSPDBP_GDATA(cache)     (&(cache->policy_data.xspdbp))
 
 struct cache_t
 {
@@ -67,6 +72,8 @@ struct cache_t
     drrip_gdata     drrip;
     brrip_gdata     brrip;
     gspc_gdata      gspc;
+    srripdbp_gdata  srripdbp;
+    srripsage_gdata srripsage;
     gspcm_gdata     gspcm;
     gspct_gdata     gspct;
     gshp_gdata      gshp;
@@ -77,6 +84,9 @@ struct cache_t
     sap_gdata       sap;
     sdp_gdata       sdp;
     pasrrip_gdata   pasrrip;
+    xsp_gdata       xsp;
+    xsppin_gdata    xsppin;
+    xspdbp_gdata    xspdbp;
   }policy_data;
 
   struct cache_set_t *sets; /* Cache sets */

@@ -359,7 +359,7 @@ struct cache_block_t* cache_find_block_stridelru(stridelru_data *policy_data,
     {
       /* If distance between current bock and any region is above 4K pages consider 
        * access as out of reach */
-      if (distance > 256)
+      if (distance > 4096)
       {
         /* Increment out of reach counter if block is either above min way or 
          * is below max way */

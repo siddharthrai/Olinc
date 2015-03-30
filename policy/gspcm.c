@@ -412,109 +412,112 @@ void cache_fill_block_gspcm(gspcm_data *policy_data, gspcm_gdata *global_data,
 }
 
 /* Replace a block */
-int cache_replace_block_gspcm(gspcm_data *policy_data, gspcm_gdata *global_data)
+int cache_replace_block_gspcm(gspcm_data *policy_data, gspcm_gdata *global_data,
+    memory_trace *info)
 {
   struct  cache_block_t *block;
   int     rrpv;
   ub8     avg_reuse;
   ub8     reuse_ratio;
-  
+  ub4     min_wayid;
+
+  min_wayid = ~(0);
+
   if (policy_data->following == cache_policy_srrip)
   {
     int ret_way = cache_replace_block_srripm(&(policy_data->srrip_policy_data));
 
     /* If to be replaced block is BT block update bt_block counter */
     block = &(SRRIPM_DATA_BLOCKS(&(policy_data->srrip_policy_data))[ret_way]);
-    
+
     /* If block is replaced */
 #if 0
     if (block->state != cache_block_invalid && block->is_bt_block == TRUE)
 #endif
-    if (block->state != cache_block_invalid)
-    {
-      ub8 blk_access;
-      ub1 strm;
-      
-      /* Get the stream of replacement candicate */
-      strm = block->stream;
-      
-      reuse_ratio = get_reuse_ratio(global_data, strm);
-
-      /* To avoid including blocks with no reuse in average reuse computation, 
-       * we divide total blocks by reuse ratio */
-      if (global_data->total_blocks[strm])
+      if (block->state != cache_block_invalid)
       {
+        ub8 blk_access;
+        ub1 strm;
+
+        /* Get the stream of replacement candicate */
+        strm = block->stream;
+
+        reuse_ratio = get_reuse_ratio(global_data, strm);
+
+        /* To avoid including blocks with no reuse in average reuse computation, 
+         * we divide total blocks by reuse ratio */
+        if (global_data->total_blocks[strm])
+        {
 #define T_ACC(data, strm)     (data->total_access[strm])
 #define U_ACC(data, strm, rr) (T_ACC(data, strm) * rr)
 #define T_BLK(data, strm)     (data->total_blocks[strm])
 #define A_REU(dat, strm, rr)  ((float)U_ACC(dat, strm, rr) / T_BLK(dat, strm))
 
-        avg_reuse = (int)(ceil(A_REU(global_data, strm, reuse_ratio)));
-        
-        if (reuse_ratio > 1)
-        {
-          printf("Stream %d : Average reuse %ld reuse ratio %ld\n", 
-            strm, avg_reuse, reuse_ratio);
-        }
+          avg_reuse = (int)(ceil(A_REU(global_data, strm, reuse_ratio)));
+
+          if (reuse_ratio > 1)
+          {
+            printf("Stream %d : Average reuse %ld reuse ratio %ld\n", 
+                strm, avg_reuse, reuse_ratio);
+          }
 
 #undef T_ACC
 #undef U_ACC
 #undef T_BLK
 #undef A_REU
-      }
-      
-      /* Reset block accesses */
-      blk_access    = block->access;
-
-      assert(global_data->total_access[strm] >= blk_access);
-      assert(global_data->total_blocks[strm] > 0);
-
-      global_data->total_blocks[strm] -= 1;
-      global_data->total_access[strm] -= blk_access;
-      
-#if 0
-      if (blk_access < avg_reuse)
-#endif
-      {
-        if (blk_access == 0)
-        {
-          SAT_CTR_INC(global_data->blk_no_reuse[strm]);
         }
-        else
-        {
-          SAT_CTR_INC(global_data->blk_reuse[strm]);
+
+        /* Reset block accesses */
+        blk_access    = block->access;
+
+        assert(global_data->total_access[strm] >= blk_access);
+        assert(global_data->total_blocks[strm] > 0);
+
+        global_data->total_blocks[strm] -= 1;
+        global_data->total_access[strm] -= blk_access;
+
 #if 0
-          if (blk_access < avg_reuse)
+        if (blk_access < avg_reuse)
+#endif
+        {
+          if (blk_access == 0)
           {
-            printf("Replaced BT block before avg reuse \n");
-          }
-    
-          if (blk_access < (int)ceil((float)avg_reuse / 4))
-          {
-            printf("Replaced BT block before reuse / 4 access\n");
+            SAT_CTR_INC(global_data->blk_no_reuse[strm]);
           }
           else
           {
-            if (blk_access < (int)ceil((float)avg_reuse / 2))
+            SAT_CTR_INC(global_data->blk_reuse[strm]);
+
+            if (blk_access < avg_reuse)
             {
-              printf("Replaced BT block before reuse / 2 access\n");
+              printf("Replaced %d block before avg reuse \n", strm);
+            }
+
+            if (blk_access < (int)ceil((float)avg_reuse / 4))
+            {
+              printf("Replaced %d block before reuse / 4 access\n", strm);
             }
             else
             {
-              if (blk_access > (int)ceil(3 * (float)avg_reuse / 4))
+              if (blk_access < (int)ceil((float)avg_reuse / 2))
               {
-                printf("Replaced BT block before reuse * 3 / 4  access\n");
+                printf("Replaced %d block before reuse / 2 access\n", strm);
               }
               else
               {
-                printf("Replaced BT block before reuse > * 3 / 4 access\n");
+                if (blk_access > (int)ceil(3 * (float)avg_reuse / 4))
+                {
+                  printf("Replaced %d block after reuse * 3 / 4  access\n", strm);
+                }
+                else
+                {
+                  printf("Replaced %d block before reuse * 3 / 4 access\n", strm);
+                }
               }
             }
           }
-#endif
         }
       }
-    }
 
     return ret_way;
   }
@@ -539,11 +542,24 @@ int cache_replace_block_gspcm(gspcm_data *policy_data, gspcm_gdata *global_data)
     }
 
     /* Remove a nonbusy block from the tail */
-    ub4     min_wayid;
-    sb4     bt_way;
+    reuse_ratio = get_reuse_ratio(global_data, info->stream);
 
-    bt_way    = -1;
-    min_wayid = ~(0);
+    /* To avoid including blocks with no reuse in average reuse computation, 
+     * we divide total blocks by reuse ratio */
+    if (global_data->total_blocks[info->stream])
+    {
+#define T_ACC(data, strm)     (data->total_access[strm])
+#define U_ACC(data, strm, rr) (T_ACC(data, strm) * rr)
+#define T_BLK(data, strm)     (data->total_blocks[strm])
+#define A_REU(dat, strm, rr)  ((float)U_ACC(dat, strm, rr) / T_BLK(dat, strm))
+
+      avg_reuse = (int)(ceil(A_REU(global_data, info->stream, reuse_ratio)));
+
+#undef T_ACC
+#undef U_ACC
+#undef T_BLK
+#undef A_REU
+    }
 
 #define BLK_LIST_H(data, rrpv) (GSPCM_DATA_VALID_TAIL(data)[rrpv].head)
 
@@ -551,23 +567,22 @@ int cache_replace_block_gspcm(gspcm_data *policy_data, gspcm_gdata *global_data)
     for (block = BLK_LIST_H(policy_data, rrpv); block; block = block->next)
     {
       if (!block->busy && block->way < min_wayid && 
-        block->is_bt_block == FALSE)
+          block->access >= avg_reuse / 2)
       {
         min_wayid = block->way;
-      }
-      else
-      {
-        if (block->is_bt_block == TRUE && bt_way == -1)
-        {
-          bt_way = block->way;
-        }
       }
     }
 
 #undef BLK_LIST_H
 
+    for (block = GSPCM_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
+    {
+      if (!block->busy && block->way < min_wayid)
+        min_wayid = block->way;
+    }
+
     /* If no non busy block can be found, return -1 */
-    return (min_wayid != ~(0)) ? min_wayid : (bt_way != -1) ? bt_way : -1;
+    return (min_wayid != ~(0)) ? min_wayid : -1;
   }
 }
 
@@ -663,7 +678,7 @@ void cache_access_block_gspcm(gspcm_data *policy_data,
       if (T_BLK(global_data, strm) && 
         blk->access > (int)ceil(A_ACC(global_data, reuse_ratio, strm)))
       {
-        new_rrpv = GSPCM_DATA_MAX_RRPV(policy_data) - 1;
+        new_rrpv = GSPCM_DATA_MAX_RRPV(policy_data);
       }
       else
       {

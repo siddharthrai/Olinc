@@ -273,7 +273,7 @@ void cache_fill_block_srripm(srripm_data *policy_data, int way, long long tag,
   rrpv = 0;
 
   /* Ensure a valid RRPV */
-  assert(rrpv >=0 && rrpv <= policy_data->max_rrpv); 
+  assert(rrpv >= 0 && rrpv <= policy_data->max_rrpv); 
 
   /* Insert block in to the corresponding RRPV queue */
   CACHE_APPEND_TO_QUEUE(block, 

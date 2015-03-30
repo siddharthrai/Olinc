@@ -2,13 +2,19 @@
 #include <unistd.h>
 #include "inter-stream-reuse.h"
 
-#define USE_INTER_STREAM_CALLBACK (FALSE)
+#define USE_INTER_STREAM_CALLBACK (TRUE)
 #define MAX_CORES                 (128)
+#define MAX_RRPV                  (3)
+#define IS_SPILL_ALLOCATED(s)     ((s) == CS || (s) == BS || (s) == PS)
 
 InterStreamReuse *reuse_ct_cbk = NULL; /* Callback for CT reuse */
+InterStreamReuse *reuse_cc_cbk = NULL; /* Callback for CC reuse */
 InterStreamReuse *reuse_bt_cbk = NULL; /* Callback for BT reuse */
+InterStreamReuse *reuse_bb_cbk = NULL; /* Callback for BB reuse */
 InterStreamReuse *reuse_zt_cbk = NULL; /* Callback for ZT reuse */
+InterStreamReuse *reuse_zz_cbk = NULL; /* Callback for ZZ reuse */
 InterStreamReuse *reuse_cb_cbk = NULL; /* Callback for CB reuse */
+InterStreamReuse *reuse_tt_cbk = NULL; /* Callback for TT reuse */
 
 #define BLCKALIGN(addr) ((addr >> CACHE_BLCKOFFSET) << CACHE_BLCKOFFSET)
 
@@ -268,38 +274,50 @@ cache_access_status cachesim_incl_cache( cachesim_cache *cache, ub8 addr,
   /* If access is a miss */
   if (!block)
   {
-    way = cache_replace_block(cache->cache, indx, info);
-    assert(way != -1);
-
-    vctm_block = cache_get_block(cache->cache, indx, way, &vctm_tag, &vctm_state, 
-      &vctm_stream);
-    
-    assert(vctm_stream >= 0 && vctm_stream <= TST + MAX_CORES - 1);
-
-    ret.tag       = vctm_block.tag;
-    ret.vtl_addr  = vctm_block.vtl_addr;
-    ret.way       = way;
-    ret.stream    = vctm_stream;
-    ret.fate      = CACHE_ACCESS_MISS;
-    ret.dirty     = vctm_block.dirty;
-    ret.epoch     = vctm_block.epoch;
-    ret.access    = vctm_block.access;
-
-    /* If current block is valid */
-    if (vctm_state != cache_block_invalid)
+    /* If access is not bypassed fill the block */
+#if 0
+    if (info && (info->spill == FALSE || (info->spill == TRUE && IS_SPILL_ALLOCATED(info->stream))))
+#endif
+    if (info)
     {
-      ret.fate  = CACHE_ACCESS_RPLC;
-      cache_set_block(cache->cache, indx, way, vctm_tag, cache_block_invalid, 
-        vctm_stream, info);
-    }
+      way = cache_replace_block(cache->cache, indx, info);
+      assert(way != -1);
+
+      vctm_block = cache_get_block(cache->cache, indx, way, &vctm_tag, &vctm_state, 
+          &vctm_stream);
+
+      assert(vctm_stream >= 0 && vctm_stream <= TST + MAX_CORES - 1);
+
+      ret.tag       = vctm_block.tag;
+      ret.vtl_addr  = vctm_block.vtl_addr;
+      ret.way       = way;
+      ret.stream    = vctm_stream;
+      ret.fate      = CACHE_ACCESS_MISS;
+      ret.dirty     = vctm_block.dirty;
+      ret.epoch     = vctm_block.epoch;
+      ret.access    = vctm_block.access;
+      ret.last_rrpv = vctm_block.last_rrpv;
+
+      /* If current block is valid */
+      if (vctm_state != cache_block_invalid)
+      {
+        ret.fate  = CACHE_ACCESS_RPLC;
+        cache_set_block(cache->cache, indx, way, vctm_tag, cache_block_invalid, 
+            vctm_stream, info);
+      }
+      else
+      {
+        assert(vctm_stream == NN);
+      }
+
+      cache_fill_block(cache->cache, indx, way, addr, cache_block_exclusive,
+          strm, info);
+      return ret;
+    } 
     else
     {
-      assert(vctm_stream == NN);
+      ret.fate  = CACHE_ACCESS_MISS;
     }
-
-    cache_fill_block(cache->cache, indx, way, addr, cache_block_exclusive, strm, info);
-    
-    return ret;
   }
   else
   {
@@ -311,6 +329,7 @@ cache_access_status cachesim_incl_cache( cachesim_cache *cache, ub8 addr,
     ret.dirty     = block->dirty;
     ret.epoch     = block->epoch;
     ret.access    = block->access;
+    ret.last_rrpv = block->last_rrpv;
 
     cache_access_block(cache->cache, indx, block->way, strm, info);
 
@@ -1303,10 +1322,14 @@ int main(int argc, char **argv)
   ub8  rdis;
   ub8  inscnt;
   ub8  address;
-  ub8  per_unit_miss[TST];
-  ub8  acc_per_unit[TST];
-  ub4  cache_count;
-  ub4  way_count;
+  ub8  per_unit_miss[TST];  /* Per unit misses */
+  ub8  acc_per_unit[TST];   /* Per unit access */
+  ub8 *per_set_evct;        /* Eviction seen by each set */
+  ub8 *per_set_access;      /* Accesses seen by each set */
+  ub8 **per_rrpv_evct;      /* Replacements seen by each rrpv for each stream */
+  ub8 **per_rrpv_hit;       /* Hits seen by each rrpv for each stream */
+  ub4  cache_count;         /* # cache to simulate */
+  ub4  way_count;           /* Associativity */
   ub4  max_min_ratio;
   ub8 *cache_sizes;
   ub8 *cache_ways;
@@ -1314,6 +1337,7 @@ int main(int argc, char **argv)
   sb1 *config_file_name;
   sb4  opt;
   ub8  cache_set;
+  ub8  indx;
 
   gzFile trc_file;
   gzofstream stats_stream;
@@ -1676,9 +1700,13 @@ int main(int argc, char **argv)
   if (USE_INTER_STREAM_CALLBACK)
   {
     reuse_ct_cbk = new InterStreamReuse(CS, TS, sim_params.lcP.useVa);
+    reuse_cc_cbk = new InterStreamReuse(CS, CS, sim_params.lcP.useVa);
     reuse_bt_cbk = new InterStreamReuse(BS, TS, sim_params.lcP.useVa);
+    reuse_bb_cbk = new InterStreamReuse(BS, BS, sim_params.lcP.useVa);
     reuse_zt_cbk = new InterStreamReuse(ZS, TS, sim_params.lcP.useVa);
+    reuse_zz_cbk = new InterStreamReuse(ZS, ZS, sim_params.lcP.useVa);
     reuse_cb_cbk = new InterStreamReuse(CS, BS, sim_params.lcP.useVa);
+    reuse_tt_cbk = new InterStreamReuse(TS, TS, sim_params.lcP.useVa);
   }
 
   for (ub1 c_cache = 0; c_cache < cache_count; c_cache++)
@@ -1704,6 +1732,30 @@ int main(int argc, char **argv)
 
       printf("Cache parameters : Size %d Ways %d Sets %d\n", 
           cache_sizes[c_cache], params.ways, params.num_sets);
+      
+      per_set_evct = new ub8[params.num_sets];
+      assert(per_set_evct);
+
+      per_set_access = new ub8[params.num_sets];
+      assert(per_set_access);
+
+      per_rrpv_evct = new ub8*[TST + 1];
+      assert(per_rrpv_evct);
+
+      for (ub4 i = 0; i <= TST; i++)
+      {
+        per_rrpv_evct[i] = new ub8[MAX_RRPV + 1];
+        assert(per_rrpv_evct[i]);
+      }
+
+      per_rrpv_hit = new ub8*[TST + 1];
+      assert(per_rrpv_hit);
+
+      for (ub4 i = 0; i <= TST; i++)
+      {
+        per_rrpv_hit[i] = new ub8[MAX_RRPV + 1];
+        assert(per_rrpv_hit[i]);
+      }
 
       /* Initialize policy specific part of cache */
       l3cache.cache = cache_init(&params);
@@ -1718,9 +1770,19 @@ int main(int argc, char **argv)
         reuse_ct_cbk->StartCbk();
       }
 
+      if (reuse_cc_cbk)
+      {
+        reuse_cc_cbk->StartCbk();
+      }
+
       if (reuse_bt_cbk)
       {
         reuse_bt_cbk->StartCbk();
+      }
+
+      if (reuse_bb_cbk)
+      {
+        reuse_bb_cbk->StartCbk();
       }
 
       if (reuse_zt_cbk)
@@ -1728,9 +1790,19 @@ int main(int argc, char **argv)
         reuse_zt_cbk->StartCbk();
       }
       
+      if (reuse_zz_cbk)
+      {
+        reuse_zz_cbk->StartCbk();
+      }
+      
       if (reuse_cb_cbk)
       {
         reuse_cb_cbk->StartCbk();
+      }
+
+      if (reuse_tt_cbk)
+      {
+        reuse_tt_cbk->StartCbk();
       }
 
       /* Read entire trace file and run the simulation */
@@ -1749,7 +1821,6 @@ int main(int argc, char **argv)
           info.fill     = trace_info.fill;
           info.spill    = trace_info.spill;
 #endif
-
           address = info.address;
 
           /* NN is used for all streams */
@@ -1757,279 +1828,596 @@ int main(int argc, char **argv)
                   (info.stream == XS || info.stream == DS ||
                    info.stream == BS || info.stream == NS ||
                    info.stream == HS)) || params.stream == info.stream))
+          {
+            /* Make a cache access */
 #if 0
-            info.stream == HS)) || params.stream == info.stream) &&
-              info.fill == TRUE)
+            cache_access_status ret = 
+              cachesim_incl_cache(&l3cache, address, rdis, params.policy,
+                  (info.stream > (TST)) ? TST : info.stream, &info);
 #endif
+            indx = ADDR_NDX(&l3cache, address);
+
+            /* Increment per-set access count */
+            per_set_access[indx]++;
+
+            /* Issue callback for reuse */
+            if (reuse_ct_cbk)
+            {
+              reuse_ct_cbk->CacheAccessBeginCbk(info, indx, per_set_access[indx], per_set_evct[indx]);
+            }
+
+            if (reuse_cc_cbk)
+            {
+              reuse_cc_cbk->CacheAccessBeginCbk(info, indx, per_set_access[indx], per_set_evct[indx]);
+            }
+
+            if (reuse_bt_cbk)
+            {
+              reuse_bt_cbk->CacheAccessBeginCbk(info, indx, per_set_access[indx], per_set_evct[indx]);
+            }
+
+            if (reuse_bb_cbk)
+            {
+              reuse_bb_cbk->CacheAccessBeginCbk(info, indx, per_set_access[indx], per_set_evct[indx]);
+            }
+
+            if (reuse_zt_cbk)
+            {
+              reuse_zt_cbk->CacheAccessBeginCbk(info, indx, per_set_access[indx], per_set_evct[indx]);
+            }
+
+            if (reuse_zz_cbk)
+            {
+              reuse_zz_cbk->CacheAccessBeginCbk(info, indx, per_set_access[indx], per_set_evct[indx]);
+            }
+
+            if (reuse_cb_cbk)
+            {
+              reuse_cb_cbk->CacheAccessBeginCbk(info, indx, per_set_access[indx], per_set_evct[indx]);
+            }
+
+            if (reuse_tt_cbk)
+            {
+              reuse_tt_cbk->CacheAccessBeginCbk(info, indx, per_set_access[indx], per_set_evct[indx]);
+            }
+
+            cache_access_status ret = 
+              cachesim_incl_cache(&l3cache, address, rdis, params.policy,
+                  info.stream, &info);
+
+            assert(ret.fate != CACHE_ACCESS_UNK);
+
+            /* Update statistics only for fill */
+            if (info.fill == TRUE)
+            {
+              if (ret.fate == CACHE_ACCESS_MISS || ret.fate == CACHE_ACCESS_RPLC)
               {
-                /* Make a cache access */
-#if 0
-                cache_access_status ret = 
-                  cachesim_incl_cache(&l3cache, address, rdis, params.policy,
-                      (info.stream > (TST)) ? TST : info.stream, &info);
-#endif
-                /* Issue callback for reuse */
-                if (reuse_ct_cbk)
+                if (info.stream >= PS && info.stream <= PS + MAX_CORES - 1)
                 {
-                  reuse_ct_cbk->CacheAccessBeginCbk(info);
-                }
-                
-                if (reuse_bt_cbk)
-                {
-                  reuse_bt_cbk->CacheAccessBeginCbk(info);
-                }
+                  (*p_rmiss)++;
 
-                if (reuse_zt_cbk)
-                {
-                  reuse_zt_cbk->CacheAccessBeginCbk(info);
                 }
-                
-                if (reuse_cb_cbk)
+                else
                 {
-                  reuse_cb_cbk->CacheAccessBeginCbk(info);
-                }
-
-                cache_access_status ret = 
-                  cachesim_incl_cache(&l3cache, address, rdis, params.policy,
-                      info.stream, &info);
-
-                assert(ret.fate != CACHE_ACCESS_UNK);
-
-                /* Update statistics only for fill */
-                if (info.fill == TRUE)
-                {
-                  if (ret.fate == CACHE_ACCESS_MISS || ret.fate == CACHE_ACCESS_RPLC)
+                  switch (info.stream)
                   {
-                    if (info.stream >= PS && info.stream <= PS + MAX_CORES - 1)
-                    {
-                      (*p_rmiss)++;
+                    case IS:
+                      (*i_rmiss)++;
+                      break;
 
-                    }
-                    else
-                    {
-                      switch (info.stream)
-                      {
-                        case IS:
-                          (*i_rmiss)++;
-                          break;
+                    case CS:
+                      (*c_rmiss)++;
+                      break;
 
-                        case CS:
-                          (*c_rmiss)++;
-                          break;
+                    case ZS:
+                      (*z_rmiss)++;
+                      break;
 
-                        case ZS:
-                          (*z_rmiss)++;
-                          break;
+                    case TS:
+                      (*t_rmiss)++;
+                      break;
 
-                        case TS:
-                          (*t_rmiss)++;
-                          break;
+                    case NS:
+                      (*n_rmiss)++;
+                      break;
 
-                        case NS:
-                          (*n_rmiss)++;
-                          break;
+                    case HS:
+                      (*h_rmiss)++;
+                      break;
 
-                        case HS:
-                          (*h_rmiss)++;
-                          break;
+                    case BS:
+                      (*b_rmiss)++;
+                      break;
 
-                        case BS:
-                          (*b_rmiss)++;
-                          break;
+                    case DS:
+                      (*d_rmiss)++;
+                      break;
 
-                        case DS:
-                          (*d_rmiss)++;
-                          break;
+                    case XS:
+                      (*x_rmiss)++;
+                      break;
 
-                        case XS:
-                          (*x_rmiss)++;
-                          break;
-
-                        default:
-                          cout << "Illegal stream " << (int)(info.stream) << " for address ";
-                          cout << hex << info.address << " type : ";
-                          cout << dec << (int)info.fill << " spill: " << dec << (int)info.spill;
-                          assert(1);
-                      }
-                    }
-
-                    if (ret.fate == CACHE_ACCESS_RPLC)
-                    { 
-                      /* Current stream has a block allocated */
-                      assert(ret.stream != NN);
-                      
-                      if (ret.stream == CS || ret.stream == ZS || ret.stream == TS)
-                      {
-                        updateEopchEvictCountersForRead(ret);
-                      }
-                    }
+                    default:
+                      cout << "Illegal stream " << (int)(info.stream) << " for address ";
+                      cout << hex << info.address << " type : ";
+                      cout << dec << (int)info.fill << " spill: " << dec << (int)info.spill;
+                      assert(1);
                   }
-                  else
-                  {
-                    assert(ret.fate == CACHE_ACCESS_HIT);
+                }
 
-                    /* Update C, Z, T epoch counters */
-                    if (info.stream == ret.stream &&
-                        (ret.stream == CS || ret.stream == ZS || ret.stream == TS))
-                    {
-                      if (ret.epoch != 3)
-                      {
-                        updateEpochHitCountersForRead(ret);
-                      }
-                    }
+                if (ret.fate == CACHE_ACCESS_RPLC)
+                { 
+                  /* Current stream has a block allocated */
+                  assert(ret.stream != NN);
+
+                  if (ret.stream == CS || ret.stream == ZS || ret.stream == TS)
+                  {
+                    updateEopchEvictCountersForRead(ret);
                   }
+                }
+              }
+              else
+              {
+                assert(ret.fate == CACHE_ACCESS_HIT);
 
-                  if (info.stream == CS || info.stream == ZS || info.stream == TS)
+                /* Update C, Z, T epoch counters */
+                if (info.stream == ret.stream &&
+                    (ret.stream == CS || ret.stream == ZS || ret.stream == TS))
+                {
+                  if (ret.epoch != 3)
                   {
-                    if (ret.fate == CACHE_ACCESS_MISS || ret.fate == CACHE_ACCESS_RPLC)
+                    updateEpochHitCountersForRead(ret);
+                  }
+                }
+              }
+
+              if (info.stream == CS || info.stream == ZS || info.stream == TS)
+              {
+                if (ret.fate == CACHE_ACCESS_MISS || ret.fate == CACHE_ACCESS_RPLC)
+                {
+                  updateEpochFillCountersForRead(info.stream, 0);
+                }
+                else
+                {
+                  if (ret.epoch != 3)
+                  {
+                    if (info.stream != ret.stream)
                     {
                       updateEpochFillCountersForRead(info.stream, 0);
                     }
                     else
                     {
-                      if (ret.epoch != 3)
-                      {
-                        if (info.stream != ret.stream)
-                        {
-                          updateEpochFillCountersForRead(info.stream, 0);
-                        }
-                        else
-                        {
-                          updateEpochFillCountersForRead(info.stream, ret.epoch + 1);
-                        }
-                      }
-                    }
-                  }
-
-                  if (info.stream >= PS && info.stream <= PS + MAX_CORES - 1)
-                  {
-                    (*p_raccess)++;
-                  }
-                  else
-                  {
-                    switch (info.stream)
-                    {
-                      case IS:
-                        (*i_raccess)++;
-                        break;
-
-                      case CS:
-                        (*c_raccess)++;
-
-                        break;
-
-                      case ZS:
-                        (*z_raccess)++;
-                        break;
-
-                      case TS:
-                        (*t_raccess)++;
-                        break;
-
-                      case NS:
-                        (*n_raccess)++;
-                        break;
-
-                      case HS:
-                        (*h_raccess)++;
-                        break;
-
-                      case BS:
-                        (*b_raccess)++;
-                        break;
-
-                      case DS:
-                        (*d_raccess)++;
-                        break;
-
-                      case XS:
-                        (*x_raccess)++;
-                        break;
-
-                      default:
-                        cout << "Illegal stream " << (int)info.stream << " for address ";
-                        cout << hex << info.address << " type : ";
-                        cout << dec << (int)info.fill << " spill: " << dec << (int)info.spill;
-                        assert(0);
+                      updateEpochFillCountersForRead(info.stream, ret.epoch + 1);
                     }
                   }
                 }
+              }
 
-                if (ret.fate == CACHE_ACCESS_MISS || ret.fate == CACHE_ACCESS_RPLC)
+              if (info.stream >= PS && info.stream <= PS + MAX_CORES - 1)
+              {
+                (*p_raccess)++;
+              }
+              else
+              {
+                switch (info.stream)
                 {
-                  if (info.stream >= PS && info.stream <= PS + MAX_CORES - 1)
-                  {
-                    (*p_miss)++;
+                  case IS:
+                    (*i_raccess)++;
+                    break;
+
+                  case CS:
+                    (*c_raccess)++;
+
+                    break;
+
+                  case ZS:
+                    (*z_raccess)++;
+                    break;
+
+                  case TS:
+                    (*t_raccess)++;
+                    break;
+
+                  case NS:
+                    (*n_raccess)++;
+                    break;
+
+                  case HS:
+                    (*h_raccess)++;
+                    break;
+
+                  case BS:
+                    (*b_raccess)++;
+                    break;
+
+                  case DS:
+                    (*d_raccess)++;
+                    break;
+
+                  case XS:
+                    (*x_raccess)++;
+                    break;
+
+                  default:
+                    cout << "Illegal stream " << (int)info.stream << " for address ";
+                    cout << hex << info.address << " type : ";
+                    cout << dec << (int)info.fill << " spill: " << dec << (int)info.spill;
+                    assert(0);
+                }
+              }
+            }
+
+            if (ret.fate == CACHE_ACCESS_MISS || ret.fate == CACHE_ACCESS_RPLC)
+            {
+              if (info.stream >= PS && info.stream <= PS + MAX_CORES - 1)
+              {
+                (*p_miss)++;
+
+                if (ret.stream != info.stream)
+                  (*p_blocks)++;
+              }
+              else
+              {
+                switch (info.stream)
+                {
+                  case IS:
+                    (*i_miss)++;
 
                     if (ret.stream != info.stream)
-                      (*p_blocks)++;
+                      (*i_blocks)++;
+                    break;
+
+                  case CS:
+                    (*c_miss)++;
+
+                    if (ret.stream != info.stream)
+                      (*c_blocks)++;
+
+                    break;
+
+                  case ZS:
+                    (*z_miss)++;
+
+                    if (ret.stream != info.stream)
+                      (*z_blocks)++;
+                    break;
+
+                  case TS:
+                    (*t_miss)++;
+
+                    if (ret.stream != info.stream)
+                      (*t_blocks)++;
+                    break;
+
+                  case NS:
+                    (*n_miss)++;
+
+                    if (ret.stream != info.stream)
+                      (*n_blocks)++;
+                    break;
+
+                  case HS:
+                    (*h_miss)++;
+
+                    if (ret.stream != info.stream)
+                      (*h_blocks)++;
+                    break;
+
+                  case BS:
+                    (*b_miss)++;
+
+                    if (ret.stream != info.stream)
+                      (*b_blocks)++;
+                    break;
+
+                  case DS:
+                    (*d_miss)++;
+
+                    if (ret.stream != info.stream)
+                      (*d_blocks)++;
+                    break;
+
+                  case XS:
+                    (*x_miss)++;
+
+                    if (ret.stream != info.stream)
+                      (*x_blocks)++;
+                    break;
+
+                  default:
+                    cout << "Illegal stream " << (int)(info.stream) << " for address ";
+                    cout << hex << info.address << " type : ";
+                    cout << dec << (int)info.fill << " spill: " << dec << (int)info.spill;
+                    assert(0);
+                }
+              }
+
+              if (ret.fate == CACHE_ACCESS_RPLC)
+              { 
+                per_set_evct[indx]++;
+
+                assert(ret.last_rrpv <= MAX_RRPV);
+                assert(ret.stream <= TST);
+
+                per_rrpv_evct[ret.stream][ret.last_rrpv]++;
+
+                /* Issue callback for reuse */
+                if (reuse_ct_cbk)
+                {
+                  reuse_ct_cbk->CacheAccessReplaceCbk(info, ret, indx, per_set_access[indx], per_set_evct[indx]);
+                }
+
+                if (reuse_cc_cbk)
+                {
+                  reuse_cc_cbk->CacheAccessReplaceCbk(info, ret, indx, per_set_access[indx], per_set_evct[indx]);
+                }
+
+                if (reuse_bt_cbk)
+                {
+                  reuse_bt_cbk->CacheAccessReplaceCbk(info, ret, indx, per_set_access[indx], per_set_evct[indx]);
+                }
+
+                if (reuse_bb_cbk)
+                {
+                  reuse_bb_cbk->CacheAccessReplaceCbk(info, ret, indx, per_set_access[indx], per_set_evct[indx]);
+                }
+
+                if (reuse_zt_cbk)
+                {
+                  reuse_zt_cbk->CacheAccessReplaceCbk(info, ret, indx, per_set_access[indx], per_set_evct[indx]);
+                }
+
+                if (reuse_zz_cbk)
+                {
+                  reuse_zz_cbk->CacheAccessReplaceCbk(info, ret, indx, per_set_access[indx], per_set_evct[indx]);
+                }
+
+                if (reuse_cb_cbk)
+                {
+                  reuse_cb_cbk->CacheAccessReplaceCbk(info, ret, indx, per_set_access[indx], per_set_evct[indx]);
+                }
+
+                if (reuse_tt_cbk)
+                {
+                  reuse_tt_cbk->CacheAccessReplaceCbk(info, ret, indx, per_set_access[indx], per_set_evct[indx]);
+                }
+
+                /* Current stream has a block allocated */
+                assert(ret.stream != NN);
+
+                /* Update C, Z, T epoch counters */
+                if (ret.stream == CS || ret.stream == ZS || ret.stream == TS)
+                {
+                  updateEopchEvictCounters(ret);
+                }
+
+                if (ret.stream != info.stream)
+                {
+                  if (ret.stream >= PS && ret.stream <= PS + MAX_CORES - 1)
+                  {
+                    if (info.stream != PS)
+                      (*p_xevct)++;
+
+                    assert(p_blocks->getValue());
+                    (*p_blocks)--;
                   }
                   else
                   {
-                    switch (info.stream)
+                    switch(ret.stream)
                     {
                       case IS:
-                        (*i_miss)++;
+                        (*i_xevct)++;
 
-                        if (ret.stream != info.stream)
-                          (*i_blocks)++;
+                        if (info.stream == CS)
+                        {
+                          (*i_xcevct)++;
+                        }
+                        else
+                        {
+                          if (info.stream == ZS)
+                          {
+                            (*i_xzevct)++;
+                          }
+                          {
+                            if (info.stream == TS)
+                            {
+                              (*i_xtevct)++;
+                            }
+                          }
+                        }
+
+                        assert(i_blocks->getValue());
+                        (*i_blocks)--;
                         break;
 
                       case CS:
-                        (*c_miss)++;
+                        (*c_xevct)++;
 
-                        if (ret.stream != info.stream)
-                          (*c_blocks)++;
+                        if (info.stream == ZS)
+                        {
+                          (*c_xzevct)++;
+                        }
+                        else
+                        {
+                          if (info.stream == TS)
+                          {
+                            (*c_xtevct)++;
+                          }
+                        }
+
+                        assert(c_blocks->getValue(1) && info.stream != CS);
+                        (*c_blocks)--;
 
                         break;
 
                       case ZS:
-                        (*z_miss)++;
+                        (*z_xevct)++;
 
-                        if (ret.stream != info.stream)
-                          (*z_blocks)++;
+                        if (info.stream == CS)
+                        {
+                          (*z_xcevct)++;
+                        }
+                        else
+                        {
+                          if (info.stream == TS)
+                          {
+                            (*z_xtevct)++;
+                          }
+                        }
+
+                        assert(z_blocks->getValue());
+                        (*z_blocks)--;
                         break;
 
                       case TS:
-                        (*t_miss)++;
+                        (*t_xevct)++;
 
-                        if (ret.stream != info.stream)
-                          (*t_blocks)++;
+                        if (info.stream == CS)
+                        {
+                          (*t_xcevct)++;
+                        }
+                        else
+                        {
+                          if (info.stream == ZS)
+                          {
+                            (*t_xzevct)++;
+                          }
+                        }
+
+                        /* At least one block must belong to TS */
+                        assert(t_blocks->getValue());
+                        (*t_blocks)--;
                         break;
 
                       case NS:
-                        (*n_miss)++;
+                        (*n_xevct)++;
 
-                        if (ret.stream != info.stream)
-                          (*n_blocks)++;
+                        if (info.stream == CS)
+                        {
+                          (*n_xcevct)++;
+                        }
+                        else
+                        {
+                          if (info.stream == ZS)
+                          {
+                            (*n_xzevct)++;
+                          }
+                          else
+                          {
+                            if (info.stream == TS)
+                            {
+                              (*n_xtevct)++;
+                            }
+                          }
+                        }
+
+                        assert(n_blocks->getValue());
+                        (*n_blocks)--;
                         break;
 
                       case HS:
-                        (*h_miss)++;
+                        (*h_xevct)++;
 
-                        if (ret.stream != info.stream)
-                          (*h_blocks)++;
+                        if (info.stream == CS)
+                        {
+                          (*h_xcevct)++;
+                        }
+                        else
+                        {
+                          if (info.stream == ZS)
+                          {
+                            (*h_xzevct)++;
+                          }
+                          else
+                          {
+                            if (info.stream == TS)
+                            {
+                              (*h_xtevct)++;
+                            }
+                          }
+                        }
+
+                        assert(h_blocks->getValue());
+                        (*h_blocks)--;
                         break;
 
                       case BS:
-                        (*b_miss)++;
+                        (*b_xevct)++;
 
-                        if (ret.stream != info.stream)
-                          (*b_blocks)++;
+                        if (info.stream == CS)
+                        {
+                          (*b_xcevct)++;
+                        }
+                        else
+                        {
+                          if (info.stream == ZS)
+                          {
+                            (*b_xzevct)++;
+                          }
+                          else
+                          {
+                            if (info.stream == TS)
+                            {
+                              (*b_xtevct)++;
+                            }
+                          }
+                        }
+
+                        assert(b_blocks->getValue());
+                        (*b_blocks)--;
                         break;
 
                       case DS:
-                        (*d_miss)++;
+                        (*d_xevct)++;
 
-                        if (ret.stream != info.stream)
-                          (*d_blocks)++;
+                        if (info.stream == CS)
+                        {
+                          (*d_xcevct)++;
+                        }
+                        else
+                        {
+                          if (info.stream == ZS)
+                          {
+                            (*d_xzevct)++;
+                          }
+                          else
+                          {
+                            if (info.stream == TS)
+                            {
+                              (*d_xtevct)++;
+                            }
+                          }
+                        }
+
+                        assert(d_blocks->getValue());
+                        (*d_blocks)--;
+
                         break;
 
                       case XS:
-                        (*x_miss)++;
+                        (*x_xevct)++;
 
-                        if (ret.stream != info.stream)
-                          (*x_blocks)++;
+                        if (info.stream == CS)
+                        {
+                          (*x_xcevct)++;
+                        }
+                        else
+                        {
+                          if (info.stream == ZS)
+                          {
+                            (*x_xzevct)++;
+                          }
+                          else
+                          {
+                            if (info.stream == TS)
+                            {
+                              (*x_xtevct)++;
+                            }
+                          }
+                        }
+
+                        assert(x_blocks->getValue());
+                        (*x_blocks)--;
                         break;
 
                       default:
@@ -2039,721 +2427,322 @@ int main(int argc, char **argv)
                         assert(0);
                     }
                   }
-
-                  if (ret.fate == CACHE_ACCESS_RPLC)
-                  { 
-                    /* Issue callback for reuse */
-                    if (reuse_ct_cbk)
-                    {
-                      reuse_ct_cbk->CacheAccessReplaceCbk(info, ret);
-                    }
-
-                    if (reuse_bt_cbk)
-                    {
-                      reuse_bt_cbk->CacheAccessReplaceCbk(info, ret);
-                    }
-
-                    if (reuse_zt_cbk)
-                    {
-                      reuse_zt_cbk->CacheAccessReplaceCbk(info, ret);
-                    }
-
-                    if (reuse_cb_cbk)
-                    {
-                      reuse_cb_cbk->CacheAccessReplaceCbk(info, ret);
-                    }
-
-                    /* Current stream has a block allocated */
-                    assert(ret.stream != NN);
-
-                    /* Update C, Z, T epoch counters */
-                    if (ret.stream == CS || ret.stream == ZS || ret.stream == TS)
-                    {
-                      updateEopchEvictCounters(ret);
-                    }
-
-                    if (ret.stream != info.stream)
-                    {
-                      if (ret.stream >= PS && ret.stream <= PS + MAX_CORES - 1)
-                      {
-                        if (info.stream != PS)
-                          (*p_xevct)++;
-
-                        assert(p_blocks->getValue());
-                        (*p_blocks)--;
-                      }
-                      else
-                      {
-                        switch(ret.stream)
-                        {
-                          case IS:
-                            (*i_xevct)++;
-                            
-                            if (info.stream == CS)
-                            {
-                              (*i_xcevct)++;
-                            }
-                            else
-                            {
-                              if (info.stream == ZS)
-                              {
-                                (*i_xzevct)++;
-                              }
-                              {
-                                if (info.stream == TS)
-                                {
-                                  (*i_xtevct)++;
-                                }
-                              }
-                            }
-
-                            assert(i_blocks->getValue());
-                            (*i_blocks)--;
-                            break;
-
-                          case CS:
-                            (*c_xevct)++;
-
-                            if (info.stream == ZS)
-                            {
-                              (*c_xzevct)++;
-                            }
-                            else
-                            {
-                              if (info.stream == TS)
-                              {
-                                (*c_xtevct)++;
-                              }
-                            }
-
-                            assert(c_blocks->getValue(1) && info.stream != CS);
-                            (*c_blocks)--;
-
-                            break;
-
-                          case ZS:
-                            (*z_xevct)++;
-
-                            if (info.stream == CS)
-                            {
-                              (*z_xcevct)++;
-                            }
-                            else
-                            {
-                              if (info.stream == TS)
-                              {
-                                (*z_xtevct)++;
-                              }
-                            }
-
-                            assert(z_blocks->getValue());
-                            (*z_blocks)--;
-                            break;
-
-                          case TS:
-                            (*t_xevct)++;
-
-                            if (info.stream == CS)
-                            {
-                              (*t_xcevct)++;
-                            }
-                            else
-                            {
-                              if (info.stream == ZS)
-                              {
-                                (*t_xzevct)++;
-                              }
-                            }
-
-                            /* At least one block must belong to TS */
-                            assert(t_blocks->getValue());
-                            (*t_blocks)--;
-                            break;
-
-                          case NS:
-                            (*n_xevct)++;
-
-                            if (info.stream == CS)
-                            {
-                              (*n_xcevct)++;
-                            }
-                            else
-                            {
-                              if (info.stream == ZS)
-                              {
-                                (*n_xzevct)++;
-                              }
-                              else
-                              {
-                                if (info.stream == TS)
-                                {
-                                  (*n_xtevct)++;
-                                }
-                              }
-                            }
-
-                            assert(n_blocks->getValue());
-                            (*n_blocks)--;
-                            break;
-
-                          case HS:
-                            (*h_xevct)++;
-
-                            if (info.stream == CS)
-                            {
-                              (*h_xcevct)++;
-                            }
-                            else
-                            {
-                              if (info.stream == ZS)
-                              {
-                                (*h_xzevct)++;
-                              }
-                              else
-                              {
-                                if (info.stream == TS)
-                                {
-                                  (*h_xtevct)++;
-                                }
-                              }
-                            }
-
-                            assert(h_blocks->getValue());
-                            (*h_blocks)--;
-                            break;
-
-                          case BS:
-                            (*b_xevct)++;
-
-                            if (info.stream == CS)
-                            {
-                              (*b_xcevct)++;
-                            }
-                            else
-                            {
-                              if (info.stream == ZS)
-                              {
-                                (*b_xzevct)++;
-                              }
-                              else
-                              {
-                                if (info.stream == TS)
-                                {
-                                  (*b_xtevct)++;
-                                }
-                              }
-                            }
-
-                            assert(b_blocks->getValue());
-                            (*b_blocks)--;
-                            break;
-
-                          case DS:
-                            (*d_xevct)++;
-
-                            if (info.stream == CS)
-                            {
-                              (*d_xcevct)++;
-                            }
-                            else
-                            {
-                              if (info.stream == ZS)
-                              {
-                                (*d_xzevct)++;
-                              }
-                              else
-                              {
-                                if (info.stream == TS)
-                                {
-                                  (*d_xtevct)++;
-                                }
-                              }
-                            }
-
-                            assert(d_blocks->getValue());
-                            (*d_blocks)--;
-
-                            break;
-
-                          case XS:
-                            (*x_xevct)++;
-
-                            if (info.stream == CS)
-                            {
-                              (*x_xcevct)++;
-                            }
-                            else
-                            {
-                              if (info.stream == ZS)
-                              {
-                                (*x_xzevct)++;
-                              }
-                              else
-                              {
-                                if (info.stream == TS)
-                                {
-                                  (*x_xtevct)++;
-                                }
-                              }
-                            }
-
-                            assert(x_blocks->getValue());
-                            (*x_blocks)--;
-                            break;
-
-                          default:
-                            cout << "Illegal stream " << (int)(info.stream) << " for address ";
-                            cout << hex << info.address << " type : ";
-                            cout << dec << (int)info.fill << " spill: " << dec << (int)info.spill;
-                            assert(0);
-                        }
-                      }
-                    }
-                    else
-                    {
-                      if (info.stream >= PS && info.stream <= PS + MAX_CORES - 1)
-                      {
-                        (*p_sevct)++;
-                      }
-                      else
-                      {
-                        switch(info.stream)
-                        {
-                          case IS:
-                            (*i_sevct)++;
-                            break;
-
-                          case CS:
-                            (*c_sevct)++;
-                            break;
-
-                          case ZS:
-                            (*z_sevct)++;
-                            break;
-
-                          case TS:
-                            (*t_sevct)++;
-                            break;
-
-                          case NS:
-                            (*n_sevct)++;
-                            break;
-
-                          case HS:
-                            (*h_sevct)++;
-                            break;
-
-                          case BS:
-                            (*b_sevct)++;
-                            break;
-
-                          case DS:
-                            (*d_sevct)++;
-                            break;
-
-                          case XS:
-                            (*x_sevct)++;
-                            break;
-
-                          default:
-                            cout << "Illegal stream " << (int)(info.stream) << " for address ";
-                            cout << hex << info.address << " type : ";
-                            cout << dec << (int)info.fill << " spill: " << dec << (int)info.spill;
-                            assert(0);
-                        }
-                      }
-                    }
-
-                    if (ret.access == 0)
-                    {
-                      switch (ret.stream)
-                      {
-                        case IS:
-                          (*i_zevct)++;
-                          break;
-
-                        case CS:
-                          (*c_zevct)++;
-                          break;
-
-                        case ZS:
-                          (*z_zevct)++;
-                          break;
-
-                        case TS:
-                          (*t_zevct)++;
-                          break;
-
-                        case NS:
-                          (*n_zevct)++;
-                          break;
-
-                        case HS:
-                          (*h_zevct)++;
-                          break;
-
-                        case BS:
-                          (*b_zevct)++;
-                          break;
-
-                        case DS:
-                          (*d_zevct)++;
-                          break;
-
-                        case XS:
-                          (*x_zevct)++;
-                          break;
-
-                        default:
-                          cout << "Illegal stream " << (int)(ret.stream);
-                          assert(1);
-                      }
-                    }
-                  }
                 }
                 else
                 {
-                  assert(ret.fate == CACHE_ACCESS_HIT);
-
-                  /* Issue callback for reuse */
-                  if (reuse_ct_cbk)
+                  if (info.stream >= PS && info.stream <= PS + MAX_CORES - 1)
                   {
-                    reuse_ct_cbk->CacheAccessHitCbk(info, ret);
-                  }
-
-                  if (reuse_bt_cbk)
-                  {
-                    reuse_bt_cbk->CacheAccessHitCbk(info, ret);
-                  }
-
-                  if (reuse_zt_cbk)
-                  {
-                    reuse_zt_cbk->CacheAccessHitCbk(info, ret);
-                  }
-
-                  if (reuse_cb_cbk)
-                  {
-                    reuse_cb_cbk->CacheAccessHitCbk(info, ret);
-                  }
-
-                  /* Update C, Z, T epoch counters */
-                  if (info.stream == ret.stream && 
-                      (ret.stream == CS || ret.stream == ZS || ret.stream == TS))
-                  {
-                    updateEpochHitCounters(ret);
-                  }
-
-                  /* Update stats for incoming stream */
-                  if (info.stream != ret.stream)
-                  {
-                    if (info.stream >= PS && info.stream <= PS + MAX_CORES - 1)
-                    {
-                      (*p_xhit)++;
-                      (*p_blocks)++;
-                    }
-                    else
-                    {
-                      switch (info.stream)
-                      {
-                        case IS:
-                          (*i_xhit)++;
-                          (*i_blocks)++;
-                          break;
-
-                        case CS:
-                          (*c_xhit)++;
-                          (*c_blocks)++;
-
-                          switch (ret.stream)
-                          {
-                            case ZS:
-                              (*c_zchit)++;
-                              break;
-
-                            case TS:
-                              (*c_tchit)++;
-                              break;
-
-                            case BS:
-                              (*c_bchit)++;
-                              break;
-
-                            case DS:
-                              (*c_dchit)++;
-                              break;
-                          }
-
-                          break;
-
-                        case ZS:
-                          (*z_xhit)++;
-                          (*z_blocks)++;
-
-                          switch (ret.stream)
-                          {
-                            case CS:
-                              (*z_czhit)++;
-                              break;
-
-                            case TS:
-                              (*z_tzhit)++;
-                              break;
-
-                            case BS:
-                              (*z_bzhit)++;
-                              break;
-                          }
-
-                          break;
-
-                        case TS:
-                          (*t_xhit)++;
-                          (*t_blocks)++;
-
-                          assert(info.spill == 0);
-
-                          switch (ret.stream)
-                          {
-                            case CS:
-                              (*t_cthit)++;
-
-                              if (ret.dirty)
-                              {
-                                assert(info.spill == 0);
-                                assert(c_ccons->getValue(1) < c_cprod->getValue(1));
-                                (*c_ccons)++;
-                              }
-                              break;
-
-                            case ZS:
-                              (*t_zthit)++;
-                              break;
-
-                            case BS:
-                              (*t_bthit)++;
-
-                              if (ret.dirty)
-                              {
-                                assert(info.spill == 0 && info.fill == 1);
-                                assert(b_bcons->getValue(1) < b_bprod->getValue(1));
-                                (*b_bcons)++;
-                              }
-                              break;
-                          }
-
-                          break;
-
-                        case NS:
-                          (*n_xhit)++;
-                          (*n_blocks)++;
-                          break;
-
-                        case HS:
-                          (*h_xhit)++;
-                          (*h_blocks)++;
-                          break;
-
-                        case BS:
-                          (*b_xhit)++;
-                          (*b_blocks)++;
-
-                          switch (ret.stream)
-                          {
-                            case CS:
-                              (*b_cbhit)++;
-                              break;
-
-                            case TS:
-                              (*b_tbhit)++;
-                              break;
-
-                            case ZS:
-                              (*b_zbhit)++;
-                              break;
-                          }
-                          break;
-
-                        case DS:
-                          (*d_xhit)++;
-                          (*d_blocks)++;
-
-                          switch (ret.stream)
-                          {
-                            case CS:
-                              (*d_cdhit)++;
-                              break;
-
-                            case TS:
-                              (*d_tdhit)++;
-                              break;
-
-                            case ZS:
-                              (*d_zdhit)++;
-                              break;
-
-                            case BS:
-                              (*d_bdhit)++;
-                              break;
-                          }
-
-                          break;
-
-                        case XS:
-                          (*x_xhit)++;
-                          (*x_blocks)++;
-
-                          break;
-
-                        default:
-                          cout << "Illegal stream " << (int)info.stream << " for address ";
-                          cout << hex << info.address << " type : ";
-                          cout << dec << (int)info.fill << " spill: " << dec << (int)info.spill;
-                          assert(0);
-                      }
-                    }
-
-                    if (ret.stream >= PS && ret.stream <= PS + MAX_CORES - 1)
-                    {
-                      assert(p_blocks->getValue());
-                      (*p_blocks)--;
-                    }
-                    else
-                    {
-                      switch (ret.stream)
-                      {
-                        case IS:
-                          assert(i_blocks->getValue());
-                          (*i_blocks)--;
-                          break;
-
-                        case CS:
-
-                          assert(c_blocks->getValue(1) && info.stream != CS);
-                          (*c_blocks)--;
-#if 0
-                          assert(cache_count_block(l3cache.cache, CS) == c_blocks->getValue());
-#endif
-                          break;
-
-                        case ZS:
-                          assert(z_blocks->getValue());
-                          (*z_blocks)--;
-                          break;
-
-                        case TS:
-                          assert(t_blocks->getValue());
-                          (*t_blocks)--;
-                          break;
-
-                        case NS:
-                          assert(n_blocks->getValue());
-                          (*n_blocks)--;
-                          break;
-
-                        case HS:
-                          assert(h_blocks->getValue());
-                          (*h_blocks)--;
-                          break;
-
-                        case BS:
-                          assert(b_blocks->getValue());
-                          (*b_blocks)--;
-                          break;
-
-                        case DS:
-                          assert(d_blocks->getValue());
-                          (*d_blocks)--;
-                          break;
-
-                        case XS:
-                          assert(x_blocks->getValue());
-                          (*x_blocks)--;
-                          break;
-
-                        default:
-                          cout << "Illegal stream " << (int)ret.stream << " for address ";
-                          cout << hex << info.address << " type : ";
-                          cout << dec << (int)info.fill << " spill: " << dec << (int)info.spill;
-                          assert(0);
-                      }
-                    }
-                  }
-                }
-
-                if (info.stream == CS || info.stream == ZS || info.stream == TS)
-                {
-                  if (ret.fate == CACHE_ACCESS_MISS || ret.fate == CACHE_ACCESS_RPLC)
-                  {
-                    updateEpochFillCounters(info.stream, 0);
+                    (*p_sevct)++;
                   }
                   else
                   {
-                    if (ret.epoch != 3)
+                    switch(info.stream)
                     {
-                      if (info.stream != ret.stream)
-                      {
-                        updateEpochFillCounters(info.stream, 0);
-                      }
-                      else
-                      {
-                        updateEpochFillCounters(info.stream, ret.epoch + 1);
-                      }
+                      case IS:
+                        (*i_sevct)++;
+                        break;
+
+                      case CS:
+                        (*c_sevct)++;
+                        break;
+
+                      case ZS:
+                        (*z_sevct)++;
+                        break;
+
+                      case TS:
+                        (*t_sevct)++;
+                        break;
+
+                      case NS:
+                        (*n_sevct)++;
+                        break;
+
+                      case HS:
+                        (*h_sevct)++;
+                        break;
+
+                      case BS:
+                        (*b_sevct)++;
+                        break;
+
+                      case DS:
+                        (*d_sevct)++;
+                        break;
+
+                      case XS:
+                        (*x_sevct)++;
+                        break;
+
+                      default:
+                        cout << "Illegal stream " << (int)(info.stream) << " for address ";
+                        cout << hex << info.address << " type : ";
+                        cout << dec << (int)info.fill << " spill: " << dec << (int)info.spill;
+                        assert(0);
                     }
                   }
                 }
 
+                if (ret.access == 0)
+                {
+                  switch (ret.stream)
+                  {
+                    case IS:
+                      (*i_zevct)++;
+                      break;
+
+                    case CS:
+                      (*c_zevct)++;
+                      break;
+
+                    case ZS:
+                      (*z_zevct)++;
+                      break;
+
+                    case TS:
+                      (*t_zevct)++;
+                      break;
+
+                    case NS:
+                      (*n_zevct)++;
+                      break;
+
+                    case HS:
+                      (*h_zevct)++;
+                      break;
+
+                    case BS:
+                      (*b_zevct)++;
+                      break;
+
+                    case DS:
+                      (*d_zevct)++;
+                      break;
+
+                    case XS:
+                      (*x_zevct)++;
+                      break;
+
+                    default:
+                      cout << "Illegal stream " << (int)(ret.stream);
+                      assert(1);
+                  }
+                }
+              }
+            }
+            else
+            {
+              assert(ret.fate == CACHE_ACCESS_HIT);
+
+              per_rrpv_hit[ret.stream][ret.last_rrpv]++;
+
+              /* Issue callback for reuse */
+              if (reuse_ct_cbk)
+              {
+                reuse_ct_cbk->CacheAccessHitCbk(info, ret, indx, per_set_access[indx], per_set_evct[indx]);
+              }
+
+              if (reuse_cc_cbk)
+              {
+                reuse_cc_cbk->CacheAccessHitCbk(info, ret, indx, per_set_access[indx], per_set_evct[indx]);
+              }
+
+              if (reuse_bt_cbk)
+              {
+                reuse_bt_cbk->CacheAccessHitCbk(info, ret, indx, per_set_access[indx], per_set_evct[indx]);
+              }
+
+              if (reuse_bb_cbk)
+              {
+                reuse_bb_cbk->CacheAccessHitCbk(info, ret, indx, per_set_access[indx], per_set_evct[indx]);
+              }
+
+              if (reuse_zt_cbk)
+              {
+                reuse_zt_cbk->CacheAccessHitCbk(info, ret, indx, per_set_access[indx], per_set_evct[indx]);
+              }
+
+              if (reuse_zz_cbk)
+              {
+                reuse_zz_cbk->CacheAccessHitCbk(info, ret, indx, per_set_access[indx], per_set_evct[indx]);
+              }
+
+              if (reuse_cb_cbk)
+              {
+                reuse_cb_cbk->CacheAccessHitCbk(info, ret, indx, per_set_access[indx], per_set_evct[indx]);
+              }
+
+              if (reuse_tt_cbk)
+              {
+                reuse_tt_cbk->CacheAccessHitCbk(info, ret, indx, per_set_access[indx], per_set_evct[indx]);
+              }
+
+              /* Update C, Z, T epoch counters */
+              if (info.stream == ret.stream && 
+                  (ret.stream == CS || ret.stream == ZS || ret.stream == TS))
+              {
+                updateEpochHitCounters(ret);
+              }
+
+              /* Update stats for incoming stream */
+              if (info.stream != ret.stream)
+              {
                 if (info.stream >= PS && info.stream <= PS + MAX_CORES - 1)
                 {
-                  (*p_access)++;
+                  (*p_xhit)++;
+                  (*p_blocks)++;
                 }
                 else
                 {
                   switch (info.stream)
                   {
                     case IS:
-                      (*i_access)++;
+                      (*i_xhit)++;
+                      (*i_blocks)++;
                       break;
 
                     case CS:
-                      (*c_access)++;
+                      (*c_xhit)++;
+                      (*c_blocks)++;
 
-                      if (info.spill)
+                      switch (ret.stream)
                       {
-                        (*c_cprod)++;
+                        case ZS:
+                          (*c_zchit)++;
+                          break;
+
+                        case TS:
+                          (*c_tchit)++;
+                          break;
+
+                        case BS:
+                          (*c_bchit)++;
+                          break;
+
+                        case DS:
+                          (*c_dchit)++;
+                          break;
                       }
+
                       break;
 
                     case ZS:
-                      (*z_access)++;
+                      (*z_xhit)++;
+                      (*z_blocks)++;
+
+                      switch (ret.stream)
+                      {
+                        case CS:
+                          (*z_czhit)++;
+                          break;
+
+                        case TS:
+                          (*z_tzhit)++;
+                          break;
+
+                        case BS:
+                          (*z_bzhit)++;
+                          break;
+                      }
+
                       break;
 
                     case TS:
-                      (*t_access)++;
+                      (*t_xhit)++;
+                      (*t_blocks)++;
+
+                      assert(info.spill == 0);
+
+                      switch (ret.stream)
+                      {
+                        case CS:
+                          (*t_cthit)++;
+
+                          if (ret.dirty)
+                          {
+                            assert(info.spill == 0);
+                            assert(c_ccons->getValue(1) < c_cprod->getValue(1));
+                            (*c_ccons)++;
+                          }
+                          break;
+
+                        case ZS:
+                          (*t_zthit)++;
+                          break;
+
+                        case BS:
+                          (*t_bthit)++;
+
+                          if (ret.dirty)
+                          {
+                            assert(info.spill == 0 && info.fill == 1);
+                            assert(b_bcons->getValue(1) < b_bprod->getValue(1));
+                            (*b_bcons)++;
+                          }
+                          break;
+                      }
+
                       break;
 
                     case NS:
-                      (*n_access)++;
+                      (*n_xhit)++;
+                      (*n_blocks)++;
                       break;
 
                     case HS:
-                      (*h_access)++;
+                      (*h_xhit)++;
+                      (*h_blocks)++;
                       break;
 
                     case BS:
-                      (*b_access)++;
+                      (*b_xhit)++;
+                      (*b_blocks)++;
 
-                      if (info.spill)
+                      switch (ret.stream)
                       {
-                        (*b_bprod)++;
+                        case CS:
+                          (*b_cbhit)++;
+                          break;
+
+                        case TS:
+                          (*b_tbhit)++;
+                          break;
+
+                        case ZS:
+                          (*b_zbhit)++;
+                          break;
                       }
                       break;
 
                     case DS:
-                      (*d_access)++;
+                      (*d_xhit)++;
+                      (*d_blocks)++;
+
+                      switch (ret.stream)
+                      {
+                        case CS:
+                          (*d_cdhit)++;
+                          break;
+
+                        case TS:
+                          (*d_tdhit)++;
+                          break;
+
+                        case ZS:
+                          (*d_zdhit)++;
+                          break;
+
+                        case BS:
+                          (*d_bdhit)++;
+                          break;
+                      }
+
                       break;
 
                     case XS:
-                      (*x_access)++;
+                      (*x_xhit)++;
+                      (*x_blocks)++;
+
                       break;
 
                     default:
@@ -2764,26 +2753,179 @@ int main(int argc, char **argv)
                   }
                 }
 
+                if (ret.stream >= PS && ret.stream <= PS + MAX_CORES - 1)
+                {
+                  assert(p_blocks->getValue());
+                  (*p_blocks)--;
+                }
+                else
+                {
+                  switch (ret.stream)
+                  {
+                    case IS:
+                      assert(i_blocks->getValue());
+                      (*i_blocks)--;
+                      break;
+
+                    case CS:
+
+                      assert(c_blocks->getValue(1) && info.stream != CS);
+                      (*c_blocks)--;
+#if 0
+                      assert(cache_count_block(l3cache.cache, CS) == c_blocks->getValue());
+#endif
+                      break;
+
+                    case ZS:
+                      assert(z_blocks->getValue());
+                      (*z_blocks)--;
+                      break;
+
+                    case TS:
+                      assert(t_blocks->getValue());
+                      (*t_blocks)--;
+                      break;
+
+                    case NS:
+                      assert(n_blocks->getValue());
+                      (*n_blocks)--;
+                      break;
+
+                    case HS:
+                      assert(h_blocks->getValue());
+                      (*h_blocks)--;
+                      break;
+
+                    case BS:
+                      assert(b_blocks->getValue());
+                      (*b_blocks)--;
+                      break;
+
+                    case DS:
+                      assert(d_blocks->getValue());
+                      (*d_blocks)--;
+                      break;
+
+                    case XS:
+                      assert(x_blocks->getValue());
+                      (*x_blocks)--;
+                      break;
+
+                    default:
+                      cout << "Illegal stream " << (int)ret.stream << " for address ";
+                      cout << hex << info.address << " type : ";
+                      cout << dec << (int)info.fill << " spill: " << dec << (int)info.spill;
+                      assert(0);
+                  }
+                }
+              }
+            }
+
+            if (info.stream == CS || info.stream == ZS || info.stream == TS)
+            {
+              if (ret.fate == CACHE_ACCESS_MISS || ret.fate == CACHE_ACCESS_RPLC)
+              {
+                updateEpochFillCounters(info.stream, 0);
+              }
+              else
+              {
+                if (ret.epoch != 3)
+                {
+                  if (info.stream != ret.stream)
+                  {
+                    updateEpochFillCounters(info.stream, 0);
+                  }
+                  else
+                  {
+                    updateEpochFillCounters(info.stream, ret.epoch + 1);
+                  }
+                }
+              }
+            }
+
+            if (info.stream >= PS && info.stream <= PS + MAX_CORES - 1)
+            {
+              (*p_access)++;
+            }
+            else
+            {
+              switch (info.stream)
+              {
+                case IS:
+                  (*i_access)++;
+                  break;
+
+                case CS:
+                  (*c_access)++;
+
+                  if (info.spill)
+                  {
+                    (*c_cprod)++;
+                  }
+                  break;
+
+                case ZS:
+                  (*z_access)++;
+                  break;
+
+                case TS:
+                  (*t_access)++;
+                  break;
+
+                case NS:
+                  (*n_access)++;
+                  break;
+
+                case HS:
+                  (*h_access)++;
+                  break;
+
+                case BS:
+                  (*b_access)++;
+
+                  if (info.spill)
+                  {
+                    (*b_bprod)++;
+                  }
+                  break;
+
+                case DS:
+                  (*d_access)++;
+                  break;
+
+                case XS:
+                  (*x_access)++;
+                  break;
+
+                default:
+                  cout << "Illegal stream " << (int)info.stream << " for address ";
+                  cout << hex << info.address << " type : ";
+                  cout << dec << (int)info.fill << " spill: " << dec << (int)info.spill;
+                  assert(0);
+              }
+            }
+
 #define CH (4)
 
-                if (!inscnt)
-                  sm->dumpNames("CacheSize", CH, stats_stream);
+            if (!inscnt)
+              sm->dumpNames("CacheSize", CH, stats_stream);
 
-                inscnt++;
-                (*all_access)++;
+            inscnt++;
+            (*all_access)++;
 
-                if (!(inscnt % 1000000))
-                {
-                  cout << ".";
-                  std::cout.flush();
+            if (!(inscnt % 10000))
+            {
+#if 0
+              cout << ".";
+              std::cout.flush();
+#endif
 
+              sm->dumpValues(cache_sizes[c_cache], 0, CH, stats_stream);
+              periodicReset();
 
-                  sm->dumpValues(cache_sizes[c_cache], 0, CH, stats_stream);
-                  periodicReset();
-
-                }
+            }
 #undef CH
-              }
+          }
         }
         else
         {
@@ -2797,9 +2939,19 @@ int main(int argc, char **argv)
         reuse_ct_cbk->ExitCbk();
       }
 
+      if (reuse_cc_cbk)
+      {
+        reuse_cc_cbk->ExitCbk();
+      }
+
       if (reuse_bt_cbk)
       {
         reuse_bt_cbk->ExitCbk();
+      }
+
+      if (reuse_bb_cbk)
+      {
+        reuse_bb_cbk->ExitCbk();
       }
 
       if (reuse_zt_cbk)
@@ -2807,9 +2959,19 @@ int main(int argc, char **argv)
         reuse_zt_cbk->ExitCbk();
       }
 
+      if (reuse_zz_cbk)
+      {
+        reuse_zz_cbk->ExitCbk();
+      }
+
       if (reuse_cb_cbk)
       {
         reuse_cb_cbk->ExitCbk();
+      }
+
+      if (reuse_tt_cbk)
+      {
+        reuse_tt_cbk->ExitCbk();
       }
 
       /* Free InterStreamReuse object */
@@ -2818,9 +2980,19 @@ int main(int argc, char **argv)
         delete reuse_ct_cbk;
       }
 
+      if (reuse_cc_cbk)
+      {
+        delete reuse_cc_cbk;
+      }
+
       if (reuse_bt_cbk)
       {
         delete reuse_bt_cbk;
+      }
+
+      if (reuse_bb_cbk)
+      {
+        delete reuse_bb_cbk;
       }
 
       if (reuse_zt_cbk)
@@ -2828,9 +3000,19 @@ int main(int argc, char **argv)
         delete reuse_zt_cbk;
       }
 
+      if (reuse_zz_cbk)
+      {
+        delete reuse_zz_cbk;
+      }
+
       if (reuse_cb_cbk)
       {
         delete reuse_cb_cbk;
+      }
+
+      if (reuse_tt_cbk)
+      {
+        delete reuse_tt_cbk;
       }
 
       /* Close statistics stream */
@@ -2849,7 +3031,9 @@ int main(int argc, char **argv)
         }
       }
 #endif
+
 #define CH (4)
+
       if (cache_count > 1 || (cache_count == 1 && way_count == 1))
       {
         sm->dumpValues(cache_sizes[c_cache], 0, CH, stats_stream);
@@ -2867,8 +3051,40 @@ int main(int argc, char **argv)
 
   /* Close statistics stream */
   closeStatisticsStream(stats_stream);
+  
+  printf("Eviction RRPV histogram\n");
+
+  for (ub4 i = 0; i <= TST; i++)
+  {
+    printf("Stream %d\n", i);
+
+    for (ub4 j = 0; j <= MAX_RRPV; j++)
+    {
+      printf("%d %lld\n", j, per_rrpv_evct[i][j]);
+    }
+
+    printf("\n");
+  }
+
+  printf("Hit RRPV histogram\n");
+
+  for (ub4 i = 0; i <= TST; i++)
+  {
+    printf("Stream %d\n", i);
+
+    for (ub4 j = 0; j <= MAX_RRPV; j++)
+    {
+      printf("%d %lld\n", j, per_rrpv_hit[i][j]);
+    }
+
+    printf("\n");
+  }
 
   return 0;
 }
 
+#undef USE_INTER_STREAM_CALLBACK
+#undef MAX_CORES
+#undef IS_SPILL_ALLOCATED
 #undef BLCKALIGN
+#undef MAX_RRPV

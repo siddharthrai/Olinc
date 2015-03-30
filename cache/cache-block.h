@@ -30,12 +30,12 @@ struct cache_block_t
   /* Flag set if block is produced by Blitter */
   unsigned char is_bt_block;
 
-  /* Flag set if block is produced by Color Writer */
+  /* Flag set if block is produced by color writer */
   unsigned char is_ct_block;
 
-  /* Flag set if block is produced by Depth unit */
+  /* Flag set if block is produced by depth unit */
   unsigned char is_zt_block;
-
+  
   /* Access made to this block, used for measuring maximum reuse */
   unsigned int access;
 
@@ -65,6 +65,7 @@ struct cache_block_t
   unsigned int color_transition;/* Number of CT or TC transitions */
   long long    x_stream_use;    /* X stream use of block */ 
   long long    s_stream_use;    /* X stream use of block */ 
+  int          last_rrpv;       /* Keeps track of last assigned RRPV */
 
   /* Cache block busy flag. When set this flag instructs the cache
    * replacement policy to not evict the block as there is a request

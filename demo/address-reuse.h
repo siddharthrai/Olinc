@@ -24,7 +24,7 @@ using namespace std;
 #define PAGE_SIZE     (4096)
 #define ACC_BUCKETS   (32)
 #define PHASE_ACCESS  (1 << 20)
-#define MAX_REUSE     (1024)
+#define MAX_REUSE     (4096)
 
 extern sb1 *stream_names[TST + 1];
 
@@ -37,26 +37,38 @@ typedef enum block_operation
 
 class ReuseInfo
 {
-  ub8             address;            /* Block address */
-  ub1             replacement;        /* Count of replacements */
-  block_operation last_operation;     /* Last operation on this block (Fill / reuse) */
-  vector<pair<ub8, ub8> > block_seq;  /* Sequence numbers of reuses to this blocks */
+  ub8             address;              /* Block address */
+  ub8             set_idx;              /* Cache set index of block */
+  ub1             replacement;          /* Count of replacements */
+  vector<pair<ub8, ub1> > eviction_seq; /* Replacement sequence and streams */
+  block_operation last_operation;       /* Last operation on this block (Fill / reuse) */
+  vector<ub8>     fill_seq;             /* Sequence numbers of reuses to this blocks */
+  vector<pair<ub8, ub8> > access_seq;   /* Sequence numbers of reuses to this blocks */
 
   public:
 
-  ReuseInfo(ub8 address_in, ub8 block_seq_in, ub8 g_block_seq_in)
+  ReuseInfo(ub8 address_in, ub8 set_idx_in)
   {
     address         = address_in;
     replacement     = 0;
     last_operation  = block_operation_unknown;
-
-    block_seq.push_back(pair<ub8, ub8>(block_seq_in, g_block_seq_in));
+    set_idx         = set_idx_in;
+#if 0
+    access_seq.push_back(pair<ub8, ub8>(block_seq_in, g_block_seq_in));
+    fill_seq.push_back(g_block_seq_in);
+#endif
   }
 
   /* Add a new sequence number */
-  void addSequence(ub8 block_seq_in, ub8 g_block_seq_in)
+  void addReuseSequence(ub8 access_seq_in, ub8 rplc_seq_in)
   {
-    block_seq.push_back(pair<ub8, ub8>(block_seq_in, g_block_seq_in));
+    access_seq.push_back(pair<ub8, ub8>(access_seq_in, rplc_seq_in));
+  }
+  
+  /* Add a new sequence number */
+  void addFillSequence(ub8 rplc_seq_in)
+  {
+    fill_seq.push_back(rplc_seq_in);
   }
   
   /* Set block operation */
@@ -74,13 +86,15 @@ class ReuseInfo
   /* Get number of reuses */
   ub8 getReuse()
   {
-    return block_seq.size();
+    return access_seq.size();
   }
   
   /* Increment replacement to the info */
-  void addReplacement()
+  void addReplacement(ub1 stream, ub8 eviction_seq_in)
   {
     assert(replacement < MAX_REUSE);
+    eviction_seq.push_back(pair<ub8, ub1>(eviction_seq_in, stream));
+
     replacement += 1;
   }
 
@@ -90,12 +104,40 @@ class ReuseInfo
     return replacement;
   }
   
+  /* Get number of replacements */
+  ub8 getSetIdx()
+  {
+    return set_idx;
+  }
+  
+  /* Print all sequence number */
+  void printFillSequence(gzofstream &out_stream)
+  {
+    vector<ub8>::iterator seq_itr;
+
+    for (seq_itr = fill_seq.begin(); seq_itr != fill_seq.end(); seq_itr++)
+    {
+      out_stream << *seq_itr << " ";
+    }
+  }
+
+  /* Print all sequence number */
+  void printEvictionSequence(gzofstream &out_stream)
+  {
+    vector<pair<ub8, ub1> >::iterator seq_itr;
+
+    for (seq_itr = eviction_seq.begin(); seq_itr != eviction_seq.end(); seq_itr++)
+    {
+      out_stream << seq_itr->first << ":" << (int)seq_itr->second << " ";
+    }
+  }
+
   /* Print all sequence number */
   void printSequence(gzofstream &out_stream, ub8 min_seq = 0)
   {
     vector<pair<ub8, ub8> >::iterator seq_itr;
 
-    for (seq_itr = block_seq.begin(); seq_itr != block_seq.end(); seq_itr++)
+    for (seq_itr = access_seq.begin(); seq_itr != access_seq.end(); seq_itr++)
     {
       out_stream << seq_itr->first - min_seq << " ";
     }
@@ -106,7 +148,7 @@ class ReuseInfo
   {
     vector<pair<ub8, ub8> >::iterator seq_itr;
 
-    for (seq_itr = block_seq.begin(); seq_itr != block_seq.end(); seq_itr++)
+    for (seq_itr = access_seq.begin(); seq_itr != access_seq.end(); seq_itr++)
     {
       out_stream << seq_itr->second - min_seq << " ";
     }
@@ -115,7 +157,7 @@ class ReuseInfo
   /* Get vector of sequences */
   vector<pair<ub8, ub8> > getSequence()
   {
-    return block_seq;
+    return access_seq;
   }
 };
 
@@ -273,16 +315,20 @@ class Region
 #undef LBSIZE
   }
 
-  void addBlock(ub8 address)
+  ub1 addBlock(ub8 address, ub8 set_idx)
   {
+    ub1 ret = FALSE;
+
     if (block_map.find(address) == block_map.end())
     {
-      block_map.insert(pair<ub8, ub8>(address, 1));
+      block_map.insert(pair<ub8, ub8>(address, set_idx));
+
+      ret = TRUE;
     }
 
     if (all_blocks.find(address) == all_blocks.end())
     {
-      all_blocks.insert(pair<ub8, ub8>(address, 1));
+      all_blocks.insert(pair<ub8, ub8>(address, set_idx));
     }
     
     /* Lookup and update region lru-table */
@@ -349,6 +395,8 @@ class Region
     }
 
 #undef ONLY_SET
+
+    return ret;
   }
   
   void lookupXStrmBlock(ub8 address, ub1 stream, ub1 real_hit)
@@ -459,7 +507,7 @@ class AddressMap
   ub8             x_address_seq;    /* Sequence number for CT access */
   ub8             xstrm_use;        /* #blocks used between src and tgt stream */
   ub8             xstrm_cache_use;  /* #blocks used between src and tgt stream from cache */
-  ub1             max_reuse_size;   /* max reuse among all reused blocks */
+  ub4             max_reuse_size;   /* max reuse among all reused blocks */
   ub8             next_x_block;     /* Next seq of x stream reuse */
   ub8             min_x_reuse_seq;  /* Minimum seq of CT reuse */
   ub8             max_x_reuse_seq;  /* Maximum seq of CT reuse */
@@ -467,6 +515,8 @@ class AddressMap
   map<ub8, ub8>   reuse_info;       /* Per-block CT reuse detail */
   gzofstream      out_stream;       /* Stream to dump reuse pattern */
   gzofstream      g_out_stream;     /* Stream to dump global reuse pattern */
+  gzofstream      f_out_stream;     /* Stream to dump fills */
+  gzofstream      e_out_stream;     /* Stream to dump replacements */
   RegionMap      *all_region_map;   /* Map of all regions in the reuse */
 
   public:
@@ -486,9 +536,21 @@ class AddressMap
 
     sb1 tracefile_name[100];
 
+    /* Open output stream for global sequence numbers */
+    assert(strlen("XStream-F-----stats.trace.csv.gz") + 1 < 100);
+    sprintf(tracefile_name, "XStream-F-%s-%s-stats.trace.csv.gz", 
+        stream_names[src_stream_in], stream_names[tgt_stream_in]);
+    f_out_stream.open(tracefile_name, ios::out | ios::binary);
+
+    if (!f_out_stream.is_open())
+    {
+      printf("Error opening output stream\n");
+      exit(EXIT_FAILURE);
+    }
+
     /* Open output stream */
-    assert(strlen("XSteam-----stats.trace.csv.gz") + 1 < 100);
-    sprintf(tracefile_name, "XSteam-%s-%s-stats.trace.csv.gz", 
+    assert(strlen("XStream-A-----stats.trace.csv.gz") + 1 < 100);
+    sprintf(tracefile_name, "XStream-A-%s-%s-stats.trace.csv.gz", 
         stream_names[src_stream_in], stream_names[tgt_stream_in]);
     out_stream.open(tracefile_name, ios::out | ios::binary);
 
@@ -499,12 +561,24 @@ class AddressMap
     }
 
     /* Open output stream for global sequence numbers */
-    assert(strlen("GXSteam-----stats.trace.csv.gz") + 1 < 100);
-    sprintf(tracefile_name, "GXSteam-%s-%s-stats.trace.csv.gz", 
+    assert(strlen("XStream-R-----stats.trace.csv.gz") + 1 < 100);
+    sprintf(tracefile_name, "XStream-R-%s-%s-stats.trace.csv.gz", 
         stream_names[src_stream_in], stream_names[tgt_stream_in]);
     g_out_stream.open(tracefile_name, ios::out | ios::binary);
 
     if (!g_out_stream.is_open())
+    {
+      printf("Error opening output stream\n");
+      exit(EXIT_FAILURE);
+    }
+
+    /* Open output stream for replacements */
+    assert(strlen("XStream-E-----stats.trace.csv.gz") + 1 < 100);
+    sprintf(tracefile_name, "XStream-E-%s-%s-stats.trace.csv.gz", 
+        stream_names[src_stream_in], stream_names[tgt_stream_in]);
+    e_out_stream.open(tracefile_name, ios::out | ios::binary);
+
+    if (!e_out_stream.is_open())
     {
       printf("Error opening output stream\n");
       exit(EXIT_FAILURE);
@@ -545,6 +619,12 @@ class AddressMap
 
     out_stream.close();
 
+    f_out_stream.close();
+
+    g_out_stream.close();
+
+    e_out_stream.close();
+
     delete all_region_map;
   }
   
@@ -567,7 +647,31 @@ class AddressMap
     }
   }
 
-  void update_x_stream_reuse(ub8 address)
+  void update_stream_use(ub8 address, ub8 set_idx, ub8 access, ub8 rplc)
+  {
+    map<ub8, ub8>::iterator reuse_itr;
+
+    ReuseInfo *block_reuse_info;
+
+    /* Add sequence number to x stream reuse map */
+    reuse_itr = reuse_info.find(address);
+    if (reuse_itr == reuse_info.end())
+    {
+      block_reuse_info = new ReuseInfo(address, set_idx);
+      reuse_info.insert(pair<ub8, ub8>(address, (ub8) (block_reuse_info)));
+      block_reuse_info->addFillSequence(rplc);
+    }
+    else
+    {
+      block_reuse_info = (ReuseInfo *)(reuse_itr->second);
+      assert(block_reuse_info);
+      assert(block_reuse_info->getSetIdx() == set_idx);
+
+      block_reuse_info->addFillSequence(rplc);
+    }
+  }
+
+  void update_x_stream_reuse(ub8 address, ub8 set_idx, ub8 access, ub8 rplc)
   {
     map<ub8, ub8>::iterator reuse_itr;
 
@@ -586,15 +690,18 @@ class AddressMap
     reuse_itr = reuse_info.find(address);
     if (reuse_itr == reuse_info.end())
     {
-      block_reuse_info = new ReuseInfo(address, x_address_seq, g_address_seq);
+      block_reuse_info = new ReuseInfo(address, set_idx);
       reuse_info.insert(pair<ub8, ub8>(address, (ub8) (block_reuse_info)));
+
+      block_reuse_info->addReuseSequence(access, rplc);
     }
     else
     {
       block_reuse_info = (ReuseInfo *)(reuse_itr->second);
       assert(block_reuse_info);
+      assert(block_reuse_info->getSetIdx() == set_idx);
 
-      block_reuse_info->addSequence(x_address_seq, g_address_seq);
+      block_reuse_info->addReuseSequence(access, rplc);
     }
     
     block_reuse_info->setOperation(block_operation_reuse);
@@ -603,7 +710,11 @@ class AddressMap
     if (block_reuse_info->getReuse() > max_reuse_size)
     {
       max_reuse_size = block_reuse_info->getReuse();
-      assert(max_reuse_size < MAX_REUSE);
+
+      if (max_reuse_size > MAX_REUSE)
+      {
+        max_reuse_size = MAX_REUSE - 1;
+      }
     }
 
     /* Update min max sequence seen by CT reuse */
@@ -622,11 +733,11 @@ class AddressMap
     x_address_seq++;
   }
 
-  void removeAddress(ub1 stream, ub8 address)
+  void removeAddress(ub1 stream, ub1 new_stream, ub8 address, ub8 set_idx, ub8 rplc)
   {
     map<ub1, ub8>::iterator map_itr;  /* Map iterator */
     Region *memory_region;
-    
+
     /* TODO: Block is not present in any other stream */
     if (stream == src_stream)
     {
@@ -646,7 +757,7 @@ class AddressMap
       ReuseInfo *block_reuse_info;
       map<ub8, ub8>::iterator reuse_itr;
 
-      /* Add sequence number to x stream reuse map */
+      /* Update reuse info */
       reuse_itr = reuse_info.find(address);
       if (reuse_itr != reuse_info.end())
       {
@@ -654,9 +765,11 @@ class AddressMap
         assert(block_reuse_info);
 
         /* If block is reused, increment replacement count */
+#if 0
         if (block_reuse_info->getOperation() == block_operation_reuse)
+#endif
         {
-          block_reuse_info->addReplacement();
+          block_reuse_info->addReplacement(new_stream, rplc);
         }
 
         /* Reset last block operation */
@@ -665,7 +778,7 @@ class AddressMap
     }
 
     /* TODO: Block is not present in any other stream */
-    if (stream == tgt_stream)
+    if (stream == tgt_stream && src_stream != tgt_stream)
     {
       map_itr = region_map.find(stream);
 
@@ -725,10 +838,13 @@ class AddressMap
     return TRUE;
   }
 
-  void addAddress(ub1 stream, ub8 address)
+  void addAddress(ub1 stream, ub8 address, ub8 set_idx, ub8 access, ub8 rplc)
   {
+    ub1 block_filled;                 /* TRUE is block is filled */
     map<ub1, ub8>::iterator map_itr;  /* Map iterator */
-    
+  
+    block_filled = FALSE;
+
     if (stream == src_stream)
     {
       map_itr = region_map.find(stream);
@@ -743,7 +859,11 @@ class AddressMap
         region_map.insert(pair<ub1, ub8>(stream, (ub8)memory_region));
 
         /* Add block to block map */
-        memory_region->addBlock(address);
+        if (memory_region->addBlock(address, set_idx) == TRUE)
+        {
+          block_filled = TRUE;
+          update_stream_use(address, set_idx, access, rplc);
+        }
       }
       else
       {
@@ -754,7 +874,11 @@ class AddressMap
         assert(memory_region->getStream() == stream);
 
         /* Add block to block map */
-        memory_region->addBlock(address);
+        if (memory_region->addBlock(address, set_idx) == TRUE)
+        {
+          block_filled = TRUE;
+          update_stream_use(address, set_idx, access, rplc);
+        }
 
         if (memory_region->getStart() > address)
         {
@@ -767,12 +891,12 @@ class AddressMap
             memory_region->setEnd(address);
           }
         }
-
       }
+
       g_address_seq++;
     }
 
-    if (stream == tgt_stream)
+    if (stream == tgt_stream && block_filled == FALSE)
     {
       Region *src_memory_region;
 
@@ -787,7 +911,7 @@ class AddressMap
 
         if (src_memory_region->isBlockPresent(address))
         {
-          update_x_stream_reuse(address);
+          update_x_stream_reuse(address, set_idx, access, rplc);
 
           src_memory_region->lookupXStrmBlock(address, stream, TRUE);
         }
@@ -802,6 +926,228 @@ class AddressMap
 
       g_address_seq++;
     }
+  }
+
+  void printFillMap()
+  {
+    map<ub1, ub8>::iterator map_itr;
+    Region  *current_region;
+    Region  *src_region;
+    ub4     *reused_blocks;
+
+    reused_blocks = new ub4[max_reuse_size + 1];
+    assert(reused_blocks);
+
+    memset(reused_blocks, 0, sizeof(ub4) * (max_reuse_size + 1));
+
+    for (map_itr = region_map.begin(); map_itr != region_map.end(); map_itr++)
+    {
+      current_region = (Region *)(map_itr->second);
+      assert(current_region);
+
+      f_out_stream << std::setw(10) << std::left;
+      f_out_stream << (int)(map_itr->first);
+      f_out_stream << std::setw(10) << std::left;
+      f_out_stream << current_region->getBlockCount();
+      f_out_stream << std::setw(12) << std::left;
+      f_out_stream << current_region->getStart() << " " << current_region->getEnd() << endl;
+    }
+
+    f_out_stream << "Src stream " << (ub4)src_stream << endl;
+
+    map_itr = region_map.find(src_stream); 
+    if (map_itr != region_map.end())
+    {
+      f_out_stream << "Src blocks " << ((Region *)(map_itr->second))->getAllBlockCount() << endl;
+    }
+    else
+    {
+      f_out_stream << "Src blocks " << 0 << endl;
+    }
+
+    f_out_stream << "Tgt stream " << (ub4)tgt_stream << endl;
+
+    map_itr = region_map.find(tgt_stream); 
+    if (map_itr != region_map.end())
+    {
+      f_out_stream << "Tgt blocks " << ((Region *)(map_itr->second))->getAllBlockCount() << endl;
+    }
+    else
+    {
+      f_out_stream << "Src blocks " << 0 << endl;
+    }
+
+    f_out_stream << "Reuse " << xstrm_use << endl;
+    f_out_stream << "Reused blocks " << reuse_info.size() << endl;
+
+    ReuseInfo *current_reuse_info;
+    map<ub8, ub8>::iterator reuse_itr;
+
+    for(reuse_itr = reuse_info.begin(); reuse_itr != reuse_info.end(); reuse_itr++)
+    {
+      current_reuse_info = (ReuseInfo *)reuse_itr->second;
+
+      if (current_reuse_info->getReuse() < max_reuse_size)
+      {
+        reused_blocks[current_reuse_info->getReuse()] += 1;
+      }
+      else
+      {
+        reused_blocks[max_reuse_size] += 1;
+      }
+    }
+
+    /* Printing xstream block reuse histogram */
+    f_out_stream << "max reuse " << (ub4)max_reuse_size << endl;
+
+    assert(max_reuse_size < MAX_REUSE);
+
+    f_out_stream << "[ReuseHistogram]" << endl;
+
+    for (ub4 i = 1; i <= max_reuse_size; i++)
+    {
+      f_out_stream << std::setw(10) << std::left; 
+      f_out_stream << (ub4)i << reused_blocks[i] << endl;
+    }
+
+    f_out_stream << "Printing xstream resue blocks" << endl;
+    f_out_stream << "Min sequence " << min_x_reuse_seq << endl;
+    f_out_stream << "Max sequence " << max_x_reuse_seq << endl;
+
+    /* Get the region of source stream */
+    map_itr = region_map.find(src_stream);
+
+    if (map_itr != region_map.end())
+    {
+      src_region = (Region *)map_itr->second;
+
+      ub8 last_block = 0;
+
+      /* For all blocks in source stream print reuse info for reused blocks */
+      for(reuse_itr = reuse_info.begin(); reuse_itr != reuse_info.end(); reuse_itr++)
+      {
+        current_reuse_info = (ReuseInfo *)(reuse_itr->second);
+        if (current_reuse_info->getReuse() > 0)
+        {
+          f_out_stream << reuse_itr->first << " | " << current_reuse_info->getSetIdx() << " | " << current_reuse_info->getReplacements() << " | ";
+          current_reuse_info->printFillSequence(f_out_stream);
+          f_out_stream << endl;
+        }
+      }
+    }
+
+    delete [] reused_blocks;
+  }
+
+  void printEvictionMap()
+  {
+    map<ub1, ub8>::iterator map_itr;
+    Region  *current_region;
+    Region  *src_region;
+    ub4     *reused_blocks;
+
+    reused_blocks = new ub4[max_reuse_size + 1];
+    assert(reused_blocks);
+
+    memset(reused_blocks, 0, sizeof(ub4) * (max_reuse_size + 1));
+
+    for (map_itr = region_map.begin(); map_itr != region_map.end(); map_itr++)
+    {
+      current_region = (Region *)(map_itr->second);
+      assert(current_region);
+
+      e_out_stream << std::setw(10) << std::left;
+      e_out_stream << (int)(map_itr->first);
+      e_out_stream << std::setw(10) << std::left;
+      e_out_stream << current_region->getBlockCount();
+      e_out_stream << std::setw(12) << std::left;
+      e_out_stream << current_region->getStart() << " " << current_region->getEnd() << endl;
+    }
+
+    e_out_stream << "Src stream " << (ub4)src_stream << endl;
+
+    map_itr = region_map.find(src_stream); 
+    if (map_itr != region_map.end())
+    {
+      e_out_stream << "Src blocks " << ((Region *)(map_itr->second))->getAllBlockCount() << endl;
+    }
+    else
+    {
+      e_out_stream << "Src blocks " << 0 << endl;
+    }
+
+    e_out_stream << "Tgt stream " << (ub4)tgt_stream << endl;
+
+    map_itr = region_map.find(tgt_stream); 
+    if (map_itr != region_map.end())
+    {
+      e_out_stream << "Tgt blocks " << ((Region *)(map_itr->second))->getAllBlockCount() << endl;
+    }
+    else
+    {
+      e_out_stream << "Src blocks " << 0 << endl;
+    }
+
+    e_out_stream << "Reuse " << xstrm_use << endl;
+    e_out_stream << "Reused blocks " << reuse_info.size() << endl;
+
+    ReuseInfo *current_reuse_info;
+    map<ub8, ub8>::iterator reuse_itr;
+
+    for(reuse_itr = reuse_info.begin(); reuse_itr != reuse_info.end(); reuse_itr++)
+    {
+      current_reuse_info = (ReuseInfo *)reuse_itr->second;
+
+      if (current_reuse_info->getReuse() < max_reuse_size)
+      {
+        reused_blocks[current_reuse_info->getReuse()] += 1;
+      }
+      else
+      {
+        reused_blocks[max_reuse_size] += 1;
+      }
+    }
+
+    /* Printing xstream block reuse histogram */
+    e_out_stream << "max reuse " << (ub4)max_reuse_size << endl;
+
+    assert(max_reuse_size < MAX_REUSE);
+
+    e_out_stream << "[ReuseHistogram]" << endl;
+
+    for (ub4 i = 1; i <= max_reuse_size; i++)
+    {
+      e_out_stream << std::setw(10) << std::left; 
+      e_out_stream << (ub4)i << reused_blocks[i] << endl;
+    }
+
+    e_out_stream << "Printing xstream resue blocks" << endl;
+    e_out_stream << "Min sequence " << min_x_reuse_seq << endl;
+    e_out_stream << "Max sequence " << max_x_reuse_seq << endl;
+    
+    /* Get the region of source stream */
+    map_itr = region_map.find(src_stream);
+
+    if (map_itr != region_map.end())
+    {
+      src_region = (Region *)map_itr->second;
+
+      ub8 last_block = 0;
+
+      /* For all blocks in source stream print reuse info for reused blocks */
+      for(reuse_itr = reuse_info.begin(); reuse_itr != reuse_info.end(); reuse_itr++)
+      {
+        current_reuse_info = (ReuseInfo *)(reuse_itr->second);
+        if (current_reuse_info->getReuse() > 0)
+        {
+          e_out_stream << reuse_itr->first << " | " << current_reuse_info->getSetIdx() << " | " << current_reuse_info->getReplacements() << " | ";
+          current_reuse_info->printEvictionSequence(e_out_stream);
+          e_out_stream << endl;
+        }
+      }
+    }
+
+    delete [] reused_blocks;
   }
 
   void printGlobalMap()
@@ -862,7 +1208,15 @@ class AddressMap
     for(reuse_itr = reuse_info.begin(); reuse_itr != reuse_info.end(); reuse_itr++)
     {
       current_reuse_info = (ReuseInfo *)reuse_itr->second;
-      reused_blocks[current_reuse_info->getReuse()] += 1;
+
+      if (current_reuse_info->getReuse() < max_reuse_size)
+      {
+        reused_blocks[current_reuse_info->getReuse()] += 1;
+      }
+      else
+      {
+        reused_blocks[max_reuse_size] += 1;
+      }
     }
 
     /* Printing xstream block reuse histogram */
@@ -872,7 +1226,7 @@ class AddressMap
 
     g_out_stream << "[ReuseHistogram]" << endl;
 
-    for (ub1 i = 1; i <= max_reuse_size; i++)
+    for (ub4 i = 1; i <= max_reuse_size; i++)
     {
       g_out_stream << std::setw(10) << std::left; 
       g_out_stream << (ub4)i << reused_blocks[i] << endl;
@@ -894,11 +1248,11 @@ class AddressMap
       /* For all blocks in source stream print reuse info for reused blocks */
       for(reuse_itr = reuse_info.begin(); reuse_itr != reuse_info.end(); reuse_itr++)
       {
-        current_reuse_info = (ReuseInfo *)reuse_itr->second;
+        current_reuse_info = (ReuseInfo *)(reuse_itr->second);
         if (current_reuse_info->getReuse() > 0)
         {
-          g_out_stream << reuse_itr->first << " | " << current_reuse_info->getReplacements() << " | ";
-          current_reuse_info->printGlobalSequence(g_out_stream, min_x_reuse_seq);
+          g_out_stream << reuse_itr->first << " | " << current_reuse_info->getSetIdx() << " | " << current_reuse_info->getReplacements() << " | ";
+          current_reuse_info->printGlobalSequence(g_out_stream);
           g_out_stream << endl;
         }
 
@@ -937,7 +1291,7 @@ class AddressMap
       }
     }
 
-    delete reused_blocks;
+    delete [] reused_blocks;
   }
 
   void printMap()
@@ -973,8 +1327,16 @@ class AddressMap
 
     for(reuse_itr = reuse_info.begin(); reuse_itr != reuse_info.end(); reuse_itr++)
     {
-      current_reuse_info = (ReuseInfo *)reuse_itr->second;
-      reused_blocks[current_reuse_info->getReuse()] += 1;
+      current_reuse_info = (ReuseInfo *)(reuse_itr->second);
+
+      if (current_reuse_info->getReuse() < max_reuse_size)
+      {
+        reused_blocks[current_reuse_info->getReuse()] += 1;
+      }
+      else
+      {
+        reused_blocks[max_reuse_size] += 1;
+      }
     }
 
     /* Printing xstream block reuse histogram */
@@ -984,7 +1346,7 @@ class AddressMap
 
     out_stream << "[ReuseHistogram]" << endl;
 
-    for (ub1 i = 1; i <= max_reuse_size; i++)
+    for (ub4 i = 1; i <= max_reuse_size; i++)
     {
       out_stream << std::setw(10) << std::left; 
       out_stream << (ub4)i << reused_blocks[i] << endl;
@@ -999,20 +1361,23 @@ class AddressMap
       current_reuse_info = (ReuseInfo *)reuse_itr->second;
       if (current_reuse_info->getReuse() > 0)
       {
-        out_stream << reuse_itr->first << " | " << (reuse_itr->first / PAGE_SIZE) << " | " 
+        out_stream << reuse_itr->first << " | " << current_reuse_info->getSetIdx() << " | " 
           << current_reuse_info->getReplacements() << " | ";
         current_reuse_info->printSequence(out_stream);
         out_stream << endl;
       }
-
+#if 0
       /* Collect region wise data */
       all_region_map->addBlock(reuse_itr->first, current_reuse_info->getReuse(), 
           current_reuse_info->getReplacements());
+#endif
     }
 
-    delete reused_blocks;
+    delete [] reused_blocks;
 
     printGlobalMap();
+    printEvictionMap();
+    printFillMap();
   }
 };
 
@@ -1020,5 +1385,6 @@ class AddressMap
 #undef PAGE_SIZE
 #undef ACC_BUCKETS
 #undef PHASE_ACCESS
+#undef MAX_REUSE
 
 #endif

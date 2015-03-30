@@ -189,6 +189,12 @@ typedef enum cache_policy_t
         /* Insertion at MAXRRPV - 1, eviction form MAXRRPV */
         cache_policy_srript,
         
+        /* Uses a dead block predictor for aging */
+        cache_policy_srripdbp,
+        
+        /* SRRIP with modified aging */
+        cache_policy_srripsage,
+        
         /* Bimodal insertion, eviction from MAXRRPV */
         cache_policy_brrip,
         
@@ -235,7 +241,15 @@ typedef enum cache_policy_t
 
         /* Phase aware SRRIP */
         cache_policy_pasrrip,
+
+        /* X stream SRRIP */
+        cache_policy_xsp,
         
+        /* X stream SRRIP */
+        cache_policy_xsppin,
+        
+        /* X stream with DBP */
+        cache_policy_xspdbp
 }cache_policy_t;
 
 typedef struct list_head_t

@@ -70,6 +70,8 @@ class InterStreamReuse
   AddressMap        *address_map;         /* Inter stream reuse map */
   RegionTable       *region_table;        /* Region table */
   ub1               use_va;               /* True, if virtual address is used */
+  ub1               src_stream;           /* Source stream */
+  ub1               tgt_stream;           /* Target stream */
 
   public:
 
@@ -98,8 +100,58 @@ class InterStreamReuse
     address_map   = new AddressMap(src, dst);
     region_table  = new RegionTable(src, dst);
     use_va        = use_va_in;
+    src_stream    = src;
+    tgt_stream    = dst;
   }
   
+  /*
+   *
+   * NAME
+   *  
+   *  Get source stream 
+   *
+   * DESCRIPTION
+   *  
+   *  Return source stream 
+   *
+   * PARAMETERS
+   *  
+   *  Nothing
+   *
+   * RETURNS
+   *
+   *  Nothing 
+   */
+
+  ub1 GetSourceStream()
+  {
+    return src_stream;
+  }
+
+  /*
+   *
+   * NAME
+   *  
+   *  Get target stream 
+   *
+   * DESCRIPTION
+   *  
+   *  Returns target stream 
+   *
+   * PARAMETERS
+   *  
+   *  Nothing
+   *
+   * RETURNS
+   *
+   *  Nothing 
+   */
+
+  ub1 GetTargetStream()
+  {
+    return tgt_stream;
+  }
+
   /*
    *
    * NAME
@@ -165,7 +217,7 @@ class InterStreamReuse
    *  Nothing 
    */
 
-  void CacheAccessBeginCbk(memory_trace info);
+  void CacheAccessBeginCbk(memory_trace info, ub8 set_idx, ub8 access, ub8 rplc);
 
   /*
    *
@@ -186,7 +238,7 @@ class InterStreamReuse
    *  Nothing 
    */
 
-  void CacheAccessEndCbk(memory_trace info);
+  void CacheAccessEndCbk(memory_trace info, ub8 set_idx, ub8 rplc);
 
   /*
    *
@@ -208,7 +260,7 @@ class InterStreamReuse
    *  Nothing 
    */
 
-  void CacheAccessHitCbk(memory_trace info, cache_access_status status);
+  void CacheAccessHitCbk(memory_trace info, cache_access_status status, ub8 set_idx, ub8 access, ub8 rplc);
 
   /*
    *
@@ -229,7 +281,7 @@ class InterStreamReuse
    *  Nothing 
    */
 
-  void CacheAccessMissCbk(memory_trace info);
+  void CacheAccessMissCbk(memory_trace info, ub8 set_idx, ub8 rplc);
 
   /*
    *
@@ -251,7 +303,7 @@ class InterStreamReuse
    *  Nothing 
    */
 
-  void CacheAccessReplaceCbk(memory_trace info, cache_access_status status);
+  void CacheAccessReplaceCbk(memory_trace info, cache_access_status status, ub8 set_idx, ub8 access, ub8 rplc);
 
   /*
    *
