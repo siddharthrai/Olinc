@@ -32,9 +32,11 @@
 #define FOLLOWER_SET            (1)
 #define BYPASS_RRPV             (-1)
 #define PHASE_BITS              (15)
+
 #if 0
 #define PHASE_SIZE              (1 << PHASE_BITS)
 #endif
+
 #define PHASE_SIZE              (10000)
 
 #define CACHE_UPDATE_BLOCK_STATE(block, tag, va, state_in)        \
@@ -468,7 +470,7 @@ void cache_init_srripsage(int set_indx, struct cache_params *params,
     SAT_CTR_INI(global_data->tex_e1_hit_ctr, 8, 0, 255);   /* Texture epoch 1 hits */
 
     global_data->bm_ctr       = 0;
-    global_data->bm_thr       = 4;
+    global_data->bm_thr       = 32;
     global_data->access_count = 0;
     
     /* Set default value for each stream recency threshold */
@@ -478,9 +480,9 @@ void cache_init_srripsage(int set_indx, struct cache_params *params,
     }
 
     /* Override value for each Color and Depth */
-    global_data->rcy_thr[CS]  = 8;
-    global_data->rcy_thr[ZS]  = 8;
-    global_data->rcy_thr[TS]  = 6;
+    global_data->rcy_thr[CS]  = 2;
+    global_data->rcy_thr[ZS]  = 16;
+    global_data->rcy_thr[TS]  = 1;
 
     memset(global_data->per_stream_fill, 0, sizeof(ub8) * TST);
     memset(global_data->per_stream_hit, 0, sizeof(ub8) * TST);
@@ -626,6 +628,7 @@ end:
       }
     }
 #endif
+
     memset(global_data->per_stream_fill, 0, sizeof(ub8) * TST);
     memset(global_data->per_stream_hit, 0, sizeof(ub8) * TST);
     global_data->access_count = 0;
@@ -660,7 +663,7 @@ void cache_fill_block_srripsage(srripsage_data *policy_data,
     /* Get RRPV to be assigned to the new block */
     rrpv = cache_get_fill_rrpv_srripsage(policy_data, global_data, info);
 #if 0
-    if (info && info->spill == TRUE)
+    if (info && info->stream == CS)
     {
       rrpv = SRRIPSAGE_DATA_SPILL_RRPV(policy_data);
     }
@@ -694,9 +697,23 @@ void cache_fill_block_srripsage(srripsage_data *policy_data,
       }
 
       /* Insert block in to the corresponding RRPV queue */
-      CACHE_APPEND_TO_QUEUE(block, 
-          SRRIPSAGE_DATA_VALID_HEAD(policy_data)[rrpv], 
-          SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv]);
+#if 0
+      if (info->stream != CS || (info->stream == CS && rrpv != SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1))
+      if (rrpv != SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
+      if (info->stream == CS && info->spill == TRUE && rrpv != SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
+#endif
+      if (info->stream != CS && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
+      {
+        CACHE_APPEND_TO_QUEUE(block, 
+            SRRIPSAGE_DATA_VALID_HEAD(policy_data)[rrpv], 
+            SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv]);
+      }
+      else
+      {
+        CACHE_PREPEND_TO_QUEUE(block, 
+            SRRIPSAGE_DATA_VALID_HEAD(policy_data)[rrpv], 
+            SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv]);
+      }
     }
   }
 }
@@ -709,7 +726,7 @@ int cache_replace_block_srripsage(srripsage_data *policy_data, srripsage_gdata *
 
   /* Remove a nonbusy block from the tail */
   unsigned int min_wayid = ~(0);
-  
+#if 0  
   lrublock = NULL;
 
   /* Get the LRU block */
@@ -730,7 +747,8 @@ int cache_replace_block_srripsage(srripsage_data *policy_data, srripsage_gdata *
       }
     }
   }
-    
+#endif    
+
   {
     assert(policy_data->following == cache_policy_srripsage || policy_data->following == cache_policy_srrip);
 
@@ -770,10 +788,8 @@ int cache_replace_block_srripsage(srripsage_data *policy_data, srripsage_gdata *
         CACHE_SRRIPSAGE_AGELRU(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
             SRRIPSAGE_DATA_VALID_TAIL(policy_data), policy_data, global_data);
 #endif
-
         CACHE_SRRIPSAGE_AGEBLOCK(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
             SRRIPSAGE_DATA_VALID_TAIL(policy_data), rrpv);
-
 #if 0
         CACHE_SRRIPSAGE_INCREMENT_RRPV(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
             SRRIPSAGE_DATA_VALID_TAIL(policy_data), rrpv);
@@ -845,6 +861,17 @@ void cache_access_block_srripsage(srripsage_data *policy_data,
 #endif
 
     new_rrpv = cache_get_new_rrpv_srripsage(policy_data, global_data, info, way, old_rrpv);
+#if 0    
+    if (blk->stream == BS && info->stream == TS)
+    {
+      new_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data);
+    }
+
+    if (blk->stream == CS && info->stream == TS && old_rrpv == 0)
+    {
+      new_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data);
+    }
+#endif
 
     /* Update block queue if block got new RRPV */
     if (new_rrpv != old_rrpv)
@@ -900,9 +927,9 @@ int cache_get_fill_rrpv_srripsage(srripsage_data *policy_data,
   int ret_rrpv;
   int tex_alloc;
   struct cache_block_t *block;
-  
+
   tex_alloc = FALSE;
-  
+
   block = NULL;
 
   block = SRRIPSAGE_DATA_VALID_HEAD(policy_data)[0].head;
@@ -931,6 +958,7 @@ int cache_get_fill_rrpv_srripsage(srripsage_data *policy_data,
   switch (info->stream)
   {
     case TS:
+#if 0
       if (global_data->bm_ctr == 0)
       {
         ret_rrpv = !SRRIPSAGE_DATA_MAX_RRPV(policy_data);
@@ -940,7 +968,6 @@ int cache_get_fill_rrpv_srripsage(srripsage_data *policy_data,
         ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
       }
 
-#if 0
 #define HI_CT0(data) ((float)SAT_CTR_VAL(data->tex_e0_hit_ctr))
 #define FI_CT0(data) ((float)SAT_CTR_VAL(data->tex_e0_fill_ctr))
 
@@ -953,38 +980,67 @@ int cache_get_fill_rrpv_srripsage(srripsage_data *policy_data,
       else
       {
         /* Insert block with 0 RRPV */
-        ret_rrpv = !((SRRIPSAGE_DATA_MAX_RRPV(policy_data)));
+        ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
 
         tex_alloc = TRUE;
       }
 
 #undef HI_CT0
 #undef FI_CT0
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
+
 #endif
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
       break;
 
     case BS:
+#if 0
+      if (info->spill == TRUE)
+      {
+        ret_rrpv = !SRRIPSAGE_DATA_MAX_RRPV(policy_data);
+      }
+      else
+#endif
+      {
+        ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
+      }
+      break;
+
+    case CS:
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
+      break;
+
+    case ZS:
       ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
       break;
 
     default:
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data);
       break;
   }
-  
+
+#if 0
+  if (block && policy_data->evictions && info->stream != ZS)
+#endif
   if (block && policy_data->evictions)
   {
-    /* If recency of LRU block is below a threshold, fill new block at 
-     * RRPV 3 */
+    /* If recency of LRU block is below a threshold, fill new block at RRPV 3 */
     assert(block->recency <= policy_data->evictions);
-
+     
     if ((policy_data->evictions - block->recency) < global_data->rcy_thr[block->stream])
     {
       ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data); 
     }
   }
 
+#if 0
+  if (info->stream == TS)
+  {
+    if (global_data->bm_ctr == 0)
+    {
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 2;
+    }
+  }
+#endif
   return ret_rrpv;
 }
 
@@ -1007,7 +1063,6 @@ int cache_get_new_rrpv_srripsage(srripsage_data *policy_data,
   state = SRRIPSAGE_DATA_BLOCKS(policy_data)[way].epoch;
 
   ret_rrpv = 0;
-
 #if 0
 #define HI_CT0(data) ((float)SAT_CTR_VAL(data->tex_e0_hit_ctr))
 #define FI_CT0(data) ((float)SAT_CTR_VAL(data->tex_e0_fill_ctr))
@@ -1066,6 +1121,12 @@ int cache_get_new_rrpv_srripsage(srripsage_data *policy_data,
 #undef FI_CT1
 #endif
 
+#if 0
+  if (block && policy_data->evictions && info->stream != ZS)
+  if (block && policy_data->evictions && info->stream != CS && info->stream != TS)
+  if (block && policy_data->evictions && info->stream != CS)
+#endif
+
   if (block && policy_data->evictions)
   {
     /* If recency of LRU block is below a threshold, fill new block at 
@@ -1079,10 +1140,53 @@ int cache_get_new_rrpv_srripsage(srripsage_data *policy_data,
     }
   }
 
+#if 0
+  if (info->stream == ZS)
+  {
+    if (old_rrpv == !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
+    {
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
+    }
+    else
+    {
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data); 
+    }
+  }
+
   if (info->stream == TS)
   {
-    ret_rrpv = !SRRIPSAGE_DATA_MAX_RRPV(policy_data);
+    if (old_rrpv == !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
+    {
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
+    }
+    else
+    {
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data); 
+    }
   }
+#endif
+
+#if 0
+  if (info->stream == CS)
+  {
+    if (old_rrpv == !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
+    {
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
+    }
+    else
+    {
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data); 
+    }
+  }
+
+  if (info->stream == IS || info->stream == ZS)
+  {
+    if (old_rrpv == !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
+    {
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
+    }
+  }
+#endif
 
   return ret_rrpv;
 }

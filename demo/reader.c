@@ -148,11 +148,11 @@ int main(int argc, char **argv)
         }
       }
 
+#if 0
       if (trace.spill && trace.stream == ZS)
       {
         printf("zS spill \n"); 
       }
-#if 0
       if (trace.stream == BS)
       {
         printf("BS write \n"); 
