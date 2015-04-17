@@ -1134,7 +1134,7 @@ int cache_replace_block(struct cache_t *cache, int set, memory_trace *info)
 
     case cache_policy_srripsage:
       return cache_replace_block_srripsage(CACHE_SET_DATA_SRRIPSAGE(CACHE_SET(cache, set)),
-          CACHE_SRRIPSAGE_GDATA(cache));
+          CACHE_SRRIPSAGE_GDATA(cache), info);
       break;
 
     case cache_policy_brrip:

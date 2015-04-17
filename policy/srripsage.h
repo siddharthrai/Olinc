@@ -50,6 +50,7 @@ typedef struct cache_list_head_srripsage_t
 #define SRRIPSAGE_DATA_FREE_TLST(data)  ((data)->free_tail)
 #define SRRIPSAGE_DATA_FREE_HEAD(data)  ((data)->free_head->head)
 #define SRRIPSAGE_DATA_FREE_TAIL(data)  ((data)->free_tail->head)
+#define SRRIPSAGE_DATA_RRPV_BLCKS(data) ((data)->rrpv_blocks)
 
 /* RRIP specific data */
 typedef struct cache_policy_srripsage_data_t
@@ -65,19 +66,31 @@ typedef struct cache_policy_srripsage_data_t
   srrip_data     srrip_policy_data;           /* If set is following srrip */
   ub8            evictions;                   /* Total evictions in set */  
   ub8            last_eviction;               /* Last eviction before last hit */
-  ub8            per_stream_fill[TST];        /* Fills for each stream */
-  ub8            per_stream_hit[TST];         /* Hits for each stream */
+  ub1            *rrpv_blocks;                /* #blocks at each RRPV */
+  ub8            per_stream_fill[TST + 1];    /* Fills for each stream */
+  ub1            hit_post_fill[TST + 1];      /* TRUE if there was a hit after fill */
   struct cache_block_t *blocks;               /* Actual blocks */
 }srripsage_data;
+
+#define MAX_THR (2)
 
 typedef struct cache_policy_srripsage_gdata_t
 {
   ub8 bm_ctr;                                 /* Bimodal counter */
   ub8 bm_thr;                                 /* Bimodal threshold */
-  ub8 per_stream_fill[TST];                   /* Fills for each stream */
-  ub8 per_stream_hit[TST];                    /* Hits for each stream */
+  ub8 per_stream_fill[TST + 1];               /* Fills for each stream */
+  ub8 per_stream_hit[TST + 1];                /* Hits for each stream */
+  ub8 per_stream_xevct[TST + 1];              /* Self evict for each stream */
+  ub8 per_stream_sevct[TST + 1];              /* Self evict for each stream */
+  ub8 per_stream_demote[4][TST + 1];          /* Demotion for each stream */
+  ub8 per_stream_rrpv_hit[4][TST + 1];        /* Hits for each stream for each RRPV */
   ub8 access_count;                           /* Total accesses to cache */
-  ub8 rcy_thr[TST];                           /* Per-stream recency threshold */
+  ub8 rcy_thr[MAX_THR][TST + 1];              /* Per-stream recency threshold */
+  ub8 per_stream_reuse[TST + 1];              /* Reuse seen by blocks at RRPV 0 */
+  ub8 per_stream_reuse_blocks[TST + 1];       /* Blocks at RRPV 0 */
+  ub8 per_stream_max_reuse[TST + 1];          /* Reuse seen so far for each stream */
+  ub8 per_stream_cur_thr[TST + 1];            /* Current threshold for each stream */
+  ub8 *rrpv_blocks;                           /* #blocks at each RRPV */
 
   /* Eight counter to be used for SRRIPDBP reuse probability learning */
   struct saturating_counter_t tex_e0_fill_ctr;/* Texture epoch 0 fill */
@@ -87,6 +100,7 @@ typedef struct cache_policy_srripsage_gdata_t
   struct saturating_counter_t acc_all_ctr;    /* Total accesses */
 }srripsage_gdata;
 
+#undef MAX_THR
 
 /*
  *
@@ -210,7 +224,7 @@ void cache_fill_block_srripsage(srripsage_data *policy_data,
  */
 
 int  cache_replace_block_srripsage(srripsage_data *policy_data, 
-    srripsage_gdata *global_data);
+    srripsage_gdata *global_data, memory_trace *info);
 
 /*
  *
@@ -355,7 +369,7 @@ int cache_get_replacement_rrpv_srripsage(srripsage_data *policy_data);
 
 int cache_get_new_rrpv_srripsage(srripsage_data *policy_data, 
     srripsage_gdata *global_data, memory_trace *info, int way,
-    int old_rrpv);
+    int old_rrpv, unsigned long long old_recency);
 
 /*
  *

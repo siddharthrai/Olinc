@@ -3040,10 +3040,11 @@ int main(int argc, char **argv)
               index = (index < MAX_RDIS) ? index : MAX_RDIS; 
               rdis_hist[stream_indx][index][0] += 1;
               rdis_hist[stream_indx][index][1] += access_info->access_count;
-
+#if 0
               /* Clamp reuse count to max reuse tracked */
               index = (access_info->access_count < MAX_REUSE) ?  access_info->access_count : MAX_REUSE;
               reuse_hist[stream_indx][index] += 1;
+#endif
             }
             else
             {
@@ -3686,47 +3687,54 @@ int main(int argc, char **argv)
               /* If return block was never accessed */
               if (ret.access == 0)
               {
-                switch (ret.stream)
+                if (info.stream >= PS && info.stream <= PS + MAX_CORES - 1)
                 {
-                  case IS:
-                    (*i_zevct)++;
-                    break;
+                  (*p_zevct)++;
+                }
+                else
+                {
+                  switch (ret.stream)
+                  {
+                    case IS:
+                      (*i_zevct)++;
+                      break;
 
-                  case CS:
-                    (*c_zevct)++;
-                    break;
+                    case CS:
+                      (*c_zevct)++;
+                      break;
 
-                  case ZS:
-                    (*z_zevct)++;
-                    break;
+                    case ZS:
+                      (*z_zevct)++;
+                      break;
 
-                  case TS:
-                    (*t_zevct)++;
-                    break;
+                    case TS:
+                      (*t_zevct)++;
+                      break;
 
-                  case NS:
-                    (*n_zevct)++;
-                    break;
+                    case NS:
+                      (*n_zevct)++;
+                      break;
 
-                  case HS:
-                    (*h_zevct)++;
-                    break;
+                    case HS:
+                      (*h_zevct)++;
+                      break;
 
-                  case BS:
-                    (*b_zevct)++;
-                    break;
+                    case BS:
+                      (*b_zevct)++;
+                      break;
 
-                  case DS:
-                    (*d_zevct)++;
-                    break;
+                    case DS:
+                      (*d_zevct)++;
+                      break;
 
-                  case XS:
-                    (*x_zevct)++;
-                    break;
+                    case XS:
+                      (*x_zevct)++;
+                      break;
 
-                  default:
-                    cout << "Illegal stream " << (int)(ret.stream);
-                    assert(1);
+                    default:
+                      cout << "Illegal stream " << (int)(ret.stream);
+                      assert(1);
+                  }
                 }
               }
 
