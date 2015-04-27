@@ -1574,40 +1574,6 @@ end:
     global_data->occ_thr[SAMPLED_SET][TS]   = global_data->per_stream_cur_thr[TS];
     global_data->occ_thr[SAMPLED_SET][BS]   = global_data->per_stream_cur_thr[BS];
     global_data->occ_thr[SAMPLED_SET][PS]   = global_data->per_stream_cur_thr[PS];
-
-    /* Override value for each Color and Depth */
-#if 0
-    global_data->rcy_thr[SAMPLED_SET][CS]  = 8;
-    global_data->rcy_thr[SAMPLED_SET][ZS]  = 16;
-    global_data->rcy_thr[SAMPLED_SET][TS]  = 1;
-    global_data->rcy_thr[SAMPLED_SET][BS]  = 1;
-    global_data->rcy_thr[SAMPLED_SET][PS]  = 16;
-#endif
-
-#if 0
-    global_data->rcy_thr[FOLLOWER_SET][CS] = 16;
-    global_data->rcy_thr[FOLLOWER_SET][ZS] = 1;
-    global_data->rcy_thr[FOLLOWER_SET][TS] = 1;
-    global_data->rcy_thr[FOLLOWER_SET][BS] = 1;
-    global_data->rcy_thr[FOLLOWER_SET][PS] = 1;
-    global_data->rcy_thr[FOLLOWER_SET][CS] = 16;
-    global_data->rcy_thr[FOLLOWER_SET][PS] = 16;
-
-    global_data->rcy_thr[FOLLOWER_SET][CS] = 16;
-    global_data->rcy_thr[FOLLOWER_SET][ZS] = 1;
-    global_data->rcy_thr[FOLLOWER_SET][TS] = 4;
-#endif
-
-#if 0
-    global_data->occ_thr[FOLLOWER_SET][CS] = 1;
-    global_data->rcy_thr[FOLLOWER_SET][CS] = 1;
-    global_data->rcy_thr[FOLLOWER_SET][ZS] = 1;
-    global_data->occ_thr[FOLLOWER_SET][ZS] = 1;
-    global_data->occ_thr[FOLLOWER_SET][TS] = 2;
-    global_data->rcy_thr[FOLLOWER_SET][TS] = 8;
-    global_data->occ_thr[FOLLOWER_SET][PS] = 16;
-    global_data->rcy_thr[FOLLOWER_SET][CS] = 16;
-#endif
   }
 
   if ((global_data->access_count % 512) == 0)
@@ -1686,43 +1652,6 @@ void cache_fill_block_srripsage(srripsage_data *policy_data,
       }
 
       /* Insert block in to the corresponding RRPV queue */
-#if 0
-      if (rrpv != SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-      if (info->stream == CS && info->spill == TRUE && rrpv != SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-      if (info->stream != ZS && info->stream != CS && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-      if (info->stream != TS && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-      if (info->stream != BS && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-      if (info->stream != BS && info->stream != TS && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-      if (info->stream == CS && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-      if (info->stream != CS && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-      if (info->stream != ZS && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-      if (info->stream != CS && info->stream != BS && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-      if (info->stream != CS && info->stream != BS && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-      if (info->stream == ZS && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-      if ((info->stream == CS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-      if ((info->stream == CS || info->stream == ZS  || info->stream == TS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-      if ((info->stream == CS || info->stream == TS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-      if ((info->stream == CS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-      if ((info->stream == TS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-      if ((info->stream == TS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-      if ((info->stream == PS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-      if (rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-      if (info->stream != CS && info->stream != ZS && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-      if (global_data->fill_at_head[info->stream] == TRUE && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-#endif
-
-#if 0    
-      if (policy_data->set_type == LRU_SAMPLED_SET && 
-          global_data->active_stream == info->stream &&
-          rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-
-      if (policy_data->set_type == LRU_SAMPLED_SET && 
-          rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-
-      if (policy_data->set_type == LRU_SAMPLED_SET && 
-          rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1 && 
-          global_data->bm_ctr == 0)
-#endif
       if (policy_data->set_type == LRU_SAMPLED_SET && 
           rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
       {
@@ -1733,18 +1662,6 @@ void cache_fill_block_srripsage(srripsage_data *policy_data,
       }
       else
       {
-#if 0
-        if (((policy_data->set_type == MRU_SAMPLED_SET)||
-             (policy_data->set_type == LRU_SAMPLED_SET))&&
-            rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-
-        if (policy_data->set_type == MRU_SAMPLED_SET &&
-            rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-
-        if ((policy_data->set_type == MRU_SAMPLED_SET || 
-              policy_data->set_type == LRU_SAMPLED_SET) &&
-            rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-#endif
         if (policy_data->set_type == MRU_SAMPLED_SET && 
             rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
         {
@@ -1754,33 +1671,8 @@ void cache_fill_block_srripsage(srripsage_data *policy_data,
                 SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv]);
 
         }
-#if 0
-        {
-          if (policy_data->set_type == LRU_SAMPLED_SET&&
-              rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-          {
-            /* Fill block at LRU */
-            CACHE_APPEND_TO_QUEUE(block, 
-                SRRIPSAGE_DATA_VALID_HEAD(policy_data)[rrpv], 
-                SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv]);
-          }
-        }
-#endif
         else
         {
-#if 0
-          if (rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1) 
-          if ((info->stream == CS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1) 
-          if ((info->stream == TS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1) 
-          if ((info->stream != TS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1) 
-          if ((info->stream != CS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1) 
-          if ((info->stream == TS || info->stream == ZS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1) 
-          if (rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-          if ((info->stream == CS || info->stream == ZS || info->stream == TS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1) 
-          if ((info->stream == CS || info->stream == ZS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1) 
-          if (rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1) 
-          if ((info->stream == CS || info->stream == BS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1) 
-#endif
           if (rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1) 
           {
             assert(policy_data->set_type == FOLLOWER_SET || 
@@ -1804,39 +1696,6 @@ void cache_fill_block_srripsage(srripsage_data *policy_data,
                 SRRIPSAGE_DATA_VALID_HEAD(policy_data)[rrpv], 
                 SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv]);
           }
-#if 0
-          if ((info->stream == CS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-          {
-            /* Get LRU block at the rrpv list */
-            rrpv_block = SRRIPSAGE_DATA_VALID_HEAD(policy_data)[rrpv].head;
-
-            /* Fill block at MRU */
-            if (rrpv_block && 
-                (policy_data->evictions - rrpv_block->recency) < 
-                OCC_THR(policy_data, global_data, info->stream))
-            {
-              CACHE_APPEND_TO_QUEUE(block, 
-                  SRRIPSAGE_DATA_VALID_HEAD(policy_data)[rrpv], 
-                  SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv]);
-            }
-            else
-            {
-              /* Fill block at LRU */
-              CACHE_PREPEND_TO_QUEUE(block, 
-                  SRRIPSAGE_DATA_VALID_HEAD(policy_data)[rrpv], 
-                  SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv]);
-
-              global_data->fills_at_head[info->stream]++;
-            }
-          }
-          else
-          {
-            /* Fill block at MRU */
-            CACHE_APPEND_TO_QUEUE(block, 
-                SRRIPSAGE_DATA_VALID_HEAD(policy_data)[rrpv], 
-                SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv]);
-          }
-#endif
         }
       }
     }
@@ -1858,167 +1717,100 @@ int cache_replace_block_srripsage(srripsage_data *policy_data,
   struct cache_block_t *lrublock;
   int    rrpv;
   int    old_rrpv;
-    
+
   /* Remove a nonbusy block from the tail */
   unsigned int min_wayid = ~(0);
   lrublock = NULL;
 
-#if 0
-  /* Get the LRU block */
-  for (ub4 i = 0; i <= SRRIPSAGE_DATA_MAX_RRPV(policy_data); i++)
+  assert(policy_data->following == cache_policy_srripsage || policy_data->following == cache_policy_srrip);
+
+  /* Try to find an invalid block always from head of the free list. */
+  for (block = SRRIPSAGE_DATA_FREE_HEAD(policy_data); block; block = block->prev)
   {
-    if (!lrublock)
+    if (block->way < min_wayid)
+      min_wayid = block->way;
+  }
+
+  /* Obtain RRPV from where to replace the block */
+  rrpv = cache_get_replacement_rrpv_srripsage(policy_data);
+
+  /* Ensure rrpv is with in max_rrpv bound */
+  assert(rrpv >= 0 && rrpv <= SRRIPSAGE_DATA_MAX_RRPV(policy_data));
+
+  if (min_wayid == ~(0))
+  {
+    /* If there is no block with required RRPV, increment RRPV of all the blocks
+     * until we get one with the required RRPV */
+    if (SRRIPSAGE_DATA_VALID_HEAD(policy_data)[rrpv].head == NULL)
     {
-      lrublock = SRRIPSAGE_DATA_VALID_HEAD(policy_data)[i].head;
-    }
-    else
-    {
-      if (SRRIPSAGE_DATA_VALID_HEAD(policy_data)[i].head)
+      assert(SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv].head == NULL);
+
+      /* To collect sample reuse block data */
+      if (policy_data->set_type == LRU_SAMPLED_SET)
       {
-        if ((SRRIPSAGE_DATA_VALID_HEAD(policy_data)[i].head)->recency < lrublock->recency)
+        /* Age MRU in LRU set */
+        CACHE_SRRIPSAGE_AGEBLOCK_MRU(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
+            SRRIPSAGE_DATA_VALID_TAIL(policy_data), rrpv, global_data);
+      }
+      else
+      {
+        if (policy_data->set_type == MRU_SAMPLED_SET)
         {
-          lrublock = SRRIPSAGE_DATA_VALID_HEAD(policy_data)[i].head;
+          /* Age LRU in MRU set */
+          CACHE_SRRIPSAGE_AGEBLOCK_LRU(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
+              SRRIPSAGE_DATA_VALID_TAIL(policy_data), rrpv, global_data);
+        }
+        else
+        {
+          assert(policy_data->set_type == FOLLOWER_SET || 
+              policy_data->set_type == THR_SAMPLED_SET);
+
+
+          CACHE_SRRIPSAGE_AGEBLOCK_FOLLOWER(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
+              SRRIPSAGE_DATA_VALID_TAIL(policy_data), rrpv, policy_data, global_data);
+
+          /* Increment demotion counter */
+          if (global_data->per_stream_dreuse[info->stream] > 4)
+          {
+            global_data->dems_at_head[info->stream]++;
+          }
         }
       }
     }
-  }
-#endif
 
-  {
-    assert(policy_data->following == cache_policy_srripsage || policy_data->following == cache_policy_srrip);
-
-    /* Try to find an invalid block always from head of the free list. */
-    for (block = SRRIPSAGE_DATA_FREE_HEAD(policy_data); block; block = block->prev)
+    for (block = SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->prev)
     {
-      if (block->way < min_wayid)
+      if (!block->busy && block->way < min_wayid)
         min_wayid = block->way;
     }
 
-    /* Obtain RRPV from where to replace the block */
-    rrpv = cache_get_replacement_rrpv_srripsage(policy_data);
+    /* Get last touch RRPV of the block */
+    old_rrpv = (policy_data->blocks)[min_wayid].last_rrpv;
 
-    /* Ensure rrpv is with in max_rrpv bound */
-    assert(rrpv >= 0 && rrpv <= SRRIPSAGE_DATA_MAX_RRPV(policy_data));
+    /* Increment eviction in the set */
+    policy_data->evictions += 1;
 
-    if (min_wayid == ~(0))
+    /* Update block count at old RRPV */
+    assert(SRRIPSAGE_DATA_RRPV_BLCKS(policy_data)[old_rrpv] > 0);
+    SRRIPSAGE_DATA_RRPV_BLCKS(policy_data)[old_rrpv]--;
+
+    global_data->rrpv_blocks[old_rrpv]--;
+
+    if (policy_data->blocks[min_wayid].last_rrpv == 2)
     {
-      /* If there is no block with required RRPV, increment RRPV of all the blocks
-       * until we get one with the required RRPV */
-      if (SRRIPSAGE_DATA_VALID_HEAD(policy_data)[rrpv].head == NULL)
+      ub1 src_stream = policy_data->blocks[min_wayid].stream;
+
+      if (src_stream == info->stream)
       {
-        assert(SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv].head == NULL);
-#if 0
-        if ((lrublock->recency - policy_data->evictions) < RCY_THR(policy_data, global_data, lrublock->stream))
-        {
-          CACHE_SRRIPSAGE_AGEBLOCK_FOLLOWER(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
-            SRRIPSAGE_DATA_VALID_TAIL(policy_data), rrpv);
-        }
-        else
-        {
-          CACHE_SRRIPSAGE_AGELRUBLOCK(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
-            SRRIPSAGE_DATA_VALID_TAIL(policy_data), rrpv);
-        }
-#endif
-
-        /* To collect sample reuse block data */
-#if 0
-        if (policy_data->following == cache_policy_srrip && 
-            global_data->per_stream_reuse_blocks[info->stream])
-        {
-          CACHE_SRRIPSAGE_AGEBLOCK_SAMPLE(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
-              SRRIPSAGE_DATA_VALID_TAIL(policy_data), rrpv, global_data);
-#if 0
-          CACHE_SRRIPSAGE_AGELRU_SAMPLE(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
-              SRRIPSAGE_DATA_VALID_TAIL(policy_data), policy_data, global_data);
-#endif
-        }
-#endif
-        if (policy_data->set_type == LRU_SAMPLED_SET)
-        {
-          /* Age MRU in LRU set */
-          CACHE_SRRIPSAGE_AGEBLOCK_MRU(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
-              SRRIPSAGE_DATA_VALID_TAIL(policy_data), rrpv, global_data);
-        }
-        else
-        {
-          if (policy_data->set_type == MRU_SAMPLED_SET)
-          {
-            /* Age LRU in MRU set */
-            CACHE_SRRIPSAGE_AGEBLOCK_LRU(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
-                SRRIPSAGE_DATA_VALID_TAIL(policy_data), rrpv, global_data);
-          }
-          else
-          {
-            assert(policy_data->set_type == FOLLOWER_SET || 
-                policy_data->set_type == THR_SAMPLED_SET);
-          
-#if 0
-            if (SAT_CTR_VAL(global_data->dem_ctr[info->stream]) > PSEL_MID_VAL)
-            {
-              CACHE_SRRIPSAGE_AGEBLOCK_MRU(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
-                SRRIPSAGE_DATA_VALID_TAIL(policy_data), rrpv, global_data);
-            }
-            else
-            {
-              CACHE_SRRIPSAGE_AGEBLOCK_LRU(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
-                SRRIPSAGE_DATA_VALID_TAIL(policy_data), rrpv, global_data);
-            }
-#endif
-          
-            CACHE_SRRIPSAGE_AGEBLOCK_FOLLOWER(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
-              SRRIPSAGE_DATA_VALID_TAIL(policy_data), rrpv, policy_data, global_data);
-#if 0
-            CACHE_SRRIPSAGE_AGELRU_FOLLOWER(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
-                SRRIPSAGE_DATA_VALID_TAIL(policy_data), policy_data, global_data);
-#endif
-            /* Increment demotion counter */
-            if (global_data->per_stream_dreuse[info->stream] > 4)
-            {
-              global_data->dems_at_head[info->stream]++;
-            }
-          }
-        }
-
-#if 0
-        CACHE_SRRIPSAGE_INCREMENT_RRPV(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
-            SRRIPSAGE_DATA_VALID_TAIL(policy_data), rrpv);
-#endif
+        global_data->per_stream_sevct[src_stream] += 1;
       }
-
-      for (block = SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->prev)
+      else
       {
-        if (!block->busy && block->way < min_wayid)
-          min_wayid = block->way;
-      }
-      
-      /* Get last touch RRPV of the block */
-      old_rrpv = (policy_data->blocks)[min_wayid].last_rrpv;
-      
-      /* Increment eviction in the set */
-      policy_data->evictions += 1;
-
-      /* Update block count at old RRPV */
-      assert(SRRIPSAGE_DATA_RRPV_BLCKS(policy_data)[old_rrpv] > 0);
-      SRRIPSAGE_DATA_RRPV_BLCKS(policy_data)[old_rrpv]--;
-
-      global_data->rrpv_blocks[old_rrpv]--;
-      
-      if (policy_data->blocks[min_wayid].last_rrpv == 2)
-      {
-        ub1 src_stream = policy_data->blocks[min_wayid].stream;
-
-        if (src_stream == info->stream)
-        {
-          global_data->per_stream_sevct[src_stream] += 1;
-        }
-        else
-        {
-          global_data->per_stream_xevct[src_stream] += 1;
-        }
+        global_data->per_stream_xevct[src_stream] += 1;
       }
     }
   }
-  
+
   /* If no non busy block can be found, return -1 */
   return (min_wayid != ~(0)) ? min_wayid : -1;
 }
@@ -2101,11 +1893,6 @@ void cache_access_block_srripsage(srripsage_data *policy_data,
     global_data->per_stream_demote[old_rrpv][info->stream]++;
   }
 
-#if 0  
-  if (old_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1 && 
-      blk->demote == FALSE && global_data->active_stream == info->stream)
-#endif
-
   if (old_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1 && 
       blk->demote == FALSE)
   {
@@ -2184,37 +1971,6 @@ void cache_access_block_srripsage(srripsage_data *policy_data,
       CACHE_APPEND_TO_QUEUE(blk, SRRIPSAGE_DATA_VALID_HEAD(policy_data)[new_rrpv], 
           SRRIPSAGE_DATA_VALID_TAIL(policy_data)[new_rrpv]);
     }
-#if 0
-
-    if (new_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1 && info->stream == ZS)
-    if (new_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1 && info->stream == CS)
-    if (new_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1 && info->stream == TS)
-    if (new_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1 && info->stream == CS)
-    if (new_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1 && info->stream == ZS)
-    if (new_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-#endif
-
-#if 0
-    if (new_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1 && info->stream == TS)
-    {
-      if (SAT_CTR_VAL(global_data->fath_ctr[info->stream]) > PSEL_MID_VAL)
-      {
-        CACHE_REMOVE_FROM_QUEUE(blk, SRRIPSAGE_DATA_VALID_HEAD(policy_data)[old_rrpv],
-            SRRIPSAGE_DATA_VALID_TAIL(policy_data)[old_rrpv]);
-
-        CACHE_PREPEND_TO_QUEUE(blk, SRRIPSAGE_DATA_VALID_HEAD(policy_data)[new_rrpv], 
-            SRRIPSAGE_DATA_VALID_TAIL(policy_data)[new_rrpv]);
-      }
-      else
-      {
-        CACHE_REMOVE_FROM_QUEUE(blk, SRRIPSAGE_DATA_VALID_HEAD(policy_data)[old_rrpv],
-            SRRIPSAGE_DATA_VALID_TAIL(policy_data)[old_rrpv]);
-
-        CACHE_APPEND_TO_QUEUE(blk, SRRIPSAGE_DATA_VALID_HEAD(policy_data)[new_rrpv], 
-            SRRIPSAGE_DATA_VALID_TAIL(policy_data)[new_rrpv]);
-      }
-    }
-#endif
   }
 
   if (strm == TS)
@@ -2275,58 +2031,9 @@ int cache_get_fill_rrpv_srripsage(srripsage_data *policy_data,
 
   block = SRRIPSAGE_DATA_VALID_HEAD(policy_data)[0].head;
 
-#if 0
-  /* Get the LRU block */
-  for (ub4 i = 0; i <= !SRRIPSAGE_DATA_MAX_RRPV(policy_data); i++)
-  {
-    if (!block)
-    {
-      block = SRRIPSAGE_DATA_VALID_HEAD(policy_data)[i].head;
-    }
-    else
-    {
-      if (SRRIPSAGE_DATA_VALID_HEAD(policy_data)[i].head)
-      {
-        if ((SRRIPSAGE_DATA_VALID_HEAD(policy_data)[i].head)->recency < block->recency)
-        {
-          block = SRRIPSAGE_DATA_VALID_HEAD(policy_data)[i].head;
-        }
-      }
-    }
-  }
-#endif
   switch (info->stream)
   {
     case TS:
-#if 0
-      if (global_data->bm_ctr == 0)
-      {
-        ret_rrpv = !SRRIPSAGE_DATA_MAX_RRPV(policy_data);
-      }
-      else
-      {
-        ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
-      }
-#define HI_CT0(data) ((float)SAT_CTR_VAL(data->tex_e0_hit_ctr))
-#define FI_CT0(data) ((float)SAT_CTR_VAL(data->tex_e0_fill_ctr))
-
-      /* If reuse probability of epoch 0 is below the threshold */
-      if ((FI_CT0(global_data) / HI_CT0(global_data)) > policy_data->threshold)
-      {
-        /* Insert block with max RRPV */
-        ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data);
-      }
-      else
-      {
-        /* Insert block with 0 RRPV */
-        ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
-
-        tex_alloc = TRUE;
-      }
-
-#undef HI_CT0
-#undef FI_CT0
-#endif
       ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
       break;
 
@@ -2344,16 +2051,7 @@ int cache_get_fill_rrpv_srripsage(srripsage_data *policy_data,
       break;
 
     case CS:
-#if 0
-      if (info->dbuf == FALSE && info->spill == TRUE)
-      {
-        ret_rrpv = !SRRIPSAGE_DATA_MAX_RRPV(policy_data);
-      }
-      else
-#endif
-      {
-        ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
-      }
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
       break;
 
     case ZS:
@@ -2361,14 +2059,7 @@ int cache_get_fill_rrpv_srripsage(srripsage_data *policy_data,
       break;
 
     case PS:
-      if (global_data->bm_ctr == 0)
-      {
-        ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
-      }
-      else
-      {
-        ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data);
-      }
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
       break;
 
     default:
@@ -2376,105 +2067,22 @@ int cache_get_fill_rrpv_srripsage(srripsage_data *policy_data,
       break;
   }
 
-#if 0
-  if (block && policy_data->evictions && info->stream == TS)
-  if (block && policy_data->evictions && info->stream == ZS)
-  if (block && policy_data->evictions && info->stream == CS)
-  if (block && policy_data->evictions && info->stream != CS)
-  if (block && policy_data->evictions && info->stream != TS)
-  if (block && policy_data->evictions && info->stream != TS)
-  if (block && policy_data->evictions && info->stream != ZS)
-  if (block && policy_data->evictions && info->stream != CS)
-  if (block && policy_data->evictions && info->stream != PS)
-  if (block && policy_data->evictions)
-#endif
-
   if (block && policy_data->evictions)
   {
     /* If recency of LRU block is below a threshold, fill new block at RRPV 3 */
     assert(block->recency <= policy_data->evictions);
-#if 0     
-    if ((policy_data->rrpv_blocks[0]) > 13 && 
-        (policy_data->evictions - block->recency) < RCY_THR(policy_data, global_data, block->stream))
-    if ((policy_data->rrpv_blocks[0]) > 10 && 
-        (policy_data->evictions - block->recency) < RCY_THR(policy_data, global_data, block->stream))
-    if ((policy_data->evictions - block->recency) < RCY_THR(policy_data, global_data, block->stream))
-#endif
 
     if ((policy_data->evictions - block->recency) < RCY_THR(policy_data, global_data, block->stream))
     {
       ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data);
     }
   }
-
-#if 0
-  if (SET_BLCOKS(policy_data) < 10) 
-  {
-      ret_rrpv = 0;
-  }
-#endif
-
-#define FILL_TH (10)
-#if 0
-  if (policy_data->per_stream_fill[info->stream] > FILL_TH && 
-    policy_data->hit_post_fill[info->stream] == FALSE && SET_BLCOKS(policy_data) > 10)
-  if (info->stream != TS)
-  if (info->stream == ZS)
-  if (info->stream == ZS)
-#endif
-  {
-#if 0
-    if (SET_BLCOKS(policy_data) > FILL_TH)
-#endif
-
-#define RCY_TH (4)
-
-#if 0
-    if (global_data->rcy_thr[info->stream] < RCY_TH)
-    if (SET_BLCOKS(policy_data) > FILL_TH)
-    {
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data);
-    }
-#endif
-
-#undef RCY_TH
-  }
-
-#undef FILL_TH
-
-#if 0
-  else
-  {
-    if (info->stream == CS)
-    {
-      if (global_data->bm_ctr == 0)
-      {
-        ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data);
-      }
-    }
-  }
-#endif
 
   return ret_rrpv;
 }
 
 int cache_get_replacement_rrpv_srripsage(srripsage_data *policy_data)
 {
-#if 0
-  if ((SRRIPSAGE_DATA_VALID_HEAD(policy_data)[SRRIPSAGE_DATA_MAX_RRPV(policy_data)].head == NULL &&
-        SRRIPSAGE_DATA_VALID_HEAD(policy_data)[SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1].head == NULL)||
-      SRRIPSAGE_DATA_VALID_HEAD(policy_data)[SRRIPSAGE_DATA_MAX_RRPV(policy_data)].head != NULL)
-  {
-    return SRRIPSAGE_DATA_MAX_RRPV(policy_data);
-  }
-  else
-  {
-    assert(SRRIPSAGE_DATA_VALID_HEAD(policy_data)[SRRIPSAGE_DATA_MAX_RRPV(policy_data)].head == NULL);
-    assert(SRRIPSAGE_DATA_VALID_HEAD(policy_data)[SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1].head != NULL);
-
-    return SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
-  }
-#endif
   return SRRIPSAGE_DATA_MAX_RRPV(policy_data);
 }
 
@@ -2492,388 +2100,19 @@ int cache_get_new_rrpv_srripsage(srripsage_data *policy_data,
   /* Get the LRU block */
   block = SRRIPSAGE_DATA_VALID_HEAD(policy_data)[ret_rrpv].head;
 
-#if 0 
-  /* Get the LRU block */
-  for (ub4 i = 0; i <= SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1; i++)
-  {
-    if (!block)
-    {
-      block = SRRIPSAGE_DATA_VALID_HEAD(policy_data)[i].head;
-    }
-    else
-    {
-      if (SRRIPSAGE_DATA_VALID_HEAD(policy_data)[i].head)
-      {
-        if ((SRRIPSAGE_DATA_VALID_HEAD(policy_data)[i].head)->recency < block->recency)
-        {
-          block = SRRIPSAGE_DATA_VALID_HEAD(policy_data)[i].head;
-        }
-      }
-    }
-  }
-
-  state = SRRIPSAGE_DATA_BLOCKS(policy_data)[way].epoch;
-
-  if (info->stream == ZS)
-  {
-    ret_rrpv = (old_rrpv > 0) ? (old_rrpv - 1) : 0;
-  }
-
-#define HI_CT0(data) ((float)SAT_CTR_VAL(data->tex_e0_hit_ctr))
-#define FI_CT0(data) ((float)SAT_CTR_VAL(data->tex_e0_fill_ctr))
-#define HI_CT1(data) ((float)SAT_CTR_VAL(data->tex_e1_hit_ctr))
-#define FI_CT1(data) ((float)SAT_CTR_VAL(data->tex_e1_fill_ctr))
-#define TX_BLK  (0)
-#define TX_BLK1 (1)
-#define TX_BLK2 (2)
-#define RT_BLK  (3)
-
-  if (state == TX_BLK)
-  {
-    /* If reuse probability of epoch 0 is below the threshold */
-    if ((FI_CT1(global_data) / HI_CT1(global_data)) > policy_data->threshold)
-    {
-      /* Insert block with max RRPV */
-      ret_rrpv =  SRRIPSAGE_DATA_MAX_RRPV(policy_data);
-    }
-    else
-    {
-      /* Insert block with 0 RRPV */
-      ret_rrpv = !(SRRIPSAGE_DATA_MAX_RRPV(policy_data));
-    }
-  }
-  else
-  {
-    if (state == TX_BLK1 || state == TX_BLK2)
-    {
-      ret_rrpv = !(SRRIPSAGE_DATA_MAX_RRPV(policy_data));
-    }
-    else
-    {
-      if (state == RT_BLK) 
-      {
-#if 0
-        /* If reuse probability of epoch 0 is below the threshold */
-        if ((FI_CT0(global_data) / HI_CT0(global_data)) > policy_data->threshold)
-        {
-          /* Insert block with max RRPV */
-          return SRRIPSAGE_DATA_MAX_RRPV(policy_data);
-        }
-        else
-        {
-          /* Insert block with 0 RRPV */
-          return !(SRRIPSAGE_DATA_MAX_RRPV(policy_data));
-        }
-#endif
-      }
-    }
-  }
-
-#undef TX_BLK
-#undef HI_CT0
-#undef FI_CT0
-#undef HI_CT1
-#undef FI_CT1
-#endif
-
-#if 0
-  if (block && policy_data->evictions && info->stream != CS && info->stream != ZS && info->stream != TS)
-  if (block && policy_data->evictions && info->stream != CS && info->stream != BS)
-  if (block && policy_data->evictions && info->stream == TS)
-  if (block && policy_data->evictions && info->stream == CS)
-  if (block && policy_data->evictions && info->stream != CS)
-  if (block && policy_data->evictions && info->stream != TS)
-  if (block && policy_data->evictions && info->stream != ZS)
-  if (block && policy_data->evictions && info->stream != CS)
-  if (block && policy_data->evictions && info->stream != PS)
-  if (block && policy_data->evictions && info->stream != CS)
-  if (block && policy_data->evictions && info->stream != CS)
-  if (block && policy_data->evictions)
-#endif
-
   /* Choose new rrpv based on LRU block at RRPV 0 */
   if (block && policy_data->evictions)
   {
     /* If recency of LRU block is below a threshold, fill new block at 
      * RRPV 3 */
     assert(block->recency <= policy_data->evictions);
-#if 0
-    if ((old_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data)) &&
-        (policy_data->evictions - block->recency) < RCY_THR(policy_data, global_data, block->stream))
-    if (policy_data->rrpv_blocks[0] > 13 && 
-          (policy_data->evictions - block->recency) < RCY_THR(policy_data, global_data, block->stream)) 
-    if ((policy_data->evictions - block->recency) < RCY_THR(policy_data, global_data, block->stream))
-    if ((old_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1 || 
-          old_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data)) &&
-      (policy_data->evictions - block->recency) < RCY_THR(policy_data, global_data, block->stream))
-#endif
 
     if ((old_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data)) &&
       (policy_data->evictions - block->recency) < RCY_THR(policy_data, global_data, block->stream))
     {
-      {
-        ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data); 
-#if 0
-        ret_rrpv = old_rrpv;
-#endif
-      }
-    }
-  }
-
-#define FILL_TH (10)
-#if 0
-  if (info->stream != ZS && info->stream != CS && info->stream != BS)
-  if (info->stream == TS)
-#endif
-  {
-#if 0
-    if (policy_data->per_stream_fill[info->stream] > FILL_TH && 
-        policy_data->hit_post_fill[info->stream] == FALSE &&
-        SET_BLCOKS(policy_data) > 10)
-    if (policy_data->per_stream_fill[info->stream] > FILL_TH && 
-        policy_data->hit_post_fill[info->stream] == FALSE)
-#endif
-
-#define RCY_TH (4)
-#if 0
-    if (global_data->rcy_thr[info->stream] < RCY_TH)
-
-    if (SET_BLCOKS(policy_data) > FILL_TH)
-    {
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data);
-    }
-#endif
-
-#undef RCY_TH
-  }
-
-#if 0
-  if (policy_data->hit_post_fill[info->stream] == TRUE)
-  {
-    ret_rrpv = !SRRIPSAGE_DATA_MAX_RRPV(policy_data);
-  }
-#endif
-
-#undef FILL_TH
-
-#if 0
-  if (info->stream == ZS)
-  {
-    ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data); 
-  }
-
-#endif
-
-#if 0
-  if (info->stream == ZS || info->stream == TS)
-  {
-    ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data); 
-  }
-#endif
-
-#if 0
-  if (info->stream == PS)
-#endif
-
-#if 0
-  if (info->stream == PS)
-  {
-    if (old_rrpv == !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
-    {
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
-    }
-    else
-    {
       ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data); 
     }
   }
-#endif
-
-#if 0
-  if (info->stream == BS)
-  {
-    if (old_rrpv == !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
-    {
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
-    }
-    else
-    {
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data); 
-    }
-  }
-#endif
-
-#if 0
-  if (info->stream == ZS)
-  {
-    if (old_rrpv == !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
-    {
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
-    }
-    else
-    {
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data); 
-    }
-  }
-#endif  
-
-#if 0
-  if (policy_data->set_type == FOLLOWER_SET && 
-      global_data->demote_on_hit[info->stream] == TRUE)
-
-  if (policy_data->set_type == FOLLOWER_SET)
-  {
-    if (old_rrpv == !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
-    {
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
-    }
-  }
-#endif
-
-#if 0
-  if (global_data->demote_on_hit[info->stream] == TRUE)
-  if (info->stream == TS)
-#endif
-
-#if 0
-  if ((info->stream == TS || info->stream == ZS) && policy_data->set_type == FOLLOWER_SET)
-  {
-    if (old_rrpv == !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
-    {
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
-    }
-#if 0
-    else
-    {
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data); 
-    }
-#endif
-  }
-#endif
-
-#if 0
-  if (info->stream == TS)
-  {
-    if (old_rrpv == !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
-    {
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
-    }
-#if 0
-    else
-    {
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data); 
-    }
-#endif
-  }
-#endif
-
-#if 0
-  if (policy_data->set_type == FOLLOWER_SET && 
-      (SAT_CTR_VAL(global_data->dem_ctr[info->stream]) > (PSEL_MID_VAL / 2)||
-      SAT_CTR_VAL(global_data->fath_ctr[info->stream]) < PSEL_MID_VAL))
-  {
-    if (old_rrpv == !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
-    {
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
-    }
-    else
-    {
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data); 
-    }
-  }
-#endif
-#if 0
-  if (info->stream != CS)
-  if (policy_data->set_type == FOLLOWER_SET && info->stream != CS)
-  if (policy_data->set_type == FOLLOWER_SET && info->stream != CS)
-  {
-    if (old_rrpv != !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
-    {
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
-    }
-#if 0
-    else
-    {
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data); 
-    }
-#endif
-  }
-#endif
-
-#if 0
-  if (info->stream != CS && info->stream != ZS && info->stream != TS)
-  if (info->stream == ZS)
-  if (info->stream != CS && info->stream != ZS)
-  if (policy_data->set_type == FOLLOWER_SET && (info->stream == ZS || info->stream == TS))
-#endif
-
-#if 0
-  if (policy_data->set_type == FOLLOWER_SET && (info->stream == ZS))
-  {
-    if (old_rrpv == !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
-    {
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
-    }
-  }
-#endif
-
-#if 0
-  if (info->stream != CS && info->stream != TS)
-  {
-    if (old_rrpv == !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
-    {
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
-    }
-    else
-    {
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data);
-    }
-  }
-#endif
-
-#if 0
-  if (info->stream == ZS && policy_data->set_type == FOLLOWER_SET)
-  {
-    if (old_rrpv == !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
-    {
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
-    }
-  }
-#endif
-
-#if 0
-  if (info->stream == IS)
-  {
-    if (old_rrpv == !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
-    {
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
-    }
-    else
-    {
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data);
-    }
-  }
-#endif
-
-#if 0
-  if (info->stream != CS && info->stream != ZS && info->stream != BS)
-  if (info->stream != CS)
-  if (info->stream != CS && policy_data->set_type == FOLLOWER_SET)
-#endif
-
-#if 0
-  if (info->stream != CS && policy_data->set_type == FOLLOWER_SET)
-  {
-    if (old_rrpv == !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
-    {
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
-    }
-    else
-    {
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data); 
-    }
-  }
-#endif
 
 #if 0
   if (SAT_CTR_VAL(global_data->dem_ctr[info->stream]) < PSEL_MID_VAL)
@@ -2885,18 +2124,6 @@ int cache_get_new_rrpv_srripsage(srripsage_data *policy_data,
   }
 #endif
 
-#if 0
-#define DEM_TH
-
-  if ((global_data->per_stream_dreuse_blocks[info->stream] && 
-       global_data->per_stream_dreuse[info->stream] / global_data->per_stream_dreuse_blocks[info->stream] < 2))
-  {
-    if (global_data->bm_ctr == 0)
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data); 
-  }
-
-#undef DEM_TH
-#endif
   return ret_rrpv;
 }
 
