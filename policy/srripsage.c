@@ -26,30 +26,39 @@
 #include "srripsage.h"
 #include "sap.h"
 
+#define SAMPLED_SET             (0)
+#define THR_SAMPLED_SET         (0)
+#define LRU_SAMPLED_SET         (1)
+#define MRU_SAMPLED_SET         (2)
+#define FOLLOWER_SET            (3)
+
 #define CACHE_SET(cache, set)   (&((cache)->sets[set]))
 #define CACHE_BLOCK(set, way)   (&((set)->blocks[way]))
-#define SAMPLED_SET             (0)
-#define FOLLOWER_SET            (1)
+
 #define BYPASS_RRPV             (-1)
+
 #define PHASE_BITS              (15)
+
 #define REUSE_TH                (1)
 #define MIN_TH                  (1)
 #define MAX_TH                  (16)
 
-#if 0
-#define SET_BLCOKS(p)           ((p)->rrpv_blocks[0] + (p)->rrpv_blocks[2] + (p)->rrpv_blocks[3])
-#endif
+#define OP_HIT                  (0)
+#define OP_FILL                 (1)
+#define OP_DEMOTE               (2)
 
-#define SET_BLCOKS(p)           ((p)->rrpv_blocks[0] + (p)->rrpv_blocks[2])
+#define PSEL_WIDTH              (6)
+#define PSEL_MIN_VAL            (0x00)
+#define PSEL_MAX_VAL            (0x3f)
+#define PSEL_MID_VAL            (32)
 
-#if 0
-#define PHASE_SIZE              (1 << PHASE_BITS)
-#endif
+#define SET_BLCOKS(p)           ((p)->rrpv_blocks[0])
 
 #define PHASE_SIZE              (10000)
 
-#define IS_SAMPLED_SET(p)       ((p)->following == cache_policy_srrip)
-#define RCY_THR(p, g, s)        (IS_SAMPLED_SET(p) ? (g)->rcy_thr[0][(s)] : (g)->rcy_thr[1][(s)])
+#define IS_SAMPLED_SET(p)       ((p)->set_type == THR_SAMPLED_SET)
+#define RCY_THR(p, g, s)        (IS_SAMPLED_SET(p) ? (g)->rcy_thr[SAMPLED_SET][(s)] : (g)->rcy_thr[FOLLOWER_SET][(s)])
+#define OCC_THR(p, g, s)        (IS_SAMPLED_SET(p) ? (g)->occ_thr[SAMPLED_SET][(s)] : (g)->occ_thr[FOLLOWER_SET][(s)])
 
 #define CACHE_UPDATE_BLOCK_STATE(block, tag, va, state_in)              \
 do                                                                      \
@@ -59,7 +68,8 @@ do                                                                      \
   (block)->state    = (state_in);                                       \
 }while(0)
 
-/* Age LRU block at RRPV 0 */
+/* Age LRU block at RRPV 0 in sampled set. It also updates blocks for
+ * given stream. */
 #define CACHE_SRRIPSAGE_AGELRU_SAMPLE(head_ptr, tail_ptr, p, g)         \
 do                                                                      \
 {                                                                       \
@@ -74,8 +84,12 @@ do                                                                      \
       CACHE_REMOVE_FROM_QUEUE(rpl_node, (head_ptr)[0], (tail_ptr)[0]);  \
       CACHE_APPEND_TO_QUEUE(rpl_node, (head_ptr)[3], (tail_ptr)[3]);    \
                                                                         \
+      rpl_node->demote = TRUE;                                          \
+                                                                        \
+      cache_add_reuse_blocks((g), OP_DEMOTE, rpl_node->stream);         \
+                                                                        \
       /* Update blocks ate RRPV 0 */                                    \
-      cache_remove_reuse_blocks((g), rpl_node->stream);                 \
+      cache_remove_reuse_blocks((g), 0, rpl_node->stream);              \
     }                                                                   \
     else                                                                \
     {                                                                   \
@@ -84,8 +98,8 @@ do                                                                      \
   }                                                                     \
 }while(0)
 
-/* Age LRU block at RRPV 0 */
-#define CACHE_SRRIPSAGE_AGELRU(head_ptr, tail_ptr, p, g)                \
+/* Age LRU block at RRPV 0 in follower set */
+#define CACHE_SRRIPSAGE_AGELRU_FOLLOWER(head_ptr, tail_ptr, p, g)       \
 do                                                                      \
 {                                                                       \
   struct cache_block_t *rpl_node = NULL;                                \
@@ -98,6 +112,8 @@ do                                                                      \
       cn = cn->prev;                                                    \
       CACHE_REMOVE_FROM_QUEUE(rpl_node, (head_ptr)[0], (tail_ptr)[0]);  \
       CACHE_APPEND_TO_QUEUE(rpl_node, (head_ptr)[3], (tail_ptr)[3]);    \
+                                                                        \
+      rpl_node->demote = TRUE;                                          \
     }                                                                   \
     else                                                                \
     {                                                                   \
@@ -139,6 +155,7 @@ do                                                                    \
             CACHE_REMOVE_FROM_QUEUE(rpl_node, head_ptr[i], tail_ptr[i]);  \
                                                                       \
             rpl_node->data = &(head_ptr[i + dif]);                    \
+            rpl_node->demote = TRUE;                                  \
                                                                       \
             CACHE_APPEND_TO_QUEUE(rpl_node, head_ptr[i + dif], tail_ptr[i + dif]);\
         }                                                             \
@@ -156,6 +173,7 @@ do                                                                    \
             CACHE_REMOVE_FROM_QUEUE(rpl_node, (head_ptr)[i], (tail_ptr)[i]);\
                                                                       \
             rpl_node->data = &(head_ptr[i + dif]);                    \
+            rpl_node->demote = TRUE;                                  \
                                                                       \
             CACHE_PREPEND_TO_QUEUE(rpl_node, (head_ptr)[i + dif], (tail_ptr)[i + dif]);\
         }                                                             \
@@ -168,7 +186,7 @@ do                                                                    \
   }                                                                   \
 }while(0)
 
-/* Age block based on their LRU position */
+/* Age block based on their LRU position in sampled set */
 #define CACHE_SRRIPSAGE_AGEBLOCK_SAMPLE(head_ptr, tail_ptr, rrpv, g)  \
 do                                                                    \
 {                                                                     \
@@ -201,11 +219,13 @@ do                                                                    \
             CACHE_REMOVE_FROM_QUEUE(rpl_node, head_ptr[i], tail_ptr[i]);  \
                                                                       \
             rpl_node->data = &(head_ptr[i + dif]);                    \
+            rpl_node->demote = TRUE;                                  \
                                                                       \
             CACHE_APPEND_TO_QUEUE(rpl_node, head_ptr[i + dif], tail_ptr[i + dif]);\
                                                                       \
             /* Update blocks ate RRPV 0 */                            \
-            cache_remove_reuse_blocks((g), rpl_node->stream);         \
+            cache_remove_reuse_blocks((g), OP_HIT, rpl_node->stream); \
+            cache_add_reuse_blocks((g), OP_DEMOTE, rpl_node->stream); \
         }                                                             \
       }                                                               \
       else                                                            \
@@ -221,6 +241,9 @@ do                                                                    \
             CACHE_REMOVE_FROM_QUEUE(rpl_node, (head_ptr)[i], (tail_ptr)[i]);\
                                                                       \
             rpl_node->data = &(head_ptr[i + dif]);                    \
+            rpl_node->demote = TRUE;                                  \
+                                                                      \
+            cache_add_reuse_blocks((g), OP_DEMOTE, rpl_node->stream); \
                                                                       \
             CACHE_PREPEND_TO_QUEUE(rpl_node, (head_ptr)[i + dif], (tail_ptr)[i + dif]);\
         }                                                             \
@@ -233,8 +256,8 @@ do                                                                    \
   }                                                                   \
 }while(0)
 
-/* Age block based on their LRU position */
-#define CACHE_SRRIPSAGE_AGEBLOCK(head_ptr, tail_ptr, rrpv)            \
+/* Age block based on their LRU position for follower sets */
+#define CACHE_SRRIPSAGE_AGEBLOCK_LRU(head_ptr, tail_ptr, rrpv,  g)    \
 do                                                                    \
 {                                                                     \
   int dif = 0;                                                        \
@@ -266,6 +289,77 @@ do                                                                    \
             CACHE_REMOVE_FROM_QUEUE(rpl_node, head_ptr[i], tail_ptr[i]);  \
                                                                       \
             rpl_node->data = &(head_ptr[i + dif]);                    \
+            rpl_node->demote = TRUE;                                  \
+                                                                      \
+            cache_add_reuse_blocks((g), OP_DEMOTE, rpl_node->stream); \
+                                                                      \
+            CACHE_PREPEND_TO_QUEUE(rpl_node, head_ptr[i + dif], tail_ptr[i + dif]);\
+        }                                                             \
+      }                                                               \
+      else                                                            \
+      {                                                               \
+        struct cache_block_t *node = (tail_ptr)[i].head;              \
+                                                                      \
+        if (node)                                                     \
+        {                                                             \
+            rpl_node = node;                                          \
+                                                                      \
+            assert(rpl_node);                                         \
+                                                                      \
+            CACHE_REMOVE_FROM_QUEUE(rpl_node, (head_ptr)[i], (tail_ptr)[i]);\
+                                                                      \
+            rpl_node->data = &(head_ptr[i + dif]);                    \
+            rpl_node->demote = TRUE;                                  \
+                                                                      \
+            cache_add_reuse_blocks((g), OP_DEMOTE, rpl_node->stream); \
+                                                                      \
+            CACHE_PREPEND_TO_QUEUE(rpl_node, (head_ptr)[i + dif], (tail_ptr)[i + dif]);\
+        }                                                             \
+      }                                                               \
+    }                                                                 \
+    else                                                              \
+    {                                                                 \
+      assert(!((tail_ptr)[i].head));                                  \
+    }                                                                 \
+  }                                                                   \
+}while(0)
+
+/* Age block based on their LRU position for follower sets */
+#define CACHE_SRRIPSAGE_AGEBLOCK_MRU(head_ptr, tail_ptr, rrpv, g)     \
+do                                                                    \
+{                                                                     \
+  int dif = 0;                                                        \
+  int min_wayid = 0xff;                                               \
+  struct cache_block_t *rpl_node = NULL;                              \
+                                                                      \
+  for (int i = rrpv - 1; i >= 0; i--)                                 \
+  {                                                                   \
+    assert(i <= rrpv);                                                \
+                                                                      \
+    if ((head_ptr)[i].head)                                           \
+    {                                                                 \
+      if (!dif)                                                       \
+      {                                                               \
+        dif = rrpv - i;                                               \
+      }                                                               \
+                                                                      \
+      /* Move the block from current rrpv to new RRPV */              \
+      if (i == 0)                                                     \
+      {                                                               \
+        struct cache_block_t *node = (head_ptr)[i].head;              \
+                                                                      \
+        if (node)                                                     \
+        {                                                             \
+            rpl_node = node;                                          \
+                                                                      \
+            assert(rpl_node);                                         \
+                                                                      \
+            CACHE_REMOVE_FROM_QUEUE(rpl_node, head_ptr[i], tail_ptr[i]);  \
+                                                                      \
+            rpl_node->data = &(head_ptr[i + dif]);                    \
+            rpl_node->demote = TRUE;                                  \
+                                                                      \
+            cache_add_reuse_blocks((g), OP_DEMOTE, rpl_node->stream); \
                                                                       \
             CACHE_APPEND_TO_QUEUE(rpl_node, head_ptr[i + dif], tail_ptr[i + dif]);\
         }                                                             \
@@ -283,8 +377,11 @@ do                                                                    \
             CACHE_REMOVE_FROM_QUEUE(rpl_node, (head_ptr)[i], (tail_ptr)[i]);\
                                                                       \
             rpl_node->data = &(head_ptr[i + dif]);                    \
+            rpl_node->demote = TRUE;                                  \
                                                                       \
-            CACHE_PREPEND_TO_QUEUE(rpl_node, (head_ptr)[i + dif], (tail_ptr)[i + dif]);\
+            cache_add_reuse_blocks((g), OP_DEMOTE, rpl_node->stream); \
+                                                                      \
+            CACHE_APPEND_TO_QUEUE(rpl_node, (head_ptr)[i + dif], (tail_ptr)[i + dif]);\
         }                                                             \
       }                                                               \
     }                                                                 \
@@ -295,6 +392,81 @@ do                                                                    \
   }                                                                   \
 }while(0)
 
+/* Age block based on their LRU position for follower sets */
+#define CACHE_SRRIPSAGE_AGEBLOCK_FOLLOWER(head_ptr, tail_ptr, rrpv, p, g)\
+do                                                                    \
+{                                                                     \
+  int dif = 0;                                                        \
+  int min_wayid = 0xff;                                               \
+  struct cache_block_t *rpl_node = NULL;                              \
+                                                                      \
+  for (int i = rrpv - 1; i >= 0; i--)                                 \
+  {                                                                   \
+    assert(i <= rrpv);                                                \
+                                                                      \
+    if ((head_ptr)[i].head)                                           \
+    {                                                                 \
+      if (!dif)                                                       \
+      {                                                               \
+        dif = rrpv - i;                                               \
+      }                                                               \
+                                                                      \
+      /* Move the block from current rrpv to new RRPV */              \
+      if (i == 0)                                                     \
+      {                                                               \
+        struct cache_block_t *node = (head_ptr)[i].head;              \
+                                                                      \
+        if (node)                                                     \
+        {                                                             \
+            rpl_node = node;                                          \
+                                                                      \
+            assert(rpl_node);                                         \
+                                                                      \
+            CACHE_REMOVE_FROM_QUEUE(rpl_node, head_ptr[i], tail_ptr[i]);  \
+                                                                      \
+            rpl_node->data = &(head_ptr[i + dif]);                    \
+            rpl_node->demote = TRUE;                                  \
+                                                                      \
+            CACHE_APPEND_TO_QUEUE(rpl_node, head_ptr[i + dif], tail_ptr[i + dif]);\
+        }                                                             \
+      }                                                               \
+      else                                                            \
+      {                                                               \
+        struct cache_block_t *node = (tail_ptr)[i].head;              \
+                                                                      \
+        if (node)                                                     \
+        {                                                             \
+          rpl_node = node;                                            \
+                                                                      \
+          assert(rpl_node);                                           \
+                                                                      \
+          CACHE_REMOVE_FROM_QUEUE(rpl_node, (head_ptr)[i], (tail_ptr)[i]);\
+                                                                      \
+          rpl_node->data    = &(head_ptr[i + dif]);                   \
+          rpl_node->demote  = TRUE;                                   \
+                                                                      \
+          if (SAT_CTR_VAL((g)->dem_ctr[rpl_node->stream]) > PSEL_MID_VAL)\
+          {                                                           \
+            CACHE_APPEND_TO_QUEUE(rpl_node, (head_ptr)[i + dif], (tail_ptr)[i + dif]);\
+          }                                                           \
+          else                                                        \
+          {                                                           \
+            CACHE_PREPEND_TO_QUEUE(rpl_node, (head_ptr)[i + dif], (tail_ptr)[i + dif]);\
+          }                                                           \
+        }                                                             \
+      }                                                               \
+    }                                                                 \
+    else                                                              \
+    {                                                                 \
+      assert(!((tail_ptr)[i].head));                                  \
+    }                                                                 \
+  }                                                                   \
+}while(0)
+
+#if 0
+#endif
+
+/* Move all blocks at a RRPV by constant amount */
 #define CACHE_SRRIPSAGE_INCREMENT_RRPV(head_ptr, tail_ptr, rrpv)  \
 do                                                                \
 {                                                                 \
@@ -383,7 +555,7 @@ do                                                                              
 
 int srripsage_blocks = 0;
 
-static int get_set_type_srripsage(long long int indx)
+static ub1 get_set_type_srripsage(long long int indx)
 {
   int lsb_bits;
   int msb_bits;
@@ -393,133 +565,114 @@ static int get_set_type_srripsage(long long int indx)
   msb_bits = (indx >> 6) & 0x0f;
   mid_bits = (indx >> 4) & 0x03;
 
-  if (lsb_bits == msb_bits && mid_bits == 0)
+  if (lsb_bits == msb_bits && mid_bits == 0x00)
   {
-    return SAMPLED_SET;
+    return LRU_SAMPLED_SET;
+  }
+  else
+  {
+    if (lsb_bits == msb_bits && mid_bits == 0x01)
+    {
+      return MRU_SAMPLED_SET;
+    }
+    else
+    {
+      if (lsb_bits == msb_bits && mid_bits == 0x02)
+      {
+        return THR_SAMPLED_SET;
+      }
+    }
   }
 
   return FOLLOWER_SET;
 }
 
-/* Update fill counter */
-static void cache_update_fill_counter_srripsage(srrip_data *policy_data, 
-    srripsage_gdata *global_data, int way, int strm)
+/* Update reused blocks at RRPV 0 */
+void cache_add_reuse_blocks(srripsage_gdata *global_data, ub1 op,
+    ub1 stream)
 {
-  /* SRRIPSAGE counter updates 
-   *
-   * if (access is miss)
-   * - If stream == TS state = 00 TS E0 FILL++ ACC++
-   * - If stream == ZS state = 00 ZS E0 FILL++ ACC++
-   * - If stream == CS state = 11 ACC++ PROD++
-   * - else ACC++
-   *
-   */
+  assert(op == OP_FILL || op == OP_HIT || op == OP_DEMOTE);
 
-  if (strm == TS)
+  switch (op)
   {
-    SAT_CTR_INC(global_data->tex_e0_fill_ctr);
-    SRRIP_DATA_BLOCKS(policy_data)[way].block_state = 0;
-  }
-
-  SAT_CTR_INC(global_data->acc_all_ctr);
-
-  /* If access counter is saturated, half all all other counters */
-  if (IS_CTR_SAT(global_data->acc_all_ctr))
-  {
-    SAT_CTR_HLF(global_data->tex_e0_fill_ctr);
-    SAT_CTR_HLF(global_data->tex_e0_hit_ctr);
-    SAT_CTR_HLF(global_data->tex_e1_fill_ctr);
-    SAT_CTR_HLF(global_data->tex_e1_hit_ctr);
-
-    SAT_CTR_SET(global_data->acc_all_ctr, 0);
-  }
-}
-
-/* Update hit counter */
-static void cache_update_hit_counter_srripsage(srrip_data *policy_data, 
-    srripsage_gdata *global_data, int way, int strm)
-{
-  /* SRRIPSAGE counter updates 
-   *
-   * if (access is hit)
-   * - If stream == ZS state == 00 ZS E0 HIT++ state 01 ACC++
-   * - If stream == ZS state == 01 state 10 ACC++
-   * - If stream == ZS state == 10 state 10 ACC++
-   * - If stream == TS state == 11 state 00 TS E0 FILL++ ACC++ CONS++
-   * - If stream == TS state == 00 state 01 TS E0 HIT++ ACC++
-   * - If stream == TS state == 01 state 10 TS E1 HIT++ ACC++
-   * - else state = 00 ACC++
-   *
-   *
-   */
-  struct cache_block_t *block;
-
-  block = &(SRRIP_DATA_BLOCKS(policy_data)[way]);
-  switch (strm)
-  {
-    case TS:
-
-      if (block->block_state == 0)
-      {
-        SAT_CTR_INC(global_data->tex_e0_hit_ctr);
-        SAT_CTR_INC(global_data->tex_e1_fill_ctr);
-        block->block_state = 1;
-      }
-      else
-      {
-        if (block->block_state == 1)
-        {
-          SAT_CTR_INC(global_data->tex_e1_hit_ctr);
-          block->block_state = 2;
-        }
-        else
-        {
-          if (block->block_state == 3)
-          {
-            SAT_CTR_INC(global_data->tex_e0_fill_ctr);
-            block->block_state = 0;
-          }
-        }
-      }
-
+    case OP_HIT:
+      global_data->per_stream_reuse_blocks[stream]++;
       break;
-  }
 
-  SAT_CTR_INC(global_data->acc_all_ctr);
+    case OP_FILL:
+      global_data->per_stream_oreuse_blocks[stream]++;
+      break;
 
-  /* If access counter is saturated, half all all other counters */
-  if (IS_CTR_SAT(global_data->acc_all_ctr))
-  {
-    SAT_CTR_HLF(global_data->tex_e0_fill_ctr);
-    SAT_CTR_HLF(global_data->tex_e0_hit_ctr);
-    SAT_CTR_HLF(global_data->tex_e1_fill_ctr);
-    SAT_CTR_HLF(global_data->tex_e1_hit_ctr);
+    case OP_DEMOTE:
+      global_data->per_stream_dreuse_blocks[stream]++;
+      break;
 
-    SAT_CTR_SET(global_data->acc_all_ctr, 0);
+    default:
+      printf("Unknown op %s : %d\n", __FUNCTION__, __LINE__);
+      assert(0);
   }
 }
 
 /* Update reused blocks at RRPV 0 */
-void cache_add_reuse_blocks(srripsage_gdata *global_data, ub1 stream)
+void cache_remove_reuse_blocks(srripsage_gdata *global_data, ub1 op,
+    ub1 stream)
 {
-  global_data->per_stream_reuse_blocks[stream]++;
-}
-
-/* Update reused blocks at RRPV 0 */
-void cache_remove_reuse_blocks(srripsage_gdata *global_data, ub1 stream)
-{
-  if(global_data->per_stream_reuse_blocks[stream])
+  assert(op == OP_FILL || op == OP_HIT || op == OP_DEMOTE);
+  
+  switch (op)
   {
-    global_data->per_stream_reuse_blocks[stream]--;
+    case OP_HIT:
+      if(global_data->per_stream_reuse_blocks[stream])
+      {
+        global_data->per_stream_reuse_blocks[stream]--;
+      }
+      break;
+
+    case OP_FILL:
+      if(global_data->per_stream_oreuse_blocks[stream])
+      {
+        global_data->per_stream_oreuse_blocks[stream]--;
+      }
+      break;
+
+    case OP_DEMOTE:
+      if(global_data->per_stream_dreuse_blocks[stream])
+      {
+        global_data->per_stream_dreuse_blocks[stream]--;
+      }
+      break;
+
+    default:
+      printf("Unknown op %s : %d\n", __FUNCTION__, __LINE__);
+      assert(0);
   }
 }
 
 /* Update reuse count of block at RRPV 0 */
-static void cache_update_reuse(srripsage_gdata *global_data, ub1 stream)
+static void cache_update_reuse(srripsage_gdata *global_data, ub1 op,
+    ub1 stream)
 {
-  global_data->per_stream_reuse[stream]++;
-}
+  assert(op == OP_FILL || op == OP_HIT || op == OP_DEMOTE);
+  
+  switch (op)
+  {
+    case OP_HIT:
+      global_data->per_stream_reuse[stream]++;
+      break;
 
+    case OP_FILL:
+      global_data->per_stream_oreuse[stream]++;
+      break;
+
+    case OP_DEMOTE:
+      global_data->per_stream_dreuse[stream]++;
+      break;
+
+    default:
+      printf("Unknown op %s : %d\n", __FUNCTION__, __LINE__);
+      assert(0);
+  }
+}
 
 void cache_init_srripsage(int set_indx, struct cache_params *params, 
     srripsage_data *policy_data, srripsage_gdata *global_data)
@@ -592,16 +745,22 @@ void cache_init_srripsage(int set_indx, struct cache_params *params,
     SAT_CTR_INI(global_data->tex_e1_fill_ctr, 8, 0, 255);  /* Texture epoch 1 fill */
     SAT_CTR_INI(global_data->tex_e1_hit_ctr, 8, 0, 255);   /* Texture epoch 1 hits */
 
-    global_data->bm_ctr       = 0;
-    global_data->bm_thr       = 32;
-    global_data->access_count = 0;
+    global_data->bm_ctr         = 0;
+    global_data->bm_thr         = params->threshold;
+    global_data->access_count   = 0;
+    global_data->active_stream  = NN;
 
     /* Set default value for each stream recency threshold */
     for (int strm = 0; strm <= TST; strm++)
     {
       global_data->rcy_thr[SAMPLED_SET][strm]   = 1;
       global_data->rcy_thr[FOLLOWER_SET][strm]  = 1;
+      global_data->occ_thr[SAMPLED_SET][strm]   = 1;
+      global_data->occ_thr[FOLLOWER_SET][strm]  = 1;
       global_data->per_stream_cur_thr[strm]     = 1;
+      global_data->per_stream_occ_thr[strm]     = 1;
+      global_data->fill_at_head[strm]           = FALSE;
+      global_data->demote_on_hit[strm]          = FALSE;
     }
 
     /* Override value for each Color and Depth */
@@ -618,18 +777,78 @@ void cache_init_srripsage(int set_indx, struct cache_params *params,
     global_data->rcy_thr[FOLLOWER_SET][BS]  = 1;
     global_data->rcy_thr[FOLLOWER_SET][PS]  = 1;
 
+    /* Override value of occupancy threshold */
+    global_data->occ_thr[SAMPLED_SET][CS]   = global_data->per_stream_occ_thr[CS];
+    global_data->occ_thr[SAMPLED_SET][ZS]   = global_data->per_stream_occ_thr[ZS];
+    global_data->occ_thr[SAMPLED_SET][TS]   = global_data->per_stream_occ_thr[TS];
+    global_data->occ_thr[SAMPLED_SET][BS]   = global_data->per_stream_occ_thr[BS];
+    global_data->occ_thr[SAMPLED_SET][PS]   = global_data->per_stream_occ_thr[PS];
+
+    /* Override value of occupancy threshold */
+    global_data->occ_thr[FOLLOWER_SET][CS]  = 1;
+    global_data->occ_thr[FOLLOWER_SET][ZS]  = 1;
+    global_data->occ_thr[FOLLOWER_SET][TS]  = 1;
+    global_data->occ_thr[FOLLOWER_SET][BS]  = 1;
+    global_data->occ_thr[FOLLOWER_SET][PS]  = 1;
+
     memset(global_data->per_stream_fill, 0, sizeof(ub8) * (TST + 1));
     memset(global_data->per_stream_hit, 0, sizeof(ub8) * (TST + 1));
     memset(global_data->per_stream_sevct, 0, sizeof(ub8) * (TST + 1));
     memset(global_data->per_stream_xevct, 0, sizeof(ub8) * (TST + 1));
     memset(global_data->per_stream_rrpv_hit, 0, sizeof(ub8) * (TST + 1) * 4);
     memset(global_data->per_stream_demote, 0, sizeof(ub8) * (TST + 1) * 4);
+    memset(global_data->fills_at_head, 0, sizeof(ub8) * (TST + 1));
+    memset(global_data->dems_at_head, 0, sizeof(ub8) * (TST + 1));
+
+    /* Reset reuse data used for learning for reuses at RRPV 0 */
+    memset(global_data->per_stream_reuse_blocks, 0, sizeof(ub8) * (TST + 1));
+    memset(global_data->per_stream_reuse, 0, sizeof(ub8) * (TST + 1));
+    memset(global_data->per_stream_max_reuse, 0, sizeof(ub8) * (TST + 1));
+
+    /* Reset reuse data used for learning for reuses at RRPV 2 */
+    memset(global_data->per_stream_oreuse_blocks, 0, sizeof(ub8) * (TST + 1));
+    memset(global_data->per_stream_oreuse, 0, sizeof(ub8) * (TST + 1));
+    memset(global_data->per_stream_max_oreuse, 0, sizeof(ub8) * (TST + 1));
+
+    /* Reset reuse data used for learning for reuses of demote blocks */
+    memset(global_data->per_stream_dreuse_blocks, 0, sizeof(ub8) * (TST + 1));
+    memset(global_data->per_stream_dreuse, 0, sizeof(ub8) * (TST + 1));
+    memset(global_data->per_stream_max_dreuse, 0, sizeof(ub8) * (TST + 1));
 
     /* Alocate per RRPV block count table */
     global_data->rrpv_blocks = xcalloc(SRRIPSAGE_DATA_MAX_RRPV(policy_data), sizeof(ub8));
     assert(global_data->rrpv_blocks);
 
     memset(global_data->rrpv_blocks, 0, sizeof(ub8) * SRRIPSAGE_DATA_MAX_RRPV(policy_data));
+
+    /* Initialize fill policy saturating counter */
+    for (ub1 i = 0; i <= TST; i++)
+    {
+      SAT_CTR_INI(global_data->fath_ctr[i], PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
+      SAT_CTR_SET(global_data->fath_ctr[i], PSEL_MID_VAL);
+
+      SAT_CTR_INI(global_data->dem_ctr[i], PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
+      SAT_CTR_SET(global_data->dem_ctr[i], PSEL_MID_VAL);
+
+      memset(&(global_data->lru_sample_access[i]), 0, sizeof(ub8) * (TST + 1));
+      memset(&(global_data->lru_sample_hit[i]), 0, sizeof(ub8) * (TST + 1));
+      memset(&(global_data->lru_sample_dem[i]), 0, sizeof(ub8) * (TST + 1));
+      memset(&(global_data->mru_sample_access[i]), 0, sizeof(ub8) * (TST + 1));
+      memset(&(global_data->mru_sample_hit[i]), 0, sizeof(ub8) * (TST + 1));
+      memset(&(global_data->mru_sample_dem[i]), 0, sizeof(ub8) * (TST + 1));
+      memset(&(global_data->thr_sample_access[i]), 0, sizeof(ub8) * (TST + 1));
+      memset(&(global_data->thr_sample_hit[i]), 0, sizeof(ub8) * (TST + 1));
+      memset(&(global_data->thr_sample_dem[i]), 0, sizeof(ub8) * (TST + 1));
+    }
+
+    SAT_CTR_INI(global_data->gfath_ctr, PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
+    SAT_CTR_SET(global_data->gfath_ctr, PSEL_MID_VAL);
+
+    SAT_CTR_INI(global_data->gdem_ctr, PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
+    SAT_CTR_SET(global_data->gdem_ctr, PSEL_MID_VAL);
+
+    global_data->lru_sample_set = 0;
+    global_data->mru_sample_set = 0;
   }
 
   /* Alocate per RRPV block count table */
@@ -637,17 +856,43 @@ void cache_init_srripsage(int set_indx, struct cache_params *params,
   assert(SRRIPSAGE_DATA_RRPV_BLCKS(policy_data));
 
   memset(SRRIPSAGE_DATA_RRPV_BLCKS(policy_data), 0, sizeof(ub1) * SRRIPSAGE_DATA_MAX_RRPV(policy_data));
+  
+  ub1 set_type;
 
   /* Set policy based on chosen sets */
-  if (get_set_type_srripsage(set_indx) == SAMPLED_SET)
+  set_type = get_set_type_srripsage(set_indx);
+
+  if (set_type == LRU_SAMPLED_SET)
   {
     /* Initialize srrip policy for the set */
     cache_init_srrip(params, &(policy_data->srrip_policy_data));
-    policy_data->following = cache_policy_srrip;
+
+    policy_data->set_type   = LRU_SAMPLED_SET;
+    policy_data->following  = cache_policy_srrip;
+
+    global_data->lru_sample_set +=1;
   }
   else
   {
     policy_data->following = cache_policy_srripsage;
+
+    if (set_type == MRU_SAMPLED_SET)
+    {
+      policy_data->set_type = MRU_SAMPLED_SET;
+      global_data->mru_sample_set +=1;
+    }
+    else
+    {
+      if (set_type == THR_SAMPLED_SET)
+      {
+        policy_data->set_type = THR_SAMPLED_SET;
+        global_data->thr_sample_set += 1;
+      }
+      else
+      {
+        policy_data->set_type   = FOLLOWER_SET;
+      }
+    }
   }
   
   /* Reset per-set fill counter */
@@ -693,19 +938,42 @@ struct cache_block_t* cache_find_block_srripsage(srripsage_data *policy_data,
   struct  cache_block_t *head;
   struct  cache_block_t *node;
   enum    cache_block_state_t state_ptr;
-
+  
   int stream_ptr;
   int min_wayid;
+  int i;
 
   long long tag_ptr;
-  
+
+  ub8 reuse;
+  ub8 reuse_blocks;
+
   /* Increment per-stream fills */
   global_data->per_stream_fill[strm]++;
   policy_data->per_stream_fill[strm]++;
-
+  
   if ((global_data->bm_ctr)++ == global_data->bm_thr)
   {
     global_data->bm_ctr = 0;
+  }
+  
+  if (policy_data->set_type == LRU_SAMPLED_SET)
+  {
+    global_data->lru_sample_access[strm]++;
+  }
+  else
+  {
+    if (policy_data->set_type == MRU_SAMPLED_SET)
+    {
+      global_data->mru_sample_access[strm]++;
+    }
+    else
+    {
+      if (policy_data->set_type == THR_SAMPLED_SET)
+      {
+        global_data->thr_sample_access[strm]++;
+      }
+    }
   }
 
   if (policy_data->following == cache_policy_srrip)
@@ -719,14 +987,11 @@ struct cache_block_t* cache_find_block_srripsage(srripsage_data *policy_data,
       /* Follow SRRIP policy */
       cache_access_block_srrip(&(policy_data->srrip_policy_data), node->way, strm, 
           info);
-
-      cache_update_hit_counter_srripsage(&(policy_data->srrip_policy_data), 
-          global_data, node->way, strm); 
     }
     else
     {
       min_wayid = cache_replace_block_srrip(&(policy_data->srrip_policy_data));
-      
+
       assert(min_wayid != -1);
 
       cache_get_block_srrip(&(policy_data->srrip_policy_data), min_wayid, 
@@ -737,14 +1002,16 @@ struct cache_block_t* cache_find_block_srripsage(srripsage_data *policy_data,
         cache_set_block_srrip(&(policy_data->srrip_policy_data), min_wayid,
             tag_ptr, cache_block_invalid, stream_ptr, info);
       }
+      
+      if (policy_data->blocks[min_wayid].demote)
+      {
+        cache_remove_reuse_blocks(global_data, OP_DEMOTE, info->stream);  
+      }
 
       /* Follow RRIP policy */
       cache_fill_block_srrip(&(policy_data->srrip_policy_data), min_wayid, tag, 
           cache_block_exclusive, strm, info);
 
-      /* Update global counters */
-      cache_update_fill_counter_srripsage(&(policy_data->srrip_policy_data), 
-          global_data, min_wayid, strm);
     }
   }
 
@@ -770,6 +1037,60 @@ end:
 
   if (++(global_data->access_count) == PHASE_SIZE)
   {
+    /* Update fill at occupancy list head flag */
+    printf("LRUSS:%d MRUSS: %d THRSS: %d\n", global_data->lru_sample_set, 
+        global_data->mru_sample_set, global_data->thr_sample_set);
+
+    printf("LACC-C:%d LACC-Z: %d LACC-T: %d LACC-B: %d LACC-P: %d\n", global_data->lru_sample_access[CS], 
+        global_data->lru_sample_access[ZS], global_data->lru_sample_access[TS], 
+        global_data->lru_sample_access[BS], global_data->lru_sample_access[PS]);
+
+    printf("MACC-C:%ld MACC-Z: %ld MACC-T: %ld MACC-B: %ld MACC-P: %ld\n", global_data->lru_sample_access[CS], 
+        global_data->mru_sample_access[ZS], global_data->lru_sample_access[TS], 
+        global_data->mru_sample_access[BS], global_data->lru_sample_access[PS]);
+
+    printf("LHIT-C:%d LHIT-Z: %d LHIT-T: %d LHIT-B: %d LHIT-P: %d\n", global_data->lru_sample_hit[CS], 
+        global_data->lru_sample_hit[ZS], global_data->lru_sample_hit[TS], 
+        global_data->lru_sample_hit[BS], global_data->lru_sample_hit[PS]);
+
+    printf("MHIT-C:%d MHIT-Z: %d MHIT-T: %d MHIT-B: %d MHIT-P: %d\n", global_data->mru_sample_hit[CS], 
+        global_data->mru_sample_hit[ZS], global_data->mru_sample_hit[TS], 
+        global_data->mru_sample_hit[BS], global_data->mru_sample_hit[PS]);
+    
+    ub8 demoted;
+
+    for (ub4 i = 0; i <= TST; i++)
+    {
+      if (i == CS || i == TS || i == ZS || i == BS || i == PS)   
+      {
+        demoted = global_data->per_stream_dreuse_blocks[i];
+
+        printf("DBLKS:%d:%ld ", i, demoted);
+      }
+    }
+
+    printf("\n");
+    
+    for (ub4 i = 0; i <= TST; i++)
+    {
+      if (i == CS || i == TS || i == ZS || i == BS || i == PS)   
+      {
+        reuse = global_data->per_stream_dreuse[i];
+
+        printf("DUSE:%d:%ld ", i, reuse);
+      }
+    }
+
+    printf("\n");
+
+    printf("LDEM-C:%d LDEM-Z: %d LDEM-T: %d LDEM-B: %d LDEM-P: %d\n", global_data->lru_sample_dem[CS], 
+        global_data->lru_sample_dem[ZS], global_data->lru_sample_dem[TS], 
+        global_data->lru_sample_dem[BS], global_data->lru_sample_dem[PS]);
+
+    printf("MDEM-C:%d MDEM-Z: %d MDEM-T: %d MDEM-B: %d MDEM-P: %d\n", global_data->mru_sample_dem[CS], 
+        global_data->mru_sample_dem[ZS], global_data->mru_sample_dem[TS], 
+        global_data->mru_sample_dem[BS], global_data->mru_sample_dem[PS]);
+
     printf("CF:%8ld ZF:%8ld TF:%8ld BF:%8ld\n", global_data->per_stream_fill[CS], 
         global_data->per_stream_fill[ZS], global_data->per_stream_fill[TS], 
         global_data->per_stream_fill[BS]);
@@ -817,7 +1138,32 @@ end:
     printf("R0:%9ld R1:%9ld R2:%8ld R3:%9ld\n", global_data->rrpv_blocks[0], 
         global_data->rrpv_blocks[1], global_data->rrpv_blocks[2],
         global_data->rrpv_blocks[3]);
-  
+
+    printf("FHC:%8ld FHZ:%8ld FHT:%8ld FHB:%8ld FHP:%8ld\n", global_data->fills_at_head[CS], 
+        global_data->fills_at_head[ZS], global_data->fills_at_head[TS],
+        global_data->fills_at_head[BS], global_data->fills_at_head[PS]);
+
+    printf("DMC:%8ld DMZ:%8ld DMT:%8ld DMB:%8ld DMP:%8ld\n", global_data->dems_at_head[CS], 
+        global_data->dems_at_head[ZS], global_data->dems_at_head[TS],
+        global_data->dems_at_head[BS], global_data->dems_at_head[PS]);
+
+    printf("DCTRC:%6d DCTRZ:%6d DCTRT:%6d DCTRB:%6d DCTRP:%6d\n", 
+        SAT_CTR_VAL(global_data->dem_ctr[CS]), 
+        SAT_CTR_VAL(global_data->dem_ctr[ZS]), 
+        SAT_CTR_VAL(global_data->dem_ctr[TS]), 
+        SAT_CTR_VAL(global_data->dem_ctr[BS]), 
+        SAT_CTR_VAL(global_data->dem_ctr[PS]));
+
+    printf("FCTRC:%6d FCTRZ:%6d FCTRT:%6d FCTRB:%6d FCTRP:%6d\n", 
+        SAT_CTR_VAL(global_data->fath_ctr[CS]), 
+        SAT_CTR_VAL(global_data->fath_ctr[ZS]), 
+        SAT_CTR_VAL(global_data->fath_ctr[TS]), 
+        SAT_CTR_VAL(global_data->fath_ctr[BS]), 
+        SAT_CTR_VAL(global_data->fath_ctr[PS]));
+
+    printf("GFCTR:%6d GDCTR:%6d\n", SAT_CTR_VAL(global_data->gfath_ctr), 
+        SAT_CTR_VAL(global_data->gdem_ctr));
+
     ub8 cur_thr;
 
     for (ub4 i = 0; i <= TST; i++)
@@ -829,7 +1175,9 @@ end:
         printf("DTH%d:%7ld ", i, cur_thr);
       }
     }
-    
+
+    printf("DST%d ", global_data->active_stream);
+
     printf("\n");
 
     for (ub4 i = 0; i <= TST; i++)
@@ -841,11 +1189,20 @@ end:
         printf("TH%d:%8ld ", i, cur_thr);
       }
     }
-    
+
     printf("\n");
 
-    ub8 reuse;
-    ub8 reuse_blocks;
+    for (ub4 i = 0; i <= TST; i++)
+    {
+      if (i == CS || i == TS || i == ZS || i == BS || i == PS)   
+      {
+        cur_thr = global_data->occ_thr[FOLLOWER_SET][i];
+
+        printf("OTH%d:%7ld ", i, cur_thr);
+      }
+    }
+
+    printf("\n");
 
     for (ub4 i = 0; i <= TST; i++)
     {
@@ -856,7 +1213,7 @@ end:
         printf("SB%d:%8ld ", i, reuse_blocks);
       }
     }
-    
+
     printf("\n");
 
     for (ub4 i = 0; i <= TST; i++)
@@ -877,25 +1234,96 @@ end:
       {
         reuse         = global_data->per_stream_reuse[i];
         reuse_blocks  = global_data->per_stream_reuse_blocks[i];
-
+#if 0
         if (reuse_blocks)
+#endif
+        if (reuse_blocks && global_data->active_stream == i)
         {
-          printf("S%d:%9ld ", i, reuse / reuse_blocks);
+          printf("S%d:%9ld ", i, reuse);
 #if 0
-          if (global_data->per_stream_max_reuse[i] < (reuse / reuse_blocks))
+            if (global_data->per_stream_max_reuse[i] < (reuse / reuse_blocks))
 #endif
-          if (global_data->per_stream_max_reuse[i] < reuse)
-          {
+            if (global_data->per_stream_max_reuse[i] < reuse)
+            {
 #if 0
-            global_data->per_stream_max_reuse[i]  = (reuse / reuse_blocks); 
+              global_data->per_stream_max_reuse[i]  = (reuse / reuse_blocks); 
 #endif
-            global_data->per_stream_max_reuse[i]  = reuse; 
-            global_data->rcy_thr[FOLLOWER_SET][i] = global_data->per_stream_cur_thr[i]; 
-          }
+              global_data->per_stream_max_reuse[i]  = reuse; 
+#if 0
+              if (global_data->per_stream_cur_thr[i] > global_data->rcy_thr[FOLLOWER_SET][i])
+#endif
+              {
+                global_data->rcy_thr[FOLLOWER_SET][i] = global_data->per_stream_cur_thr[i]; 
+              }
+            }
         }
         else
         {
           printf("S%d:%9ld ", i, 0);
+        }
+      }
+    }
+
+    printf("\n");
+
+    for (ub4 i = 0; i <= TST; i++)
+    {
+      if (i == CS || i == TS || i == ZS || i == BS || i == PS)   
+      {
+        /* Update occupancy threshold */
+        reuse         = global_data->per_stream_oreuse[i];
+        reuse_blocks  = global_data->per_stream_oreuse_blocks[i];
+
+        if (reuse_blocks)
+        {
+          printf("O%d:%9ld ", i, reuse);
+#if 0
+          if (global_data->per_stream_max_reuse[i] < (reuse / reuse_blocks))
+#endif
+            if (global_data->per_stream_max_oreuse[i] < reuse)
+            {
+#if 0
+              global_data->per_stream_max_reuse[i]  = (reuse / reuse_blocks); 
+#endif
+              global_data->per_stream_max_oreuse[i]  = reuse; 
+              global_data->occ_thr[FOLLOWER_SET][i] = global_data->per_stream_cur_thr[i]; 
+            }
+        }
+        else
+        {
+          printf("O%d:%9ld ", i, 0);
+        }
+      }
+    }
+
+    printf("\n");
+
+    for (ub4 i = 0; i <= TST; i++)
+    {
+      if (i == CS || i == TS || i == ZS || i == BS || i == PS)   
+      {
+        /* Update occupancy threshold */
+        reuse         = global_data->per_stream_dreuse[i];
+        reuse_blocks  = global_data->per_stream_dreuse_blocks[i];
+
+        if (reuse_blocks)
+        {
+          printf("D%d:%9ld ", i, reuse / reuse_blocks);
+#if 0
+          if (global_data->per_stream_max_dreuse[i] < (reuse / reuse_blocks))
+#endif
+          if (global_data->per_stream_max_dreuse[i] < reuse)
+          {
+#if 0
+            global_data->per_stream_max_dreuse[i] = (reuse / reuse_blocks); 
+#endif
+            global_data->per_stream_max_dreuse[i]  = reuse; 
+            global_data->dem_thr[FOLLOWER_SET][i] = global_data->per_stream_cur_thr[i]; 
+          }
+        }
+        else
+        {
+          printf("D%d:%9ld:0", i, reuse);
         }
       }
     }
@@ -929,10 +1357,32 @@ end:
 
     global_data->access_count = 0;
 
-    /* Reset per stream reused blocks */
     memset(global_data->per_stream_reuse_blocks, 0, sizeof(ub8) * (TST + 1));
     memset(global_data->per_stream_reuse, 0, sizeof(ub8) * (TST + 1));
+#if 0
     memset(global_data->per_stream_max_reuse, 0, sizeof(ub8) * (TST + 1));
+#endif
+
+    /* Reset per stream occupancy blocks */
+    memset(global_data->per_stream_oreuse_blocks, 0, sizeof(ub8) * (TST + 1));
+    memset(global_data->per_stream_oreuse, 0, sizeof(ub8) * (TST + 1));
+#if 0
+    memset(global_data->per_stream_max_oreuse, 0, sizeof(ub8) * (TST + 1));
+#endif
+
+#if 0    
+    /* Reset per stream demote */
+    memset(global_data->per_stream_dreuse_blocks, 0, sizeof(ub8) * (TST + 1));
+    memset(global_data->per_stream_dreuse, 0, sizeof(ub8) * (TST + 1));
+    memset(global_data->per_stream_max_dreuse, 0, sizeof(ub8) * (TST + 1));
+#endif
+
+    for (i = 0; i <=TST; i++)
+    {
+      global_data->per_stream_dreuse_blocks[i]  >>= 1;
+      global_data->per_stream_dreuse[i]         >>= 1;
+      global_data->per_stream_max_dreuse[i]     >>= 1;
+    }
 
     if (global_data->per_stream_cur_thr[CS] == MIN_TH &&
         global_data->per_stream_cur_thr[ZS] == MIN_TH &&
@@ -941,6 +1391,7 @@ end:
         global_data->per_stream_cur_thr[PS] == MIN_TH)
     {
       global_data->per_stream_cur_thr[CS] <<= 1;
+      global_data->active_stream = CS;
     }
     else
     {
@@ -954,6 +1405,7 @@ end:
             global_data->per_stream_cur_thr[PS] == 1);
 
         global_data->per_stream_cur_thr[CS] <<= 1;
+        global_data->active_stream = CS;
       }
       else
       {
@@ -967,6 +1419,7 @@ end:
               global_data->per_stream_cur_thr[PS] == 1);
 
           global_data->per_stream_cur_thr[ZS] <<= 1;
+          global_data->active_stream = ZS;
         }
         else
         {
@@ -980,6 +1433,7 @@ end:
                 global_data->per_stream_cur_thr[PS] == 1);
 
             global_data->per_stream_cur_thr[TS] <<= 1;
+            global_data->active_stream = TS;
           }
           else
           {
@@ -993,6 +1447,7 @@ end:
                   global_data->per_stream_cur_thr[PS] == 1);
 
               global_data->per_stream_cur_thr[BS] <<= 1;
+              global_data->active_stream = BS;
             }
             else
             {
@@ -1006,6 +1461,7 @@ end:
                     global_data->per_stream_cur_thr[BS] == 1);
 
                 global_data->per_stream_cur_thr[PS] <<= 1;
+                global_data->active_stream = PS;
               }
               else
               {
@@ -1014,24 +1470,36 @@ end:
                 {
                   global_data->per_stream_cur_thr[CS] = 1;
                   global_data->per_stream_cur_thr[ZS] <<= 1;
+
+                  global_data->active_stream            = ZS;
+                  global_data->per_stream_max_reuse[ZS] = 0;
                 }
 
                 if (global_data->per_stream_cur_thr[ZS] == MAX_TH)
                 {
                   global_data->per_stream_cur_thr[ZS] = 1;
                   global_data->per_stream_cur_thr[TS] <<= 1;
+
+                  global_data->active_stream            = TS;
+                  global_data->per_stream_max_reuse[TS] = 0;
                 }
 
                 if (global_data->per_stream_cur_thr[TS] == MAX_TH)
                 {
                   global_data->per_stream_cur_thr[TS] = 1;
                   global_data->per_stream_cur_thr[BS] <<= 1;
+
+                  global_data->active_stream            = BS;
+                  global_data->per_stream_max_reuse[BS] = 0;
                 }
 
                 if (global_data->per_stream_cur_thr[BS] == MAX_TH)
                 {
                   global_data->per_stream_cur_thr[BS] = 1;
                   global_data->per_stream_cur_thr[PS] <<= 1;
+
+                  global_data->active_stream            = PS;
+                  global_data->per_stream_max_reuse[PS] = 0;
                 }
 
                 if (global_data->per_stream_cur_thr[PS] == MAX_TH)
@@ -1046,11 +1514,66 @@ end:
     }
 
     /* Override value for each Color and Depth */
+#if 0
     global_data->rcy_thr[SAMPLED_SET][CS]   = global_data->per_stream_cur_thr[CS];
     global_data->rcy_thr[SAMPLED_SET][ZS]   = global_data->per_stream_cur_thr[ZS];
     global_data->rcy_thr[SAMPLED_SET][TS]   = global_data->per_stream_cur_thr[TS];
     global_data->rcy_thr[SAMPLED_SET][BS]   = global_data->per_stream_cur_thr[BS];
     global_data->rcy_thr[SAMPLED_SET][PS]   = global_data->per_stream_cur_thr[PS];
+#endif
+
+    if (global_data->active_stream == CS)
+    {
+      global_data->rcy_thr[SAMPLED_SET][CS]   = global_data->per_stream_cur_thr[CS];
+    }
+    else
+    {
+      global_data->rcy_thr[SAMPLED_SET][CS]   = global_data->rcy_thr[FOLLOWER_SET][CS];
+    }
+
+    
+    if (global_data->active_stream == ZS)
+    {
+      global_data->rcy_thr[SAMPLED_SET][ZS]   = global_data->per_stream_cur_thr[ZS];
+    }
+    else
+    {
+      global_data->rcy_thr[SAMPLED_SET][ZS]   = global_data->rcy_thr[FOLLOWER_SET][ZS];
+    }
+
+    if (global_data->active_stream == TS)
+    {
+      global_data->rcy_thr[SAMPLED_SET][TS]   = global_data->per_stream_cur_thr[TS];
+    }
+    else
+    {
+      global_data->rcy_thr[SAMPLED_SET][TS]   = global_data->rcy_thr[FOLLOWER_SET][TS];
+    }
+
+    if (global_data->active_stream == BS)
+    {
+      global_data->rcy_thr[SAMPLED_SET][BS]   = global_data->per_stream_cur_thr[BS];
+    }
+    else
+    {
+      global_data->rcy_thr[SAMPLED_SET][BS]   = global_data->rcy_thr[FOLLOWER_SET][BS];
+    }
+
+    if (global_data->active_stream == PS)
+    {
+      global_data->rcy_thr[SAMPLED_SET][PS]   = global_data->per_stream_cur_thr[PS];
+    }
+    else
+    {
+      global_data->rcy_thr[SAMPLED_SET][PS]   = global_data->rcy_thr[FOLLOWER_SET][PS];
+    }
+
+    /* Override value for each Color and Depth */
+    global_data->occ_thr[SAMPLED_SET][CS]   = global_data->per_stream_cur_thr[CS];
+    global_data->occ_thr[SAMPLED_SET][ZS]   = global_data->per_stream_cur_thr[ZS];
+    global_data->occ_thr[SAMPLED_SET][TS]   = global_data->per_stream_cur_thr[TS];
+    global_data->occ_thr[SAMPLED_SET][BS]   = global_data->per_stream_cur_thr[BS];
+    global_data->occ_thr[SAMPLED_SET][PS]   = global_data->per_stream_cur_thr[PS];
 
     /* Override value for each Color and Depth */
 #if 0
@@ -1059,13 +1582,31 @@ end:
     global_data->rcy_thr[SAMPLED_SET][TS]  = 1;
     global_data->rcy_thr[SAMPLED_SET][BS]  = 1;
     global_data->rcy_thr[SAMPLED_SET][PS]  = 16;
+#endif
 
-    global_data->rcy_thr[FOLLOWER_SET][CS] = 8;
-    global_data->rcy_thr[FOLLOWER_SET][ZS] = 16;
+#if 0
+    global_data->rcy_thr[FOLLOWER_SET][CS] = 16;
+    global_data->rcy_thr[FOLLOWER_SET][ZS] = 1;
     global_data->rcy_thr[FOLLOWER_SET][TS] = 1;
     global_data->rcy_thr[FOLLOWER_SET][BS] = 1;
+    global_data->rcy_thr[FOLLOWER_SET][PS] = 1;
+    global_data->rcy_thr[FOLLOWER_SET][CS] = 16;
     global_data->rcy_thr[FOLLOWER_SET][PS] = 16;
-    global_data->rcy_thr[FOLLOWER_SET][PS] = 4;
+
+    global_data->rcy_thr[FOLLOWER_SET][CS] = 16;
+    global_data->rcy_thr[FOLLOWER_SET][ZS] = 1;
+    global_data->rcy_thr[FOLLOWER_SET][TS] = 4;
+#endif
+
+#if 0
+    global_data->occ_thr[FOLLOWER_SET][CS] = 1;
+    global_data->rcy_thr[FOLLOWER_SET][CS] = 1;
+    global_data->rcy_thr[FOLLOWER_SET][ZS] = 1;
+    global_data->occ_thr[FOLLOWER_SET][ZS] = 1;
+    global_data->occ_thr[FOLLOWER_SET][TS] = 2;
+    global_data->rcy_thr[FOLLOWER_SET][TS] = 8;
+    global_data->occ_thr[FOLLOWER_SET][PS] = 16;
+    global_data->rcy_thr[FOLLOWER_SET][CS] = 16;
 #endif
   }
 
@@ -1105,20 +1646,6 @@ void cache_fill_block_srripsage(srripsage_data *policy_data,
     /* Get RRPV to be assigned to the new block */
     rrpv = cache_get_fill_rrpv_srripsage(policy_data, global_data, info);
 
-#if 0
-    if (info && info->spill == TRUE && info->stream == BS)
-    {
-      rrpv = SRRIPSAGE_DATA_SPILL_RRPV(policy_data);
-    }
-#endif
-
-#if 0
-    if (info && info->spill == TRUE)
-    {
-      rrpv = SRRIPSAGE_DATA_SPILL_RRPV(policy_data);
-    }
-#endif
-
     /* If block is not bypassed */
     if (rrpv != BYPASS_RRPV)
     {
@@ -1136,6 +1663,7 @@ void cache_fill_block_srripsage(srripsage_data *policy_data,
       block->recency    = policy_data->evictions;
       block->last_rrpv  = rrpv;
       block->access     = 0;
+      block->demote     = FALSE;
 
       switch (strm)
       {
@@ -1147,6 +1675,15 @@ void cache_fill_block_srripsage(srripsage_data *policy_data,
           block->epoch = 3;
           break;
       }
+      
+      /* Update RRPV 2 block count */
+      if (policy_data->set_type == THR_SAMPLED_SET)
+      {
+        if (rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
+        {
+          cache_add_reuse_blocks(global_data, OP_FILL, info->stream);
+        }
+      }
 
       /* Insert block in to the corresponding RRPV queue */
 #if 0
@@ -1154,6 +1691,8 @@ void cache_fill_block_srripsage(srripsage_data *policy_data,
       if (info->stream == CS && info->spill == TRUE && rrpv != SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
       if (info->stream != ZS && info->stream != CS && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
       if (info->stream != TS && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
+      if (info->stream != BS && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
+      if (info->stream != BS && info->stream != TS && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
       if (info->stream == CS && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
       if (info->stream != CS && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
       if (info->stream != ZS && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
@@ -1166,40 +1705,139 @@ void cache_fill_block_srripsage(srripsage_data *policy_data,
       if ((info->stream == CS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
       if ((info->stream == TS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
       if ((info->stream == TS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
-      if ((info->stream == TS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
       if ((info->stream == PS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
       if (rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
       if (info->stream != CS && info->stream != ZS && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
+      if (global_data->fill_at_head[info->stream] == TRUE && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
 #endif
 
-      if (rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
+#if 0    
+      if (policy_data->set_type == LRU_SAMPLED_SET && 
+          global_data->active_stream == info->stream &&
+          rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
+
+      if (policy_data->set_type == LRU_SAMPLED_SET && 
+          rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
+
+      if (policy_data->set_type == LRU_SAMPLED_SET && 
+          rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1 && 
+          global_data->bm_ctr == 0)
+#endif
+      if (policy_data->set_type == LRU_SAMPLED_SET && 
+          rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
       {
-#if 0
-        /* Get LRU block at the rrpv list */
-        rrpv_block = SRRIPSAGE_DATA_VALID_HEAD(policy_data)[0].head;
-
-        /* Fill block at LRU */
-        if (rrpv_block && (policy_data->evictions - rrpv_block->recency) < 8)
-        {
-          CACHE_APPEND_TO_QUEUE(block, 
-              SRRIPSAGE_DATA_VALID_HEAD(policy_data)[rrpv], 
-              SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv]);
-        }
-        else
-#endif
-        {
           /* Fill block at LRU */
           CACHE_PREPEND_TO_QUEUE(block, 
               SRRIPSAGE_DATA_VALID_HEAD(policy_data)[rrpv], 
               SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv]);
-        }
       }
       else
       {
-        /* Fill block at MRU */
-        CACHE_APPEND_TO_QUEUE(block, 
-            SRRIPSAGE_DATA_VALID_HEAD(policy_data)[rrpv], 
-            SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv]);
+#if 0
+        if (((policy_data->set_type == MRU_SAMPLED_SET)||
+             (policy_data->set_type == LRU_SAMPLED_SET))&&
+            rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
+
+        if (policy_data->set_type == MRU_SAMPLED_SET &&
+            rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
+
+        if ((policy_data->set_type == MRU_SAMPLED_SET || 
+              policy_data->set_type == LRU_SAMPLED_SET) &&
+            rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
+#endif
+        if (policy_data->set_type == MRU_SAMPLED_SET && 
+            rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
+        {
+            /* Fill block at LRU */
+            CACHE_APPEND_TO_QUEUE(block, 
+                SRRIPSAGE_DATA_VALID_HEAD(policy_data)[rrpv], 
+                SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv]);
+
+        }
+#if 0
+        {
+          if (policy_data->set_type == LRU_SAMPLED_SET&&
+              rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
+          {
+            /* Fill block at LRU */
+            CACHE_APPEND_TO_QUEUE(block, 
+                SRRIPSAGE_DATA_VALID_HEAD(policy_data)[rrpv], 
+                SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv]);
+          }
+        }
+#endif
+        else
+        {
+#if 0
+          if (rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1) 
+          if ((info->stream == CS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1) 
+          if ((info->stream == TS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1) 
+          if ((info->stream != TS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1) 
+          if ((info->stream != CS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1) 
+          if ((info->stream == TS || info->stream == ZS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1) 
+          if (rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
+          if ((info->stream == CS || info->stream == ZS || info->stream == TS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1) 
+          if ((info->stream == CS || info->stream == ZS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1) 
+          if (rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1) 
+          if ((info->stream == CS || info->stream == BS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1) 
+#endif
+          if (rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1) 
+          {
+            assert(policy_data->set_type == FOLLOWER_SET || 
+                policy_data->set_type == THR_SAMPLED_SET);
+            if (SAT_CTR_VAL(global_data->fath_ctr[info->stream]) > PSEL_MID_VAL)
+            {
+              CACHE_PREPEND_TO_QUEUE(block, 
+                  SRRIPSAGE_DATA_VALID_HEAD(policy_data)[rrpv], 
+                  SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv]);
+            }
+            else
+            {
+              CACHE_APPEND_TO_QUEUE(block, 
+                  SRRIPSAGE_DATA_VALID_HEAD(policy_data)[rrpv], 
+                  SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv]);
+            }
+          }
+          else
+          {
+            CACHE_APPEND_TO_QUEUE(block, 
+                SRRIPSAGE_DATA_VALID_HEAD(policy_data)[rrpv], 
+                SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv]);
+          }
+#if 0
+          if ((info->stream == CS) && rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
+          {
+            /* Get LRU block at the rrpv list */
+            rrpv_block = SRRIPSAGE_DATA_VALID_HEAD(policy_data)[rrpv].head;
+
+            /* Fill block at MRU */
+            if (rrpv_block && 
+                (policy_data->evictions - rrpv_block->recency) < 
+                OCC_THR(policy_data, global_data, info->stream))
+            {
+              CACHE_APPEND_TO_QUEUE(block, 
+                  SRRIPSAGE_DATA_VALID_HEAD(policy_data)[rrpv], 
+                  SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv]);
+            }
+            else
+            {
+              /* Fill block at LRU */
+              CACHE_PREPEND_TO_QUEUE(block, 
+                  SRRIPSAGE_DATA_VALID_HEAD(policy_data)[rrpv], 
+                  SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv]);
+
+              global_data->fills_at_head[info->stream]++;
+            }
+          }
+          else
+          {
+            /* Fill block at MRU */
+            CACHE_APPEND_TO_QUEUE(block, 
+                SRRIPSAGE_DATA_VALID_HEAD(policy_data)[rrpv], 
+                SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv]);
+          }
+#endif
+        }
       }
     }
   }
@@ -1272,7 +1910,7 @@ int cache_replace_block_srripsage(srripsage_data *policy_data,
 #if 0
         if ((lrublock->recency - policy_data->evictions) < RCY_THR(policy_data, global_data, lrublock->stream))
         {
-          CACHE_SRRIPSAGE_AGEBLOCK(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
+          CACHE_SRRIPSAGE_AGEBLOCK_FOLLOWER(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
             SRRIPSAGE_DATA_VALID_TAIL(policy_data), rrpv);
         }
         else
@@ -1283,7 +1921,9 @@ int cache_replace_block_srripsage(srripsage_data *policy_data,
 #endif
 
         /* To collect sample reuse block data */
-        if (policy_data->following == cache_policy_srrip && global_data->per_stream_reuse_blocks[info->stream])
+#if 0
+        if (policy_data->following == cache_policy_srrip && 
+            global_data->per_stream_reuse_blocks[info->stream])
         {
           CACHE_SRRIPSAGE_AGEBLOCK_SAMPLE(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
               SRRIPSAGE_DATA_VALID_TAIL(policy_data), rrpv, global_data);
@@ -1292,14 +1932,51 @@ int cache_replace_block_srripsage(srripsage_data *policy_data,
               SRRIPSAGE_DATA_VALID_TAIL(policy_data), policy_data, global_data);
 #endif
         }
+#endif
+        if (policy_data->set_type == LRU_SAMPLED_SET)
+        {
+          /* Age MRU in LRU set */
+          CACHE_SRRIPSAGE_AGEBLOCK_MRU(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
+              SRRIPSAGE_DATA_VALID_TAIL(policy_data), rrpv, global_data);
+        }
         else
         {
-          CACHE_SRRIPSAGE_AGEBLOCK(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
-              SRRIPSAGE_DATA_VALID_TAIL(policy_data), rrpv);
+          if (policy_data->set_type == MRU_SAMPLED_SET)
+          {
+            /* Age LRU in MRU set */
+            CACHE_SRRIPSAGE_AGEBLOCK_LRU(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
+                SRRIPSAGE_DATA_VALID_TAIL(policy_data), rrpv, global_data);
+          }
+          else
+          {
+            assert(policy_data->set_type == FOLLOWER_SET || 
+                policy_data->set_type == THR_SAMPLED_SET);
+          
 #if 0
-          CACHE_SRRIPSAGE_AGELRU(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
-              SRRIPSAGE_DATA_VALID_TAIL(policy_data), policy_data, global_data);
+            if (SAT_CTR_VAL(global_data->dem_ctr[info->stream]) > PSEL_MID_VAL)
+            {
+              CACHE_SRRIPSAGE_AGEBLOCK_MRU(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
+                SRRIPSAGE_DATA_VALID_TAIL(policy_data), rrpv, global_data);
+            }
+            else
+            {
+              CACHE_SRRIPSAGE_AGEBLOCK_LRU(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
+                SRRIPSAGE_DATA_VALID_TAIL(policy_data), rrpv, global_data);
+            }
 #endif
+          
+            CACHE_SRRIPSAGE_AGEBLOCK_FOLLOWER(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
+              SRRIPSAGE_DATA_VALID_TAIL(policy_data), rrpv, policy_data, global_data);
+#if 0
+            CACHE_SRRIPSAGE_AGELRU_FOLLOWER(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
+                SRRIPSAGE_DATA_VALID_TAIL(policy_data), policy_data, global_data);
+#endif
+            /* Increment demotion counter */
+            if (global_data->per_stream_dreuse[info->stream] > 4)
+            {
+              global_data->dems_at_head[info->stream]++;
+            }
+          }
         }
 
 #if 0
@@ -1308,7 +1985,7 @@ int cache_replace_block_srripsage(srripsage_data *policy_data,
 #endif
       }
 
-      for (block = SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
+      for (block = SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->prev)
       {
         if (!block->busy && block->way < min_wayid)
           min_wayid = block->way;
@@ -1319,7 +1996,7 @@ int cache_replace_block_srripsage(srripsage_data *policy_data,
       
       /* Increment eviction in the set */
       policy_data->evictions += 1;
-      
+
       /* Update block count at old RRPV */
       assert(SRRIPSAGE_DATA_RRPV_BLCKS(policy_data)[old_rrpv] > 0);
       SRRIPSAGE_DATA_RRPV_BLCKS(policy_data)[old_rrpv]--;
@@ -1353,118 +2030,174 @@ void cache_access_block_srripsage(srripsage_data *policy_data,
   struct cache_block_t *blk   = NULL;
   struct cache_block_t *next  = NULL;
   struct cache_block_t *prev  = NULL;
-  
+
   int min_wayid;
   int stream_ptr;
   long long tag_ptr;
 
   int old_rrpv;
   int new_rrpv;
-  
+
   /* Update per-stream hits */
   global_data->per_stream_hit[strm]++;
 
+  assert(policy_data->following == cache_policy_srripsage || 
+      policy_data->following == cache_policy_srrip);
+
+  blk  = &(SRRIPSAGE_DATA_BLOCKS(policy_data)[way]);
+  prev = blk->prev;
+  next = blk->next;
+
+  /* Check: block's tag and state are valid */
+  assert(blk->tag >= 0);
+  assert(blk->state != cache_block_invalid);
+
+  /* Get old RRPV from the block */
+  old_rrpv = (((rrip_list *)(blk->data))->rrpv);
+  new_rrpv = old_rrpv;
+
+  /* Get new RRPV using policy specific function */
+  new_rrpv = cache_get_new_rrpv_srripsage(policy_data, global_data, info, way, 
+      old_rrpv, blk->recency);
+  
+  /* Update counters for sampled set */
+  if (policy_data->set_type == THR_SAMPLED_SET)
   {
-    assert(policy_data->following == cache_policy_srripsage || policy_data->following == cache_policy_srrip);
-
-    blk  = &(SRRIPSAGE_DATA_BLOCKS(policy_data)[way]);
-    prev = blk->prev;
-    next = blk->next;
-
-    /* Check: block's tag and state are valid */
-    assert(blk->tag >= 0);
-    assert(blk->state != cache_block_invalid);
-
-    /* Get old RRPV from the block */
-    old_rrpv = (((rrip_list *)(blk->data))->rrpv);
-    new_rrpv = old_rrpv;
-
-    /* Get new RRPV using policy specific function */
-#if 0
-    if (info && info->fill == TRUE)
+    /* Update hit counter at RRPV 0 */
+    if (new_rrpv == !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
     {
-      new_rrpv = cache_get_new_rrpv_srripsage(policy_data, global_data, way, old_rrpv);
-
-      if (blk->stream == CS && info->stream == BS)
+      if (old_rrpv != new_rrpv)
       {
-        new_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data);
+        /* Update blocks ate RRPV 0 */
+        cache_add_reuse_blocks(global_data, OP_HIT, blk->stream);
+
+        if (old_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
+        {
+          cache_remove_reuse_blocks(global_data, OP_FILL, blk->stream);  
+        }
       }
+      else
+      {
+        /* Update blocks ate RRPV 0 */
+        cache_update_reuse(global_data, OP_HIT, blk->stream);
+      }
+    }
+
+    if (old_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
+    {
+      /* Update blocks ate RRPV 0 */
+      cache_update_reuse(global_data, OP_FILL, blk->stream);
+    }
+
+    if (blk->demote) 
+    {
+      cache_update_reuse(global_data, OP_DEMOTE, blk->stream);
+    }
+  }
+  
+  /* Update demotion counter */
+  if (new_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data))
+  {
+    global_data->per_stream_demote[old_rrpv][info->stream]++;
+  }
+
+#if 0  
+  if (old_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1 && 
+      blk->demote == FALSE && global_data->active_stream == info->stream)
+#endif
+
+  if (old_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1 && 
+      blk->demote == FALSE)
+  {
+    if (policy_data->set_type == LRU_SAMPLED_SET)
+    {
+      /* Update per-stream counter */
+      SAT_CTR_INC(global_data->fath_ctr[blk->stream]);
+
+      global_data->lru_sample_hit[blk->stream]++;
+      
+      /* Update global counter */
+      SAT_CTR_INC(global_data->gfath_ctr);
     }
     else
     {
-      new_rrpv = SRRIPSAGE_DATA_SPILL_RRPV(policy_data);
-    }
-#endif
-
-    new_rrpv = cache_get_new_rrpv_srripsage(policy_data, global_data, info, way, 
-        old_rrpv, blk->recency);
-    
-    if (policy_data->following == cache_policy_srrip)
-    {
-      if (new_rrpv == 0)
+      if (policy_data->set_type == MRU_SAMPLED_SET)
       {
-        if (old_rrpv != new_rrpv)
+        /* Update per-stream counter */
+        SAT_CTR_DEC(global_data->fath_ctr[blk->stream]);
+        global_data->mru_sample_hit[blk->stream]++;
+
+        /* Update global counter */
+        SAT_CTR_DEC(global_data->gfath_ctr);
+      }
+    }
+  }
+  else
+  {
+    if (old_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1 &&
+        blk->demote == TRUE)
+    {
+      if (policy_data->set_type == LRU_SAMPLED_SET)
+      {
+        /* Update per-stream counter */
+        SAT_CTR_INC(global_data->dem_ctr[blk->stream]);
+
+        global_data->lru_sample_dem[blk->stream]++;
+
+        /* Update global counter */
+        SAT_CTR_INC(global_data->gdem_ctr);
+      }
+      else
+      {
+        if (policy_data->set_type == MRU_SAMPLED_SET)
         {
-          /* Update blocks ate RRPV 0 */
-          cache_add_reuse_blocks(global_data, info->stream);
-        }
-        else
-        {
-          /* Update blocks ate RRPV 0 */
-          cache_update_reuse(global_data, info->stream);
+          /* Update per-stream counter */
+          SAT_CTR_DEC(global_data->dem_ctr[blk->stream]);
+
+          global_data->mru_sample_dem[blk->stream]++;
+
+          /* Update global counter */
+          SAT_CTR_DEC(global_data->gdem_ctr);
         }
       }
     }
+  }
 
-#if 0    
-    if (blk->stream == BS && info->stream == TS)
-    {
-      new_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data);
-    }
+  /* Update block queue if block got new RRPV */
+  if (new_rrpv != old_rrpv)
+  {
+    /* Move block at the tail of the list */
+    CACHE_REMOVE_FROM_QUEUE(blk, SRRIPSAGE_DATA_VALID_HEAD(policy_data)[old_rrpv],
+        SRRIPSAGE_DATA_VALID_TAIL(policy_data)[old_rrpv]);
 
-    if (blk->stream == CS && info->stream == TS && old_rrpv == 0)
+    CACHE_APPEND_TO_QUEUE(blk, SRRIPSAGE_DATA_VALID_HEAD(policy_data)[new_rrpv], 
+        SRRIPSAGE_DATA_VALID_TAIL(policy_data)[new_rrpv]);
+  }
+  else
+  {
+    /* Move block to the tail of the list */
+    if (new_rrpv == !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
     {
-      new_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data);
-    }
-#endif
-    
-    /* Update demotion counter */
-    if (new_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data))
-    {
-      global_data->per_stream_demote[old_rrpv][info->stream]++;
-    }
-
-    /* Update block queue if block got new RRPV */
-    if (new_rrpv != old_rrpv)
-    {
-      /* Move block at the tail of the list */
       CACHE_REMOVE_FROM_QUEUE(blk, SRRIPSAGE_DATA_VALID_HEAD(policy_data)[old_rrpv],
           SRRIPSAGE_DATA_VALID_TAIL(policy_data)[old_rrpv]);
 
       CACHE_APPEND_TO_QUEUE(blk, SRRIPSAGE_DATA_VALID_HEAD(policy_data)[new_rrpv], 
           SRRIPSAGE_DATA_VALID_TAIL(policy_data)[new_rrpv]);
     }
-    else
-    {
 #if 0
-      /* Move block to the tail of the list */
-      if (new_rrpv == !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
-      {
-        CACHE_REMOVE_FROM_QUEUE(blk, SRRIPSAGE_DATA_VALID_HEAD(policy_data)[old_rrpv],
-            SRRIPSAGE_DATA_VALID_TAIL(policy_data)[old_rrpv]);
 
-        CACHE_APPEND_TO_QUEUE(blk, SRRIPSAGE_DATA_VALID_HEAD(policy_data)[new_rrpv], 
-            SRRIPSAGE_DATA_VALID_TAIL(policy_data)[new_rrpv]);
-      }
-
-      if (new_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1 && info->stream == ZS)
-      if (new_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1 && info->stream == CS)
-      if (new_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1 && info->stream == TS)
-      if (new_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1 && info->stream == CS)
-      if (new_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1 && info->stream == ZS)
+    if (new_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1 && info->stream == ZS)
+    if (new_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1 && info->stream == CS)
+    if (new_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1 && info->stream == TS)
+    if (new_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1 && info->stream == CS)
+    if (new_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1 && info->stream == ZS)
+    if (new_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
 #endif
 
-      if (new_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1)
+#if 0
+    if (new_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1 && info->stream == TS)
+    {
+      if (SAT_CTR_VAL(global_data->fath_ctr[info->stream]) > PSEL_MID_VAL)
       {
         CACHE_REMOVE_FROM_QUEUE(blk, SRRIPSAGE_DATA_VALID_HEAD(policy_data)[old_rrpv],
             SRRIPSAGE_DATA_VALID_TAIL(policy_data)[old_rrpv]);
@@ -1472,47 +2205,56 @@ void cache_access_block_srripsage(srripsage_data *policy_data,
         CACHE_PREPEND_TO_QUEUE(blk, SRRIPSAGE_DATA_VALID_HEAD(policy_data)[new_rrpv], 
             SRRIPSAGE_DATA_VALID_TAIL(policy_data)[new_rrpv]);
       }
-    }
-
-    if (strm == TS)
-    {
-      if (info && blk->stream == info->stream)
-      {
-        blk->epoch  = (blk->epoch < 2) ? blk->epoch + 1 : 2;
-      }
       else
       {
-        blk->epoch = 0;
+        CACHE_REMOVE_FROM_QUEUE(blk, SRRIPSAGE_DATA_VALID_HEAD(policy_data)[old_rrpv],
+            SRRIPSAGE_DATA_VALID_TAIL(policy_data)[old_rrpv]);
+
+        CACHE_APPEND_TO_QUEUE(blk, SRRIPSAGE_DATA_VALID_HEAD(policy_data)[new_rrpv], 
+            SRRIPSAGE_DATA_VALID_TAIL(policy_data)[new_rrpv]);
       }
+    }
+#endif
+  }
+
+  if (strm == TS)
+  {
+    if (info && blk->stream == info->stream)
+    {
+      blk->epoch  = (blk->epoch < 2) ? blk->epoch + 1 : 2;
     }
     else
     {
-      if (blk->stream == TS)
-      {
-        blk->epoch = 3;
-      }
+      blk->epoch = 0;
     }
-
-    if (blk->last_rrpv != new_rrpv)
-    {
-      /* Update RRPV block count */
-      assert(SRRIPSAGE_DATA_RRPV_BLCKS(policy_data)[blk->last_rrpv] > 0);
-
-      SRRIPSAGE_DATA_RRPV_BLCKS(policy_data)[blk->last_rrpv]--;
-      global_data->rrpv_blocks[blk->last_rrpv]--;
-
-      SRRIPSAGE_DATA_RRPV_BLCKS(policy_data)[new_rrpv]++;
-      global_data->rrpv_blocks[new_rrpv]++;
-    }
-
-    global_data->per_stream_rrpv_hit[old_rrpv][strm]++;
-
-    CACHE_UPDATE_BLOCK_STREAM(blk, strm);
-    blk->dirty      = (info && info->dirty) ? 1 : 0;
-    blk->recency    = policy_data->evictions;
-    blk->last_rrpv  = new_rrpv;
-    blk->access    += 1;
   }
+  else
+  {
+    if (blk->stream == TS)
+    {
+      blk->epoch = 3;
+    }
+  }
+
+  if (blk->last_rrpv != new_rrpv)
+  {
+    /* Update RRPV block count */
+    assert(SRRIPSAGE_DATA_RRPV_BLCKS(policy_data)[blk->last_rrpv] > 0);
+
+    SRRIPSAGE_DATA_RRPV_BLCKS(policy_data)[blk->last_rrpv]--;
+    global_data->rrpv_blocks[blk->last_rrpv]--;
+
+    SRRIPSAGE_DATA_RRPV_BLCKS(policy_data)[new_rrpv]++;
+    global_data->rrpv_blocks[new_rrpv]++;
+  }
+
+  global_data->per_stream_rrpv_hit[old_rrpv][strm]++;
+
+  CACHE_UPDATE_BLOCK_STREAM(blk, strm);
+  blk->dirty      = (info && info->dirty) ? 1 : 0;
+  blk->recency    = policy_data->evictions;
+  blk->last_rrpv  = new_rrpv;
+  blk->access    += 1;
 
   policy_data->last_eviction = policy_data->evictions;
 
@@ -1588,19 +2330,19 @@ int cache_get_fill_rrpv_srripsage(srripsage_data *policy_data,
       ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
       break;
 
-#if 0
     case BS:
+#if 0
       if (info->spill == TRUE)
       {
         ret_rrpv = !SRRIPSAGE_DATA_MAX_RRPV(policy_data);
       }
       else
-
+#endif
       {
-        ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
+        ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data);
       }
       break;
-#endif
+
     case CS:
 #if 0
       if (info->dbuf == FALSE && info->spill == TRUE)
@@ -1619,7 +2361,14 @@ int cache_get_fill_rrpv_srripsage(srripsage_data *policy_data,
       break;
 
     case PS:
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
+      if (global_data->bm_ctr == 0)
+      {
+        ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
+      }
+      else
+      {
+        ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data);
+      }
       break;
 
     default:
@@ -1640,7 +2389,7 @@ int cache_get_fill_rrpv_srripsage(srripsage_data *policy_data,
   if (block && policy_data->evictions)
 #endif
 
-  if (block && policy_data->evictions && info->stream != PS)
+  if (block && policy_data->evictions)
   {
     /* If recency of LRU block is below a threshold, fill new block at RRPV 3 */
     assert(block->recency <= policy_data->evictions);
@@ -1665,23 +2414,33 @@ int cache_get_fill_rrpv_srripsage(srripsage_data *policy_data,
   }
 #endif
 
-#if 0
-#define FILL_TH (16)
+#define FILL_TH (10)
 #if 0
   if (policy_data->per_stream_fill[info->stream] > FILL_TH && 
     policy_data->hit_post_fill[info->stream] == FALSE && SET_BLCOKS(policy_data) > 10)
   if (info->stream != TS)
+  if (info->stream == ZS)
+  if (info->stream == ZS)
 #endif
   {
-    if (policy_data->per_stream_fill[info->stream] > FILL_TH && 
-        policy_data->hit_post_fill[info->stream] == FALSE && SET_BLCOKS(policy_data) > 10)
+#if 0
+    if (SET_BLCOKS(policy_data) > FILL_TH)
+#endif
+
+#define RCY_TH (4)
+
+#if 0
+    if (global_data->rcy_thr[info->stream] < RCY_TH)
+    if (SET_BLCOKS(policy_data) > FILL_TH)
     {
       ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data);
     }
+#endif
+
+#undef RCY_TH
   }
 
 #undef FILL_TH
-#endif
 
 #if 0
   else
@@ -1701,6 +2460,21 @@ int cache_get_fill_rrpv_srripsage(srripsage_data *policy_data,
 
 int cache_get_replacement_rrpv_srripsage(srripsage_data *policy_data)
 {
+#if 0
+  if ((SRRIPSAGE_DATA_VALID_HEAD(policy_data)[SRRIPSAGE_DATA_MAX_RRPV(policy_data)].head == NULL &&
+        SRRIPSAGE_DATA_VALID_HEAD(policy_data)[SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1].head == NULL)||
+      SRRIPSAGE_DATA_VALID_HEAD(policy_data)[SRRIPSAGE_DATA_MAX_RRPV(policy_data)].head != NULL)
+  {
+    return SRRIPSAGE_DATA_MAX_RRPV(policy_data);
+  }
+  else
+  {
+    assert(SRRIPSAGE_DATA_VALID_HEAD(policy_data)[SRRIPSAGE_DATA_MAX_RRPV(policy_data)].head == NULL);
+    assert(SRRIPSAGE_DATA_VALID_HEAD(policy_data)[SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1].head != NULL);
+
+    return SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
+  }
+#endif
   return SRRIPSAGE_DATA_MAX_RRPV(policy_data);
 }
 
@@ -1809,13 +2583,16 @@ int cache_get_new_rrpv_srripsage(srripsage_data *policy_data,
   if (block && policy_data->evictions && info->stream == CS)
   if (block && policy_data->evictions && info->stream != CS)
   if (block && policy_data->evictions && info->stream != TS)
+  if (block && policy_data->evictions && info->stream != ZS)
   if (block && policy_data->evictions && info->stream != CS)
   if (block && policy_data->evictions && info->stream != PS)
+  if (block && policy_data->evictions && info->stream != CS)
+  if (block && policy_data->evictions && info->stream != CS)
   if (block && policy_data->evictions)
 #endif
 
   /* Choose new rrpv based on LRU block at RRPV 0 */
-  if (block && policy_data->evictions && info->stream != PS)
+  if (block && policy_data->evictions)
   {
     /* If recency of LRU block is below a threshold, fill new block at 
      * RRPV 3 */
@@ -1823,29 +2600,31 @@ int cache_get_new_rrpv_srripsage(srripsage_data *policy_data,
 #if 0
     if ((old_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data)) &&
         (policy_data->evictions - block->recency) < RCY_THR(policy_data, global_data, block->stream))
-      if (policy_data->rrpv_blocks[0] > 13 && 
+    if (policy_data->rrpv_blocks[0] > 13 && 
           (policy_data->evictions - block->recency) < RCY_THR(policy_data, global_data, block->stream)) 
-        if ((policy_data->evictions - block->recency) < RCY_THR(policy_data, global_data, block->stream))
+    if ((policy_data->evictions - block->recency) < RCY_THR(policy_data, global_data, block->stream))
+    if ((old_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1 || 
+          old_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data)) &&
+      (policy_data->evictions - block->recency) < RCY_THR(policy_data, global_data, block->stream))
 #endif
 
-          if ((policy_data->evictions - block->recency) < RCY_THR(policy_data, global_data, block->stream))
-          {
+    if ((old_rrpv == SRRIPSAGE_DATA_MAX_RRPV(policy_data)) &&
+      (policy_data->evictions - block->recency) < RCY_THR(policy_data, global_data, block->stream))
+    {
+      {
+        ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data); 
 #if 0
-            if (info->stream == TS)
-            {
-              ret_rrpv = old_rrpv; 
-            }
-            else
+        ret_rrpv = old_rrpv;
 #endif
-            {
-              ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data); 
-            }
-          }
+      }
+    }
   }
 
+#define FILL_TH (10)
 #if 0
-#define FILL_TH (512)
+  if (info->stream != ZS && info->stream != CS && info->stream != BS)
   if (info->stream == TS)
+#endif
   {
 #if 0
     if (policy_data->per_stream_fill[info->stream] > FILL_TH && 
@@ -1854,12 +2633,18 @@ int cache_get_new_rrpv_srripsage(srripsage_data *policy_data,
     if (policy_data->per_stream_fill[info->stream] > FILL_TH && 
         policy_data->hit_post_fill[info->stream] == FALSE)
 #endif
-    if (policy_data->per_stream_fill[info->stream] > FILL_TH && 
-        policy_data->hit_post_fill[info->stream] == FALSE &&
-        SET_BLCOKS(policy_data) > 10)
+
+#define RCY_TH (4)
+#if 0
+    if (global_data->rcy_thr[info->stream] < RCY_TH)
+
+    if (SET_BLCOKS(policy_data) > FILL_TH)
     {
       ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data);
     }
+#endif
+
+#undef RCY_TH
   }
 
 #if 0
@@ -1870,7 +2655,6 @@ int cache_get_new_rrpv_srripsage(srripsage_data *policy_data,
 #endif
 
 #undef FILL_TH
-#endif
 
 #if 0
   if (info->stream == ZS)
@@ -1889,14 +2673,18 @@ int cache_get_new_rrpv_srripsage(srripsage_data *policy_data,
 
 #if 0
   if (info->stream == PS)
+#endif
+
+#if 0
+  if (info->stream == PS)
   {
     if (old_rrpv == !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
     {
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 2;
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
     }
     else
     {
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1; 
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data); 
     }
   }
 #endif
@@ -1927,6 +2715,40 @@ int cache_get_new_rrpv_srripsage(srripsage_data *policy_data,
       ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data); 
     }
   }
+#endif  
+
+#if 0
+  if (policy_data->set_type == FOLLOWER_SET && 
+      global_data->demote_on_hit[info->stream] == TRUE)
+
+  if (policy_data->set_type == FOLLOWER_SET)
+  {
+    if (old_rrpv == !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
+    {
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
+    }
+  }
+#endif
+
+#if 0
+  if (global_data->demote_on_hit[info->stream] == TRUE)
+  if (info->stream == TS)
+#endif
+
+#if 0
+  if ((info->stream == TS || info->stream == ZS) && policy_data->set_type == FOLLOWER_SET)
+  {
+    if (old_rrpv == !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
+    {
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
+    }
+#if 0
+    else
+    {
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data); 
+    }
+#endif
+  }
 #endif
 
 #if 0
@@ -1936,15 +2758,19 @@ int cache_get_new_rrpv_srripsage(srripsage_data *policy_data,
     {
       ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
     }
+#if 0
     else
     {
       ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data); 
     }
+#endif
   }
 #endif
 
 #if 0
-  if (info->stream == CS)
+  if (policy_data->set_type == FOLLOWER_SET && 
+      (SAT_CTR_VAL(global_data->dem_ctr[info->stream]) > (PSEL_MID_VAL / 2)||
+      SAT_CTR_VAL(global_data->fath_ctr[info->stream]) < PSEL_MID_VAL))
   {
     if (old_rrpv == !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
     {
@@ -1956,21 +2782,59 @@ int cache_get_new_rrpv_srripsage(srripsage_data *policy_data,
     }
   }
 #endif
+#if 0
+  if (info->stream != CS)
+  if (policy_data->set_type == FOLLOWER_SET && info->stream != CS)
+  if (policy_data->set_type == FOLLOWER_SET && info->stream != CS)
+  {
+    if (old_rrpv != !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
+    {
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
+    }
+#if 0
+    else
+    {
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data); 
+    }
+#endif
+  }
+#endif
 
 #if 0
   if (info->stream != CS && info->stream != ZS && info->stream != TS)
   if (info->stream == ZS)
   if (info->stream != CS && info->stream != ZS)
+  if (policy_data->set_type == FOLLOWER_SET && (info->stream == ZS || info->stream == TS))
 #endif
 
 #if 0
-  if (info->stream != TS)
+  if (policy_data->set_type == FOLLOWER_SET && (info->stream == ZS))
   {
     if (old_rrpv == !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
     {
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 2;
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
+    }
+  }
+#endif
+
+#if 0
+  if (info->stream != CS && info->stream != TS)
+  {
+    if (old_rrpv == !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
+    {
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
     }
     else
+    {
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data);
+    }
+  }
+#endif
+
+#if 0
+  if (info->stream == ZS && policy_data->set_type == FOLLOWER_SET)
+  {
+    if (old_rrpv == !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
     {
       ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
     }
@@ -1991,6 +2855,48 @@ int cache_get_new_rrpv_srripsage(srripsage_data *policy_data,
   }
 #endif
 
+#if 0
+  if (info->stream != CS && info->stream != ZS && info->stream != BS)
+  if (info->stream != CS)
+  if (info->stream != CS && policy_data->set_type == FOLLOWER_SET)
+#endif
+
+#if 0
+  if (info->stream != CS && policy_data->set_type == FOLLOWER_SET)
+  {
+    if (old_rrpv == !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
+    {
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
+    }
+    else
+    {
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data); 
+    }
+  }
+#endif
+
+#if 0
+  if (SAT_CTR_VAL(global_data->dem_ctr[info->stream]) < PSEL_MID_VAL)
+  {
+    if (old_rrpv != !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
+    {
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data); 
+    }
+  }
+#endif
+
+#if 0
+#define DEM_TH
+
+  if ((global_data->per_stream_dreuse_blocks[info->stream] && 
+       global_data->per_stream_dreuse[info->stream] / global_data->per_stream_dreuse_blocks[info->stream] < 2))
+  {
+    if (global_data->bm_ctr == 0)
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data); 
+  }
+
+#undef DEM_TH
+#endif
   return ret_rrpv;
 }
 
@@ -2085,3 +2991,11 @@ int cache_count_block_srripsage(srripsage_data *policy_data, ub1 strm)
 #undef SET_BLCOKS
 #undef IS_SAMPLED_SET
 #undef RCY_THR
+#undef OP_HIT
+#undef OP_FILL
+#undef OP_DEMOTE
+#undef PSEL_WIDTH
+#undef PSEL_MIN_VAL
+#undef PSEL_MAX_VAL
+#undef PSEL_MID_VAL
+

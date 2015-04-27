@@ -56,7 +56,8 @@ InterStreamReuse *reuse_bb_cbk;      /* Callback for BB reuse */
 InterStreamReuse *reuse_zt_cbk;      /* Callback for ZT reuse */
 InterStreamReuse *reuse_zz_cbk;      /* Callback for ZZ reuse */
 InterStreamReuse *reuse_cb_cbk;      /* Callback for CB reuse */
-InterStreamReuse *reuse_tt_cbk;      /* Callback for II reuse */
+InterStreamReuse *reuse_tt_cbk;      /* Callback for TT reuse */
+InterStreamReuse *reuse_pp_cbk;      /* Callback for PP reuse */
 
 NumericStatistic <ub8> *all_access;  /* Input stream access */
 
@@ -1061,6 +1062,7 @@ cache_access_status cachesim_incl_cache(
     reuse_zz_cbk->CacheAccessBeginCbk(info, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
     reuse_cb_cbk->CacheAccessBeginCbk(info, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
     reuse_tt_cbk->CacheAccessBeginCbk(info, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
+    reuse_pp_cbk->CacheAccessBeginCbk(info, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
   }
 
   /* Do the tag matching */
@@ -1225,6 +1227,7 @@ cache_access_status cachesim_incl_cache(
         reuse_zz_cbk->CacheAccessReplaceCbk(info, ret, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
         reuse_cb_cbk->CacheAccessReplaceCbk(info, ret, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
         reuse_tt_cbk->CacheAccessReplaceCbk(info, ret, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
+        reuse_pp_cbk->CacheAccessReplaceCbk(info, ret, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
       }
     
       if (ret.fillpc)
@@ -1301,6 +1304,7 @@ cache_access_status cachesim_incl_cache(
       reuse_zz_cbk->CacheAccessHitCbk(info, ret, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
       reuse_cb_cbk->CacheAccessHitCbk(info, ret, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
       reuse_tt_cbk->CacheAccessHitCbk(info, ret, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
+      reuse_pp_cbk->CacheAccessHitCbk(info, ret, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
     }
 
     block = (cachesim_cacheline *)(phy_way[indx][ret.way]);
@@ -2861,6 +2865,7 @@ int main(int argc, char **argv)
     reuse_zz_cbk = new InterStreamReuse(ZS, ZS, sim_params.lcP.useVa);
     reuse_cb_cbk = new InterStreamReuse(CS, BS, sim_params.lcP.useVa);
     reuse_tt_cbk = new InterStreamReuse(TS, TS, sim_params.lcP.useVa);
+    reuse_pp_cbk = new InterStreamReuse(PS, PS, sim_params.lcP.useVa);
   }
 
   /* Open statistics stream */
@@ -2968,6 +2973,7 @@ int main(int argc, char **argv)
       reuse_zz_cbk->StartCbk();
       reuse_cb_cbk->StartCbk();
       reuse_tt_cbk->StartCbk();
+      reuse_pp_cbk->StartCbk();
     }
 
     /* Read entire trace file and run the simulation */
@@ -3687,7 +3693,7 @@ int main(int argc, char **argv)
               /* If return block was never accessed */
               if (ret.access == 0)
               {
-                if (info.stream >= PS && info.stream <= PS + MAX_CORES - 1)
+                if (ret.stream >= PS && ret.stream <= PS + MAX_CORES - 1)
                 {
                   (*p_zevct)++;
                 }
@@ -4257,6 +4263,7 @@ int main(int argc, char **argv)
       reuse_zz_cbk->ExitCbk();
       reuse_cb_cbk->ExitCbk();
       reuse_tt_cbk->ExitCbk();
+      reuse_pp_cbk->ExitCbk();
     }
 
     /* Free InterStreamReuse object */
@@ -4270,6 +4277,7 @@ int main(int argc, char **argv)
       delete reuse_zz_cbk;
       delete reuse_cb_cbk;
       delete reuse_tt_cbk;
+      delete reuse_pp_cbk;
     }
 
     /* Close statistics stream */

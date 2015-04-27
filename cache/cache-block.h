@@ -38,6 +38,9 @@ struct cache_block_t
   
   /* Access made to this block, used for measuring maximum reuse */
   unsigned int access;
+  
+  /* TRUE, if block has been demoted */
+  unsigned char demote;
 
   /* Cache block state for coherence, tag and way-id. */
   enum cache_block_state_t state;

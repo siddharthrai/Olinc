@@ -69,15 +69,29 @@ typedef struct cache_policy_srripsage_data_t
   ub1            *rrpv_blocks;                /* #blocks at each RRPV */
   ub8            per_stream_fill[TST + 1];    /* Fills for each stream */
   ub1            hit_post_fill[TST + 1];      /* TRUE if there was a hit after fill */
+  ub1            set_type;                    /* Type of set SAMPLER / FOLLOWER */
   struct cache_block_t *blocks;               /* Actual blocks */
 }srripsage_data;
 
-#define MAX_THR (2)
+#define MAX_THR (4)
 
 typedef struct cache_policy_srripsage_gdata_t
 {
   ub8 bm_ctr;                                 /* Bimodal counter */
   ub8 bm_thr;                                 /* Bimodal threshold */
+  ub4 active_stream;                          /* Current stream for threshold computation */
+  ub4 lru_sample_set;                         /* # LRU sample sets */
+  ub8 lru_sample_access[TST + 1];             /* # Access to LRU sample sets */
+  ub8 lru_sample_hit[TST + 1];                /* # Hits to LRU sample sets */
+  ub8 lru_sample_dem[TST + 1];                /* # Hits to LRU sample sets */
+  ub4 mru_sample_set;                         /* # MRU sample sets */
+  ub8 mru_sample_access[TST + 1];             /* # Access to MRU sample sets */
+  ub8 mru_sample_hit[TST + 1];                /* # Hits to MRU sample sets */
+  ub8 mru_sample_dem[TST + 1];                /* # Hits to MRU sample sets */
+  ub4 thr_sample_set;                         /* # THR sample sets */
+  ub8 thr_sample_access[TST + 1];             /* # Access to THR sample sets */
+  ub8 thr_sample_hit[TST + 1];                /* # Hits to THR sample sets */
+  ub8 thr_sample_dem[TST + 1];                /* # Hits to THR sample sets */
   ub8 per_stream_fill[TST + 1];               /* Fills for each stream */
   ub8 per_stream_hit[TST + 1];                /* Hits for each stream */
   ub8 per_stream_xevct[TST + 1];              /* Self evict for each stream */
@@ -88,16 +102,37 @@ typedef struct cache_policy_srripsage_gdata_t
   ub8 rcy_thr[MAX_THR][TST + 1];              /* Per-stream recency threshold */
   ub8 per_stream_reuse[TST + 1];              /* Reuse seen by blocks at RRPV 0 */
   ub8 per_stream_reuse_blocks[TST + 1];       /* Blocks at RRPV 0 */
-  ub8 per_stream_max_reuse[TST + 1];          /* Reuse seen so far for each stream */
-  ub8 per_stream_cur_thr[TST + 1];            /* Current threshold for each stream */
+  ub8 per_stream_max_reuse[TST + 1];          /* Reuse seen so far for each stream at RRPV 0 */
+  ub8 per_stream_cur_thr[TST + 1];            /* Current threshold for each stream at RRPV 0*/
+  ub8 occ_thr[MAX_THR][TST + 1];              /* Per-stream occupancy threshold */
+  ub8 per_stream_oreuse[TST + 1];             /* Reuse seen by blocks at RRPV 0 */
+  ub8 per_stream_oreuse_blocks[TST + 1];      /* Blocks at RRPV 2 */
+  ub8 per_stream_max_oreuse[TST + 1];         /* Reuse seen so far for each stream at RRPV 2 */
+  ub8 per_stream_occ_thr[TST + 1];            /* Current threshold for each stream at RRPV 2*/
+  ub8 dem_thr[MAX_THR][TST + 1];              /* Per-stream occupancy threshold */
+  ub8 per_stream_dreuse[TST + 1];             /* Reuse seen by demoted blocks */
+  ub8 per_stream_dreuse_blocks[TST + 1];      /* Demoted blocks */
+  ub8 per_stream_max_dreuse[TST + 1];         /* Reuse seen so far for each stream by demoted blocks */
+  ub8 per_stream_dem_thr[TST + 1];            /* Current threshold for each stream */
+  ub1 fill_at_head[TST + 1];                  /* True if block is to be filled at the head of the arrival list */
+  ub1 demote_on_hit[TST + 1];                 /* True if block is to be filled at the head of the arrival list */
   ub8 *rrpv_blocks;                           /* #blocks at each RRPV */
+  ub8 fills_at_head[TST + 1];                 /* True if block is to be filled at the head of the arrival list */
+  ub8 dems_at_head[TST + 1];                  /* True if block is to be filled at the head of the arrival list */
 
   /* Eight counter to be used for SRRIPDBP reuse probability learning */
-  struct saturating_counter_t tex_e0_fill_ctr;/* Texture epoch 0 fill */
-  struct saturating_counter_t tex_e0_hit_ctr; /* Texture epoch 0 hits */
-  struct saturating_counter_t tex_e1_fill_ctr;/* Texture epoch 1 fill */
-  struct saturating_counter_t tex_e1_hit_ctr; /* Texture epoch 1 hits */
-  struct saturating_counter_t acc_all_ctr;    /* Total accesses */
+  struct saturating_counter_t tex_e0_fill_ctr;    /* Texture epoch 0 fill */
+  struct saturating_counter_t tex_e0_hit_ctr;     /* Texture epoch 0 hits */
+  struct saturating_counter_t tex_e1_fill_ctr;    /* Texture epoch 1 fill */
+  struct saturating_counter_t tex_e1_hit_ctr;     /* Texture epoch 1 hits */
+  struct saturating_counter_t acc_all_ctr;        /* Total accesses */
+
+  struct saturating_counter_t fath_ctr[TST + 1];  /* Per-stream dueling Counter for fills */
+  struct saturating_counter_t dem_ctr[TST + 1];   /* Per-stream dueling Counter for demotions */
+
+  struct saturating_counter_t gfath_ctr;          /* Global dueling Counter for fills */
+  struct saturating_counter_t gdem_ctr;           /* Global dueling Counter for demotions */
+
 }srripsage_gdata;
 
 #undef MAX_THR

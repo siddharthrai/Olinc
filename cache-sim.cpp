@@ -15,6 +15,7 @@ InterStreamReuse *reuse_zt_cbk = NULL; /* Callback for ZT reuse */
 InterStreamReuse *reuse_zz_cbk = NULL; /* Callback for ZZ reuse */
 InterStreamReuse *reuse_cb_cbk = NULL; /* Callback for CB reuse */
 InterStreamReuse *reuse_tt_cbk = NULL; /* Callback for TT reuse */
+InterStreamReuse *reuse_pp_cbk = NULL; /* Callback for TT reuse */
 
 #define BLCKALIGN(addr) ((addr >> CACHE_BLCKOFFSET) << CACHE_BLCKOFFSET)
 
@@ -1707,6 +1708,7 @@ int main(int argc, char **argv)
     reuse_zz_cbk = new InterStreamReuse(ZS, ZS, sim_params.lcP.useVa);
     reuse_cb_cbk = new InterStreamReuse(CS, BS, sim_params.lcP.useVa);
     reuse_tt_cbk = new InterStreamReuse(TS, TS, sim_params.lcP.useVa);
+    reuse_pp_cbk = new InterStreamReuse(PS, PS, sim_params.lcP.useVa);
   }
 
   for (ub1 c_cache = 0; c_cache < cache_count; c_cache++)
@@ -1805,6 +1807,11 @@ int main(int argc, char **argv)
         reuse_tt_cbk->StartCbk();
       }
 
+      if (reuse_pp_cbk)
+      {
+        reuse_pp_cbk->StartCbk();
+      }
+
       /* Read entire trace file and run the simulation */
       while (!gzeof(trc_file))
       {
@@ -1879,6 +1886,11 @@ int main(int argc, char **argv)
             if (reuse_tt_cbk)
             {
               reuse_tt_cbk->CacheAccessBeginCbk(info, indx, per_set_access[indx], per_set_evct[indx]);
+            }
+
+            if (reuse_pp_cbk)
+            {
+              reuse_pp_cbk->CacheAccessBeginCbk(info, indx, per_set_access[indx], per_set_evct[indx]);
             }
 
             cache_access_status ret = 
@@ -2180,6 +2192,11 @@ int main(int argc, char **argv)
                 if (reuse_tt_cbk)
                 {
                   reuse_tt_cbk->CacheAccessReplaceCbk(info, ret, indx, per_set_access[indx], per_set_evct[indx]);
+                }
+
+                if (reuse_pp_cbk)
+                {
+                  reuse_pp_cbk->CacheAccessReplaceCbk(info, ret, indx, per_set_access[indx], per_set_evct[indx]);
                 }
 
                 /* Current stream has a block allocated */
@@ -2485,7 +2502,7 @@ int main(int argc, char **argv)
 
                 if (ret.access == 0)
                 {
-                  if (info.stream >= PS && info.stream <= PS + MAX_CORES - 1)
+                  if (ret.stream >= PS && ret.stream <= PS + MAX_CORES - 1)
                   {
                     (*p_zevct)++;
                   }
@@ -2582,6 +2599,11 @@ int main(int argc, char **argv)
               if (reuse_tt_cbk)
               {
                 reuse_tt_cbk->CacheAccessHitCbk(info, ret, indx, per_set_access[indx], per_set_evct[indx]);
+              }
+
+              if (reuse_pp_cbk)
+              {
+                reuse_pp_cbk->CacheAccessHitCbk(info, ret, indx, per_set_access[indx], per_set_evct[indx]);
               }
 
               /* Update C, Z, T epoch counters */
@@ -2981,6 +3003,11 @@ int main(int argc, char **argv)
         reuse_tt_cbk->ExitCbk();
       }
 
+      if (reuse_pp_cbk)
+      {
+        reuse_pp_cbk->ExitCbk();
+      }
+
       /* Free InterStreamReuse object */
       if (reuse_ct_cbk)
       {
@@ -3020,6 +3047,11 @@ int main(int argc, char **argv)
       if (reuse_tt_cbk)
       {
         delete reuse_tt_cbk;
+      }
+
+      if (reuse_pp_cbk)
+      {
+        delete reuse_pp_cbk;
       }
 
       /* Close statistics stream */

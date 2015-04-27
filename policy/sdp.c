@@ -111,7 +111,7 @@ static int get_set_type_sdp(struct cache_params *params, long long int indx,
         }
         else
         {
-          if (lsb_bits == msb_bits && mid_bits == 0x10 && sdp_samples >= 5)
+          if (lsb_bits == msb_bits && mid_bits == 0x02 && sdp_samples >= 5)
           {
             /* If there is no GPU this is core sample 4, this is done to avoid problems 
              * in policy initializatin. */
@@ -126,7 +126,7 @@ static int get_set_type_sdp(struct cache_params *params, long long int indx,
           }
           else
           {
-            if (lsb_bits == (~msb_bits & 0x0f) && mid_bits == 0x10 && sdp_samples >= 6)
+            if (lsb_bits == (~msb_bits & 0x0f) && mid_bits == 0x02 && sdp_samples >= 6)
             {
               /* If there is no GPU this is core sample 4, this is done to avoid problems 
                * in policy initializatin. */
@@ -141,7 +141,7 @@ static int get_set_type_sdp(struct cache_params *params, long long int indx,
             }
             else
             {
-              if (lsb_bits == msb_bits && mid_bits == 0x11 && sdp_samples == 7)
+              if (lsb_bits == msb_bits && mid_bits == 0x03 && sdp_samples == 7)
               {
                 /* For core sample 7, GPU must be present. */
                 assert(params->sdp_gpu_cores > 0);
