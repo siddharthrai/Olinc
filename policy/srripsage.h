@@ -115,10 +115,13 @@ typedef struct cache_policy_srripsage_gdata_t
   ub8 per_stream_max_dreuse[TST + 1];         /* Reuse seen so far for each stream by demoted blocks */
   ub8 per_stream_dem_thr[TST + 1];            /* Current threshold for each stream */
   ub1 fill_at_head[TST + 1];                  /* True if block is to be filled at the head of the arrival list */
+  ub1 demote_at_head[TST + 1];                /* True if block is to be demoted at the head of the arrival list */
   ub1 demote_on_hit[TST + 1];                 /* True if block is to be filled at the head of the arrival list */
   ub8 *rrpv_blocks;                           /* #blocks at each RRPV */
   ub8 fills_at_head[TST + 1];                 /* True if block is to be filled at the head of the arrival list */
   ub8 dems_at_head[TST + 1];                  /* True if block is to be filled at the head of the arrival list */
+  ub1 lru_streams[TST + 1];                   /* True if block is to be filled at the head of the arrival list */
+  ub1 cur_lru_stream;                     /* True if block is to be filled at the head of the arrival list */
 
   /* Eight counter to be used for SRRIPDBP reuse probability learning */
   struct saturating_counter_t tex_e0_fill_ctr;    /* Texture epoch 0 fill */
@@ -128,11 +131,19 @@ typedef struct cache_policy_srripsage_gdata_t
   struct saturating_counter_t acc_all_ctr;        /* Total accesses */
 
   struct saturating_counter_t fath_ctr[TST + 1];  /* Per-stream dueling Counter for fills */
+  struct saturating_counter_t fathm_ctr[TST + 1]; /* Per-stream dueling Counter for fills */
   struct saturating_counter_t dem_ctr[TST + 1];   /* Per-stream dueling Counter for demotions */
+  struct saturating_counter_t demm_ctr[TST + 1];  /* Per-stream dueling Counter for demotions */
+  struct saturating_counter_t cb_ctr;             /* CB reuse counter */
+  struct saturating_counter_t bc_ctr;             /* CB reuse counter */
+  struct saturating_counter_t ct_ctr;             /* CT reuse counter */
+  struct saturating_counter_t bt_ctr;             /* CT reuse counter */
+  struct saturating_counter_t tb_ctr;             /* CT reuse counter */
+  struct saturating_counter_t zt_ctr;             /* CT reuse counter */
 
   struct saturating_counter_t gfath_ctr;          /* Global dueling Counter for fills */
+  struct saturating_counter_t gfathm_ctr;         /* Global dueling Counter for misses */
   struct saturating_counter_t gdem_ctr;           /* Global dueling Counter for demotions */
-
 }srripsage_gdata;
 
 #undef MAX_THR
