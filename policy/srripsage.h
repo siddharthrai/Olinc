@@ -70,6 +70,8 @@ typedef struct cache_policy_srripsage_data_t
   ub8            per_stream_fill[TST + 1];    /* Fills for each stream */
   ub1            hit_post_fill[TST + 1];      /* TRUE if there was a hit after fill */
   ub1            set_type;                    /* Type of set SAMPLER / FOLLOWER */
+  ub1            fill_at_lru[TST + 1];        /* If set, fill at LRU */
+  ub1            dem_to_lru[TST + 1];         /* If set, demote to LRU */
   struct cache_block_t *blocks;               /* Actual blocks */
 }srripsage_data;
 
@@ -99,6 +101,7 @@ typedef struct cache_policy_srripsage_gdata_t
   ub8 per_stream_demote[4][TST + 1];          /* Demotion for each stream */
   ub8 per_stream_rrpv_hit[4][TST + 1];        /* Hits for each stream for each RRPV */
   ub8 access_count;                           /* Total accesses to cache */
+
   ub8 rcy_thr[MAX_THR][TST + 1];              /* Per-stream recency threshold */
   ub8 per_stream_reuse[TST + 1];              /* Reuse seen by blocks at RRPV 0 */
   ub8 per_stream_reuse_blocks[TST + 1];       /* Blocks at RRPV 0 */
@@ -120,8 +123,6 @@ typedef struct cache_policy_srripsage_gdata_t
   ub8 *rrpv_blocks;                           /* #blocks at each RRPV */
   ub8 fills_at_head[TST + 1];                 /* True if block is to be filled at the head of the arrival list */
   ub8 dems_at_head[TST + 1];                  /* True if block is to be filled at the head of the arrival list */
-  ub1 lru_streams[TST + 1];                   /* True if block is to be filled at the head of the arrival list */
-  ub1 cur_lru_stream;                     /* True if block is to be filled at the head of the arrival list */
 
   /* Eight counter to be used for SRRIPDBP reuse probability learning */
   struct saturating_counter_t tex_e0_fill_ctr;    /* Texture epoch 0 fill */

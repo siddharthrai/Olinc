@@ -276,10 +276,10 @@ cache_access_status cachesim_incl_cache( cachesim_cache *cache, ub8 addr,
   if (!block)
   {
     /* If access is not bypassed fill the block */
-#if 0
     if (info && (info->spill == FALSE || (info->spill == TRUE && IS_SPILL_ALLOCATED(info->stream))))
-#endif
+#if 0
     if (info)
+#endif
     {
       way = cache_replace_block(cache->cache, indx, info);
       assert(way != -1);

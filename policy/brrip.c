@@ -254,6 +254,8 @@ void cache_fill_block_brrip(brrip_data *policy_data, brrip_gdata *global_data,
   block->epoch = 0;
 
   /* Get RRPV to be assigned to the new block */
+  rrpv = cache_get_fill_rrpv_brrip(policy_data, global_data);
+
   if (info && info->fill == TRUE)
   {
     rrpv = cache_get_fill_rrpv_brrip(policy_data, global_data);

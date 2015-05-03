@@ -201,6 +201,9 @@ typedef enum cache_policy_t
         /* Dynamic policy between SRRIP and BRRIP */
         cache_policy_drrip,
 
+        /* Graphics stream aware DRRIP */
+        cache_policy_gsdrrip,
+
         /* Graphics stream aware insertion, replacement from MAXRRPV  */
         cache_policy_gspc,
 
