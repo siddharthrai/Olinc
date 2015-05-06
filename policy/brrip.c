@@ -256,6 +256,7 @@ void cache_fill_block_brrip(brrip_data *policy_data, brrip_gdata *global_data,
   /* Get RRPV to be assigned to the new block */
   rrpv = cache_get_fill_rrpv_brrip(policy_data, global_data);
 
+#if 0
   if (info && info->fill == TRUE)
   {
     rrpv = cache_get_fill_rrpv_brrip(policy_data, global_data);
@@ -264,7 +265,8 @@ void cache_fill_block_brrip(brrip_data *policy_data, brrip_gdata *global_data,
   {
     rrpv = BRRIP_DATA_SPILL_RRPV(policy_data);
   }
-  
+#endif  
+
   if (rrpv != BYPASS_RRPV)
   {
     /* Insert block in to the corresponding RRPV queue */

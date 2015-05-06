@@ -335,7 +335,7 @@ void cache_access_block_gsdrrip(gsdrrip_data *policy_data, gsdrrip_gdata *global
 
 struct cache_block_t cache_get_block_gsdrrip(gsdrrip_data *policy_data, 
   gsdrrip_gdata *global_data, int way, long long *tag_ptr, 
-  enum cache_block_state_t *state_ptr, int *stream_ptr, memory_trace *info);
+  enum cache_block_state_t *state_ptr, int *stream_ptr);
 
 /*
  *

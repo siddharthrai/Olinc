@@ -64,7 +64,7 @@
 
 #define SET_BLCOKS(p)           ((p)->rrpv_blocks[0])
 
-#define PHASE_SIZE              (10000)
+#define PHASE_SIZE              (5000)
 
 #define IS_SAMPLED_SET(p)       ((p)->set_type == THR_SAMPLED_SET)
 #define RCY_STHR(g, s)          ((g)->rcy_thr[SAMPLED_SET][(s)])
@@ -346,6 +346,75 @@ static ub1 get_set_type_srripsage(long long int indx)
   int msb_bits;
   int mid_bits;
 
+  lsb_bits = indx & 0x07;
+  msb_bits = (indx >> 7) & 0x07;
+  mid_bits = (indx >> 3) & 0x0f;
+
+  if (lsb_bits == msb_bits && mid_bits == 0x00)
+  {
+    return PS_LRU_SAMPLED_SET;
+  }
+
+  if ((~lsb_bits & 0x07) == msb_bits && mid_bits == 0x00)
+  {
+    return PS_MRU_SAMPLED_SET;
+  }
+
+  if (lsb_bits == msb_bits && mid_bits == 0x01)
+  {
+    return THR_SAMPLED_SET;
+  }
+
+  if ((~lsb_bits & 0x07) == msb_bits && mid_bits == 0x01)
+  {
+    return CS_LRU_SAMPLED_SET;
+  }
+
+  if (lsb_bits == msb_bits && mid_bits == 0x02)
+  {
+    return CS_MRU_SAMPLED_SET;
+  }
+
+  if ((~lsb_bits & 0x07) == msb_bits && mid_bits == 0x02)
+  {
+    return ZS_LRU_SAMPLED_SET;
+  }
+
+  if (lsb_bits == msb_bits && mid_bits == 0x03)
+  {
+    return ZS_MRU_SAMPLED_SET;
+  }
+
+  if ((~lsb_bits & 0x07) == msb_bits && mid_bits == 0x03)
+  {
+    return TS_LRU_SAMPLED_SET;
+  }
+
+  if (lsb_bits == msb_bits && mid_bits == 0x04)
+  {
+    return TS_MRU_SAMPLED_SET;
+  }
+
+  if ((~lsb_bits & 0x07) == msb_bits && mid_bits == 0x04)
+  {
+    return BS_LRU_SAMPLED_SET;
+  }
+
+  if (lsb_bits == msb_bits && mid_bits == 0x05)
+  {
+    return BS_MRU_SAMPLED_SET;
+  }
+
+  return FOLLOWER_SET;
+}
+
+#if 0
+static ub1 get_set_type_srripsage(long long int indx)
+{
+  int lsb_bits;
+  int msb_bits;
+  int mid_bits;
+
   lsb_bits = indx & 0x0f;
   msb_bits = (indx >> 6) & 0x0f;
   mid_bits = (indx >> 4) & 0x03;
@@ -427,6 +496,7 @@ static ub1 get_set_type_srripsage(long long int indx)
 
   return FOLLOWER_SET;
 }
+#endif
 
 /* Update reused blocks at RRPV 0 */
 void cache_add_reuse_blocks(srripsage_gdata *global_data, ub1 op,
@@ -796,6 +866,16 @@ void cache_init_srripsage(int set_indx, struct cache_params *params,
       policy_data->dem_to_lru[TS]   = TRUE;
       break;
 
+    case BS_LRU_SAMPLED_SET:
+      policy_data->set_type         = LRU_SAMPLED_SET;
+      policy_data->fill_at_lru[BS]  = TRUE;
+      break;
+
+    case BS_MRU_SAMPLED_SET:
+      policy_data->set_type         = MRU_SAMPLED_SET;
+      policy_data->dem_to_lru[BS]   = TRUE;
+      break;
+
     case PS_LRU_SAMPLED_SET:
       policy_data->set_type         = LRU_SAMPLED_SET;
       policy_data->fill_at_lru[PS]  = TRUE;
@@ -810,8 +890,12 @@ void cache_init_srripsage(int set_indx, struct cache_params *params,
       policy_data->set_type = FOLLOWER_SET;
       break;
 
+    case THR_SAMPLED_SET:
+      policy_data->set_type = THR_SAMPLED_SET;
+      break;
+
     default:
-      printf("Invalid set type %s : %d\n", __FUNCTION__, __LINE__);  
+      printf("Invalid set type %d - %s : %d\n", set_type, __FUNCTION__, __LINE__);  
   }
 
   /* Reset per-set fill counter */
@@ -1374,7 +1458,7 @@ end:
     memset(global_data->per_stream_max_dreuse, 0, sizeof(ub8) * (TST + 1));
 #endif
 
-    for (i = 0; i <=TST; i++)
+    for (i = 0; i <= TST; i++)
     {
       global_data->per_stream_dreuse_blocks[i]  >>= 1;
       global_data->per_stream_dreuse[i]         >>= 1;
@@ -1702,7 +1786,6 @@ end:
         global_data->demote_on_hit[i]  = FALSE;
       }
       
-#if 0
       if (SAT_CTR_VAL(global_data->dem_ctr[i]) > PSEL_MID_VAL)
       {
         global_data->demote_on_hit[i]  = TRUE;
@@ -1711,8 +1794,8 @@ end:
       {
         global_data->demote_on_hit[i]  = FALSE;
       }
-#endif
 
+#if 0
       switch (i)
       {
         case CS:
@@ -1760,11 +1843,12 @@ end:
             global_data->demote_on_hit[i]  = TRUE;
           }
       }
-
+#endif
       }
 
 #undef DONH_THR
-    
+
+#if 0
     /* Set fill and demote flags for inter-stream use */
     if (SAT_CTR_VAL(global_data->fathm_ctr[TS]) < PSEL_MID_VAL)
     {
@@ -1786,18 +1870,23 @@ end:
         global_data->demote_on_hit[TS]  = TRUE;
       }
     }
+#endif
 
     global_data->fill_at_head[PS]  = FALSE;
 
+#if 0
     if (global_data->fill_at_head[CS] || global_data->fill_at_head[ZS])
+#endif
+
+    if (global_data->fill_at_head[CS])
     {
       global_data->fill_at_head[TS]  = FALSE;
     }
 
-    global_data->fill_at_head[CS]  = TRUE;
-    global_data->fill_at_head[TS]  = FALSE;
-    global_data->fill_at_head[CS]  = TRUE;
-    global_data->fill_at_head[ZS]  = TRUE;
+    if (global_data->fill_at_head[TS] == TRUE)
+    {
+      global_data->fill_at_head[ZS]  = FALSE;
+    }
 
 #if 0    
     global_data->fill_at_head[CS]  = TRUE;
@@ -1834,13 +1923,16 @@ end:
     global_data->demote_on_hit[PS]  = TRUE;
 
     global_data->demote_on_hit[TS]  = TRUE;
-#endif
 
     global_data->demote_on_hit[CS]  = FALSE;
     global_data->demote_on_hit[ZS]  = FALSE;
     global_data->demote_on_hit[TS]  = TRUE;
     global_data->demote_on_hit[PS]  = FALSE;
     global_data->demote_on_hit[BS]  = FALSE;
+    global_data->demote_on_hit[TS]  = TRUE;
+    global_data->demote_on_hit[ZS]  = TRUE;
+    global_data->demote_on_hit[TS]  = TRUE;
+#endif
 
     /* Reset various counters */
     for (ub1 i = 0; i <= TST; i++)
@@ -1866,14 +1958,10 @@ end:
     for (ub1 i = 0; i <= TST; i++)
     {
       SAT_CTR_SET(global_data->fath_ctr[i], PSEL_MID_VAL);
+#if 0
       SAT_CTR_SET(global_data->dem_ctr[i], PSEL_MID_VAL);
+#endif
     }
-  }
-
-  if ((global_data->access_count % 512) == 0)
-  {
-    /* Reset all hit_post_fill bits */
-    memset(policy_data->hit_post_fill, 0, sizeof(ub1) * (TST + 1));
   }
 
   if (!node)
@@ -2027,7 +2115,6 @@ void cache_fill_block_srripsage(srripsage_data *policy_data,
           }
           else
           {
-#if 0
             if (global_data->bm_ctr == 0)
             {
               CACHE_PREPEND_TO_QUEUE(block, 
@@ -2035,7 +2122,6 @@ void cache_fill_block_srripsage(srripsage_data *policy_data,
                   SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv]);
             }
             else
-#endif
             {
               CACHE_APPEND_TO_QUEUE(block, 
                   SRRIPSAGE_DATA_VALID_HEAD(policy_data)[rrpv], 
@@ -2102,14 +2188,14 @@ int cache_replace_block_srripsage(srripsage_data *policy_data,
       if (policy_data->set_type == LRU_SAMPLED_SET)
       {
         /* Age MRU in LRU set */
-          CACHE_SRRIPSAGE_AGEBLOCK_MRU(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
-              SRRIPSAGE_DATA_VALID_TAIL(policy_data), rrpv, global_data);
+        CACHE_SRRIPSAGE_AGEBLOCK_MRU(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
+            SRRIPSAGE_DATA_VALID_TAIL(policy_data), rrpv, global_data);
       }
       else
       {
         if (policy_data->set_type == MRU_SAMPLED_SET)
         {
-          /* Age MRU in LRU set */
+          /* Demote sample stream at LRU and rest at MRU */
           if (policy_data->dem_to_lru[info->stream])
           {
             CACHE_SRRIPSAGE_AGEBLOCK_LRU(SRRIPSAGE_DATA_VALID_HEAD(policy_data), 
@@ -2330,25 +2416,31 @@ void cache_access_block_srripsage(srripsage_data *policy_data,
     {
       if (policy_data->set_type == LRU_SAMPLED_SET)
       {
-        /* Update per-stream counter */
-        SAT_CTR_INC(global_data->dem_ctr[blk->stream]);
+        if (policy_data->fill_at_lru[blk->stream])
+        {
+          /* Update per-stream counter */
+          SAT_CTR_INC(global_data->dem_ctr[blk->stream]);
 
-        global_data->lru_sample_dem[blk->stream]++;
+          global_data->lru_sample_dem[blk->stream]++;
 
-        /* Update global counter */
-        SAT_CTR_INC(global_data->gdem_ctr);
+          /* Update global counter */
+          SAT_CTR_INC(global_data->gdem_ctr);
+        }
       }
       else
       {
         if (policy_data->set_type == MRU_SAMPLED_SET)
         {
           /* Update per-stream counter */
-          SAT_CTR_DEC(global_data->dem_ctr[blk->stream]);
+          if (policy_data->dem_to_lru[blk->stream])
+          {
+            SAT_CTR_DEC(global_data->dem_ctr[blk->stream]);
 
-          global_data->mru_sample_dem[blk->stream]++;
+            global_data->mru_sample_dem[blk->stream]++;
 
-          /* Update global counter */
-          SAT_CTR_DEC(global_data->gdem_ctr);
+            /* Update global counter */
+            SAT_CTR_DEC(global_data->gdem_ctr);
+          }
         }
       }
     }
@@ -2442,14 +2534,7 @@ int cache_get_fill_rrpv_srripsage(srripsage_data *policy_data,
       break;
 
     case BS:
-      if (info->spill == TRUE)
-      {
-        ret_rrpv = !SRRIPSAGE_DATA_MAX_RRPV(policy_data);
-      }
-      else
-      {
-        ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
-      }
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data);
       break;
 
     case CS:
@@ -2461,7 +2546,7 @@ int cache_get_fill_rrpv_srripsage(srripsage_data *policy_data,
       break;
 
     case PS:
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1;
+      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data);
       break;
 
     default:
@@ -2533,10 +2618,12 @@ int cache_get_new_rrpv_srripsage(srripsage_data *policy_data,
     {
       ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data) - 1; 
     }
+#if 0
     else
     {
       ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data); 
     }
+#endif
   }
 
   return ret_rrpv;

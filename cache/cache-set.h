@@ -20,6 +20,7 @@
 #include "xspdbp.h"
 #include "brrip.h"
 #include "drrip.h"
+#include "gsdrrip.h"
 #include "gspc.h"
 #include "gspcm.h"
 #include "gspct.h"
@@ -50,6 +51,7 @@
 #define CACHE_SET_DATA_XSPDBP(cache_set)    (&(((cache_set)->policy_data).xspdbp))
 #define CACHE_SET_DATA_BRRIP(cache_set)     (&(((cache_set)->policy_data).brrip))
 #define CACHE_SET_DATA_DRRIP(cache_set)     (&(((cache_set)->policy_data).drrip))
+#define CACHE_SET_DATA_GSDRRIP(cache_set)   (&(((cache_set)->policy_data).gsdrrip))
 #define CACHE_SET_DATA_LIP(cache_set)       (&(((cache_set)->policy_data).lip))
 #define CACHE_SET_DATA_BIP(cache_set)       (&(((cache_set)->policy_data).bip))
 #define CACHE_SET_DATA_DIP(cache_set)       (&(((cache_set)->policy_data).dip))
@@ -85,6 +87,7 @@ struct cache_set_t
     xspdbp_data     xspdbp;
     brrip_data      brrip;
     drrip_data      drrip;
+    gsdrrip_data    gsdrrip;
     lip_data        lip;
     bip_data        bip;
     dip_data        dip;

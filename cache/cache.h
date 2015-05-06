@@ -40,6 +40,7 @@ extern struct str_map_t cache_block_state_map;
 #define CACHE_DIP_GDATA(cache)        (&(cache->policy_data.dip))
 #define CACHE_DRRIP_GDATA(cache)      (&(cache->policy_data.drrip))
 #define CACHE_BRRIP_GDATA(cache)      (&(cache->policy_data.brrip))
+#define CACHE_GSDRRIP_GDATA(cache)    (&(cache->policy_data.gsdrrip))
 #define CACHE_GSPC_GDATA(cache)       (&(cache->policy_data.gspc))
 #define CACHE_GSPCM_GDATA(cache)      (&(cache->policy_data.gspcm))
 #define CACHE_GSPCT_GDATA(cache)      (&(cache->policy_data.gspct))
@@ -69,8 +70,9 @@ struct cache_t
   struct 
   {
     dip_gdata       dip;
-    drrip_gdata     drrip;
     brrip_gdata     brrip;
+    drrip_gdata     drrip;
+    gsdrrip_gdata   gsdrrip;
     gspc_gdata      gspc;
     srripdbp_gdata  srripdbp;
     srripsage_gdata srripsage;

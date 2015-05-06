@@ -264,10 +264,12 @@ void cache_fill_block_srrip(srrip_data *policy_data, int way, long long tag,
 
   rrpv = cache_get_fill_rrpv_srrip(policy_data, info);
 
+#if 0
   if (info && info->spill == TRUE)
   {
     rrpv = SRRIP_DATA_SPILL_RRPV(policy_data);
   }
+#endif
 
   /* If block is not bypassed */
   if (rrpv != BYPASS_RRPV)
@@ -442,14 +444,7 @@ int cache_get_fill_rrpv_srrip(srrip_data *policy_data, memory_trace *info)
       return SRRIP_DATA_MAX_RRPV(policy_data);
 
     case cache_policy_srrip:
-      if (info->fill == TRUE && info->stream == BS) 
-      {
-        return SRRIP_DATA_MAX_RRPV(policy_data);
-      }
-      else
-      {
-        return SRRIP_DATA_MAX_RRPV(policy_data) - 1;
-      }
+      return SRRIP_DATA_MAX_RRPV(policy_data) - 1;
     
     case cache_policy_bypass:
       /* Not to insert */
