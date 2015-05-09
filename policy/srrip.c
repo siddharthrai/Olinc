@@ -306,8 +306,7 @@ int cache_replace_block_srrip(srrip_data *policy_data)
   /* Try to find an invalid block always from head of the free list. */
   for (block = SRRIP_DATA_FREE_HEAD(policy_data); block; block = block->prev)
   {
-    if (block->way < min_wayid)
-      min_wayid = block->way;
+    return block->way;
   }
   
   /* Obtain RRPV from where to replace the block */
@@ -389,19 +388,8 @@ void cache_access_block_srrip(srrip_data *policy_data, int way, int strm,
       old_rrpv = (((rrip_list *)(blk->data))->rrpv);
       new_rrpv = old_rrpv;
 
-      /* Update RRPV and epoch only for read hits */
-      if (info && info->fill == TRUE)
-      {
-        /* Get new RRPV using policy specific function */
-        new_rrpv = cache_get_new_rrpv_srrip(old_rrpv);
-      }
-      else
-      {
-        if (info && info->spill == TRUE)
-        {
-          new_rrpv = SRRIP_DATA_SPILL_RRPV(policy_data);
-        }
-      }
+      /* Get new RRPV using policy specific function */
+      new_rrpv = cache_get_new_rrpv_srrip(old_rrpv);
 
       /* Update block queue if block got new RRPV */
       if (new_rrpv != old_rrpv)

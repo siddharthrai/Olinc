@@ -123,6 +123,7 @@ typedef struct cache_policy_srripsage_gdata_t
   ub8 *rrpv_blocks;                           /* #blocks at each RRPV */
   ub8 fills_at_head[TST + 1];                 /* True if block is to be filled at the head of the arrival list */
   ub8 dems_at_head[TST + 1];                  /* True if block is to be filled at the head of the arrival list */
+  ub8 fail_demotion[TST + 1];                 /* Premature demotions */
 
   /* Eight counter to be used for SRRIPDBP reuse probability learning */
   struct saturating_counter_t tex_e0_fill_ctr;    /* Texture epoch 0 fill */

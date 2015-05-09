@@ -241,6 +241,8 @@ InterStreamReuse *reuse_pp_cbk = NULL; /* Callback for TT reuse */
   NumericStatistic <ub8> *p_xtevct;    /* X stream evict by C */
   NumericStatistic <ub8> *p_xhit;      /* CPU inter stream hit */
 
+  ub8 *per_way_evct[TST + 1];          /* Eviction seen by each way for each stream */
+
 cache_access_status cachesim_incl_cache( cachesim_cache *cache, ub8 addr, 
   ub8 rdis, ub1 policy, ub1 strm, memory_trace *info)
 {
@@ -288,7 +290,7 @@ cache_access_status cachesim_incl_cache( cachesim_cache *cache, ub8 addr,
           &vctm_stream);
 
       assert(vctm_stream >= 0 && vctm_stream <= TST + MAX_CORES - 1);
-
+      
       ret.tag       = vctm_block.tag;
       ret.vtl_addr  = vctm_block.vtl_addr;
       ret.way       = way;
@@ -305,6 +307,9 @@ cache_access_status cachesim_incl_cache( cachesim_cache *cache, ub8 addr,
         ret.fate  = CACHE_ACCESS_RPLC;
         cache_set_block(cache->cache, indx, way, vctm_tag, cache_block_invalid, 
             vctm_stream, info);
+
+        /* Update per-stream per-way eviction */
+        per_way_evct[vctm_stream][way] += 1;
       }
       else
       {
@@ -1710,7 +1715,7 @@ int main(int argc, char **argv)
     reuse_tt_cbk = new InterStreamReuse(TS, TS, sim_params.lcP.useVa);
     reuse_pp_cbk = new InterStreamReuse(PS, PS, sim_params.lcP.useVa);
   }
-
+  
   for (ub1 c_cache = 0; c_cache < cache_count; c_cache++)
   {
     for (ub1 c_way = 0; c_way < way_count; c_way++)
@@ -1723,6 +1728,15 @@ int main(int argc, char **argv)
 
       set_cache_params(&params, &(sim_params.lcP), cache_sizes[c_cache], cache_ways[c_way], cache_set);
 
+      /* Allocate per stream per way evict histogram */
+      for (ub4 i = 0; i <= TST; i++)
+      {
+        per_way_evct[i] = (ub8 *)malloc(sizeof(ub8) * params.ways);
+        assert(per_way_evct[i]);
+
+        memset(per_way_evct[i], 0, sizeof(ub8) * params.ways);
+      }
+
 #define LOG_BASE_TWO(a) (log(a) / log(2))
 
       ub8 block_bits       = LOG_BASE_TWO(CACHE_L1_BSIZE);
@@ -1734,7 +1748,7 @@ int main(int argc, char **argv)
 
       printf("Cache parameters : Size %d Ways %d Sets %d\n", 
           cache_sizes[c_cache], params.ways, params.num_sets);
-      
+
       per_set_evct = new ub8[params.num_sets];
       assert(per_set_evct);
 
@@ -1791,12 +1805,12 @@ int main(int argc, char **argv)
       {
         reuse_zt_cbk->StartCbk();
       }
-      
+
       if (reuse_zz_cbk)
       {
         reuse_zz_cbk->StartCbk();
       }
-      
+
       if (reuse_cb_cbk)
       {
         reuse_cb_cbk->StartCbk();
@@ -3084,6 +3098,22 @@ int main(int argc, char **argv)
 
 #undef CH
 
+      printf("Per-stream per-way eviction\n");
+
+      for (ub4 i = 0; i <= TST; i++)
+      {
+        printf("Stream %d\n", i);
+
+        for (ub4 j = 0; j < params.ways; j++)
+        {
+          printf("%d %lld\n", j, per_way_evct[i][j]);
+        }
+        printf("\n");
+
+        /* Deallocate per-way evict array */
+        free(per_way_evct[i]);
+      }
+      
       cache_free(l3cache.cache);
     }
   }
@@ -3118,7 +3148,7 @@ int main(int argc, char **argv)
 
     printf("\n");
   }
-
+  
   return 0;
 }
 

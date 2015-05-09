@@ -614,6 +614,14 @@ bool ConfigLoader::parseCachePolicy(char *paramName, char *id, enum cache_policy
         }
         
         /*  Return boolean parameter.  */
+        if (!strcmp(auxStr, "GSDRRIP"))
+        {
+          val = cache_policy_gsdrrip;
+
+          goto end;
+        }
+        
+        /*  Return boolean parameter.  */
         if (!strcmp(auxStr, "GSPC"))
         {
           val = cache_policy_gspc;

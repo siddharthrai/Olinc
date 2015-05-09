@@ -225,9 +225,16 @@ static int get_set_type_gsdrrip(long long int indx, ub4 gsdrrip_samples)
   return SDP_FOLLOWER_SET;
 }
 
-static ub1 cache_get_gsdrrip_stream(ub1 stream, ub1 core)
+static ub1 cache_get_gsdrrip_stream(gsdrrip_gdata *global_data, ub1 stream, 
+    ub1 core)
 {
   ub1 ret_stream;
+  
+  /* Temporary, until trace generation is fixed */
+  if (stream < PS)
+  {
+    core = 0;
+  }
 
   switch (stream)
   {
@@ -267,6 +274,8 @@ static ub1 cache_get_gsdrrip_stream(ub1 stream, ub1 core)
    default:
       panic("Unknown stream type %s %d\n", __FUNCTION__, __LINE__);
   }
+  
+  assert(ret_stream <= global_data->gsdrrip_streams);
 
   return ret_stream;
 }
@@ -411,7 +420,7 @@ static void cache_set_following_srrip(gsdrrip_data *policy_data,
   assert(policy_data);
   assert(stream <= global_data->gsdrrip_streams);
 
-  for (ub4 i = 0; i < global_data->gsdrrip_streams; i++) 
+  for (ub4 i = 0; i <= global_data->gsdrrip_streams; i++) 
   {
     if (i == stream)
     {
@@ -431,7 +440,7 @@ static void cache_set_following_brrip(gsdrrip_data *policy_data,
   assert(policy_data);
   assert(stream <= global_data->gsdrrip_streams);
 
-  for (ub4 i = 0; i < global_data->gsdrrip_streams; i++) 
+  for (ub4 i = 0; i <= global_data->gsdrrip_streams; i++) 
   {
     if (i == stream)
     {
@@ -449,7 +458,7 @@ static void cache_set_following_gsdrrip(gsdrrip_data *policy_data,
 {
   assert(policy_data);
 
-  for (ub4 i = 0; i < global_data->gsdrrip_streams; i++) 
+  for (ub4 i = 0; i <= global_data->gsdrrip_streams; i++) 
   {
     policy_data->following[i] = cache_policy_gsdrrip;
   }
@@ -466,17 +475,17 @@ void cache_init_gsdrrip(long long int set_indx, struct cache_params *params, gsd
   if (set_indx == 0)
   {
     /* TODO: allocate psel for all streams */
-    global_data->psel = xcalloc(params->gsdrrip_streams, sizeof(sctr));
+    global_data->psel = xcalloc(params->streams + 1, sizeof(sctr));
     assert(global_data->psel);
 
     /* Initialize policy selection counter for all streams */
-    for (ub4 i = 0; i < params->gsdrrip_streams; i++)
+    for (ub4 i = 0; i <= params->streams; i++)
     {
       SAT_CTR_INI(global_data->psel[i], PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
       SAT_CTR_SET(global_data->psel[i], PSEL_MID_VAL);
     }
     
-    global_data->gsdrrip_streams = params->gsdrrip_streams;
+    global_data->gsdrrip_streams = params->streams;
 
     global_data->stats.gsdrrip_srrip_samples = 0;
     global_data->stats.gsdrrip_brrip_samples = 0;
@@ -502,38 +511,14 @@ void cache_init_gsdrrip(long long int set_indx, struct cache_params *params, gsd
 #undef BRRIP_PSEL_MIN_VAL
 #undef BRRIP_PSEL_MAX_VAL
 
-  /* Samples to be used for corrective path (Two fixed samples are used for
-   * policy and baseline) */
-#define FXD_SAMPL    (2)
-#define SDP_SAMPL(p) (p->sdp_gpu_cores + p->sdp_cpu_cores + FXD_SAMPL)
-
-    global_data->sdp.sdp_samples    = SDP_SAMPL(params);
-    global_data->sdp.sdp_gpu_cores  = params->sdp_gpu_cores;
-    global_data->sdp.sdp_cpu_cores  = params->sdp_cpu_cores;
-    global_data->sdp.sdp_cpu_tpset  = params->sdp_cpu_tpset;
-    global_data->sdp.sdp_cpu_tqset  = params->sdp_cpu_tqset;
-
-#undef FXD_SAMPL
-#undef SDP_SAMPL
-
-    /* Initialize SAP global data for SAP statistics for GSDRRIP */
-    global_data->sdp.sap.sap_streams      = params->sdp_streams;
-    global_data->sdp.sap.sap_cpu_cores    = params->sdp_cpu_cores;
-    global_data->sdp.sap.sap_gpu_cores    = params->sdp_gpu_cores;
-    global_data->sdp.sap.sap_cpu_tpset    = params->sdp_cpu_tpset;
-    global_data->sdp.sap.sap_cpu_tqset    = params->sdp_cpu_tqset;
-    global_data->sdp.sap.activate_access  = params->sdp_tactivate * params->num_sets;
-    
     /* Initialize GSDRRIP stats */
     cache_init_gsdrrip_stats(&(global_data->stats));
 
-    /* Initialize SAP statistics for GSDRRIP */
-    cache_init_sap_stats(&(global_data->sdp.sap.stats), "PC-GSDRRIP-SAP-stats.trace.csv.gz");
   }
   
   /* Allocate per-stream following array */ 
   GSDRRIP_DATA_FOLLOWING(policy_data) = 
-    (enum cache_policy_t *)xcalloc(params->gsdrrip_streams, sizeof (enum cache_policy_t));
+    (enum cache_policy_t *)xcalloc((params->streams + 1), sizeof (enum cache_policy_t));
   assert(GSDRRIP_DATA_FOLLOWING(policy_data));
 
   /* For RRIP blocks are organized in per RRPV list */
@@ -870,7 +855,6 @@ void cache_free_gsdrrip(unsigned int set_indx, gsdrrip_data *policy_data,
     free(global_data->psel);
 
     cache_fini_gsdrrip_stats(&(global_data->stats));
-    cache_fini_sap_stats(&(global_data->sdp.sap.stats));
   }
 }
 
@@ -908,23 +892,25 @@ void cache_fill_block_gsdrrip(gsdrrip_data *policy_data, gsdrrip_gdata *global_d
   assert(policy_data);
   assert(global_data);
 
-  assert(policy_data->following[strm] == cache_policy_srrip ||
-    policy_data->following[strm] == cache_policy_brrip || 
-    policy_data->following[strm] == cache_policy_gsdrrip);
-  
+#define GSSTRM(g, i)  (cache_get_gsdrrip_stream((g), (i)->stream, (i)->core))
+
+  assert(policy_data->following[GSSTRM(global_data, info)] == cache_policy_srrip ||
+    policy_data->following[GSSTRM(global_data, info)] == cache_policy_brrip || 
+    policy_data->following[GSSTRM(global_data, info)] == cache_policy_gsdrrip);
+
   if (info->pc)
   {
-    switch (policy_data->following[strm])
+    switch (policy_data->following[GSSTRM(global_data, info)])
     {
       case cache_policy_srrip:
         /* Increment fill stats for SRRIP */
         global_data->stats.sample_srrip_fill += 1;
-        SAT_CTR_INC(global_data->psel[info->stream]);
+        SAT_CTR_INC(global_data->psel[GSSTRM(global_data, info)]);
         break;
 
       case cache_policy_brrip:
         global_data->stats.sample_brrip_fill += 1;
-        SAT_CTR_DEC(global_data->psel[info->stream]);
+        SAT_CTR_DEC(global_data->psel[GSSTRM(global_data, info)]);
         break;
 
       case cache_policy_gsdrrip:
@@ -938,10 +924,9 @@ void cache_fill_block_gsdrrip(gsdrrip_data *policy_data, gsdrrip_gdata *global_d
 
 #define CTR_VAL(d)    (SAT_CTR_VAL((d)->brrip.access_ctr))
 #define THRESHOLD(d)  ((d)->brrip.threshold)
-#define GSSTRM(i)     (cache_get_gsdrrip_stream((i)->stream, (i)->core))
 
   /* Fill block in all component policies */
-  switch (GET_CURRENT_POLICY(policy_data, global_data, GSSTRM(info)))
+  switch (GET_CURRENT_POLICY(policy_data, global_data, GSSTRM(global_data, info)))
   {
     case cache_policy_srrip:
       cache_fill_block_srrip(&(policy_data->srrip), way, tag, state, strm, 
@@ -1000,10 +985,10 @@ int cache_replace_block_gsdrrip(gsdrrip_data *policy_data,
   assert(policy_data);
   assert(global_data);
   
-#define GSSTRM(i) (cache_get_gsdrrip_stream((i)->stream, (i)->core))
+#define GSSTRM(g, i) (cache_get_gsdrrip_stream((g), (i)->stream, (i)->core))
 
   /* According to the policy choose a replacement candidate */
-  switch (GET_CURRENT_POLICY(policy_data, global_data, GSSTRM(info)))
+  switch (GET_CURRENT_POLICY(policy_data, global_data, GSSTRM(global_data, info)))
   {
     case cache_policy_srrip:
       ret_way = cache_replace_block_srrip(&(policy_data->srrip));
@@ -1041,7 +1026,9 @@ void cache_access_block_gsdrrip(gsdrrip_data *policy_data,
   assert(policy_data);
   assert(global_data);
   
-  switch (policy_data->following[strm])
+#define GSSTRM(g, i) (cache_get_gsdrrip_stream((g), (i)->stream, (i)->core))
+
+  switch (policy_data->following[GSSTRM(global_data, info)])
   {
     case cache_policy_srrip:
       /* Increment fill stats for SRRIP */
@@ -1060,9 +1047,7 @@ void cache_access_block_gsdrrip(gsdrrip_data *policy_data,
       panic("Invalid policy function %s line %d\n", __FUNCTION__, __LINE__);
   }
 
-#define GSSTRM(i) (cache_get_gsdrrip_stream((i)->stream, (i)->core))
-
-  switch (GET_CURRENT_POLICY(policy_data, global_data, GSSTRM(info)))
+  switch (GET_CURRENT_POLICY(policy_data, global_data, GSSTRM(global_data, info)))
   {
     case cache_policy_srrip:
       cache_access_block_srrip(&(policy_data->srrip), way, strm, info);
@@ -1088,10 +1073,10 @@ void cache_set_block_gsdrrip(gsdrrip_data *policy_data, gsdrrip_gdata *global_da
   assert(policy_data);
   assert(global_data);
   
-#define GSSTRM(i) (cache_get_gsdrrip_stream((i)->stream, (i)->core))
+#define GSSTRM(g, i) (cache_get_gsdrrip_stream((g), (i)->stream, (i)->core))
 
   /* Call component policies */
-  switch (GET_CURRENT_POLICY(policy_data, global_data, GSSTRM(info)))
+  switch (GET_CURRENT_POLICY(policy_data, global_data, GSSTRM(global_data, info)))
   {
     case cache_policy_srrip:
       cache_set_block_srrip(&(policy_data->srrip), way, tag, state, stream, info);

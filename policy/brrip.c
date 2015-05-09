@@ -352,6 +352,9 @@ void cache_access_block_brrip(brrip_data *policy_data, int way, int strm, memory
   int old_rrpv;
   int new_rrpv;
   
+  old_rrpv = 0;
+  new_rrpv = 0;
+
   blk  = &(BRRIP_DATA_BLOCKS(policy_data)[way]);
   prev = blk->prev;
   next = blk->next;
@@ -363,20 +366,13 @@ void cache_access_block_brrip(brrip_data *policy_data, int way, int strm, memory
   switch (BRRIP_DATA_CAPOLICY(policy_data))
   {
     case cache_policy_brrip:
+
       /* Get old RRPV from the block */
       old_rrpv = (((rrip_list *)(blk->data))->rrpv);
-      new_rrpv = old_rrpv;
 
-      if (info && info->fill == TRUE)
-      {
-        /* Get new RRPV using policy specific function */
-        new_rrpv = cache_get_new_rrpv_brrip(old_rrpv);
-      }
-      else
-      {
-        new_rrpv = BRRIP_DATA_SPILL_RRPV(policy_data);
-      }
-
+      /* Get new RRPV using policy specific function */
+      new_rrpv = cache_get_new_rrpv_brrip(old_rrpv);
+        
       /* Update block queue if block got new RRPV */
       if (new_rrpv != old_rrpv)
       {
