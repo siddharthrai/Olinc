@@ -63,7 +63,7 @@ struct cache_block_t * cache_find_block_lru(lru_data *policy_data, long long tag
 void cache_fill_block_lru(lru_data *policy_data, int way, long long tag,
   enum cache_block_state_t state, int strm, memory_trace *info);
 
-int  cache_replace_block_lru(lru_data *policy_data);
+int  cache_replace_block_lru(lru_data *policy_data, memory_trace *info);
 
 void cache_access_block_lru(lru_data *policy_data, int way, int strm, 
   memory_trace *info);

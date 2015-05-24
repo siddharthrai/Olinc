@@ -178,7 +178,7 @@ void cache_fill_block_lru(lru_data *policy_data, int way, long long tag,
     LRU_DATA_VALID_TAIL(policy_data));
 }
 
-int cache_replace_block_lru(lru_data *policy_data)
+int cache_replace_block_lru(lru_data *policy_data, memory_trace *info)
 {
   struct cache_block_t *block;
   

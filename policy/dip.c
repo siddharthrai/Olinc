@@ -336,7 +336,7 @@ int cache_replace_block_dip(dip_data *policy_data, dip_gdata *global_data)
   {
     case cache_policy_lru:
 
-      return cache_replace_block_lru(&(policy_data->lru));
+      return cache_replace_block_lru(&(policy_data->lru), NULL);
       break; 
 
     case cache_policy_bip:

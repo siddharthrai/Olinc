@@ -48,6 +48,10 @@ int main(int argc, char **argv)
   dbuf_b_access     = 0;
   dbuf_b_write      = 0;
   prev_block        = 0;
+  
+  long int seq;
+  
+  seq = 0;
 
   while (!gzeof(trc_file))
   {
@@ -147,6 +151,11 @@ int main(int argc, char **argv)
           }
         }
       }
+      
+      if (trace.spill && trace.fill && trace.stream == CS)
+      {
+        printf("%ld\n", trace.address); 
+      }
 
 #if 0
       if (trace.spill && trace.stream == ZS)
@@ -158,12 +167,15 @@ int main(int argc, char **argv)
         printf("BS write \n"); 
       }
 #endif
+
       prev_block = trace.vtl_addr;
+
+      seq++;
     }
   }
 
   gzclose(trc_file);
-
+#if 0
   printf("Color: DBuf access: %ld | NonDBuf access: %ld\n", dbuf_c_access, nondbuf_c_access);
   printf("Color: DBuf write: %ld | NonDBuf write: %ld\n", dbuf_c_write, nondbuf_c_write);
   printf("Depth: DBuf access: %ld | NonDBuf access: %ld\n", dbuf_z_access, nondbuf_z_access);
@@ -172,4 +184,5 @@ int main(int argc, char **argv)
   printf("Blitter: DBuf write: %ld | NonDBuf write: %ld\n", dbuf_b_write, nondbuf_b_write);
   printf("Other: DBuf access: %ld | NonDBuf access: %ld\n", dbuf_access, nondbuf_access);
   printf("Other: DBuf write: %ld | NonDBuf write: %ld\n", dbuf_write, nondbuf_write);
+#endif
 }

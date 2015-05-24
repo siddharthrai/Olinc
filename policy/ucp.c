@@ -300,7 +300,7 @@ static void cache_fill_block_ucp_lru(ucp_data *policy_data, int way,
 /* Get a replacement candidate */
 int cache_replace_block_ucp_lru(ucp_data *policy_data)
 {
-  return cache_replace_block_lru(&(policy_data->lru));
+  return cache_replace_block_lru(&(policy_data->lru), NULL);
 }
 
 /* Find block with the given tag */

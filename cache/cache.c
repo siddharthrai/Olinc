@@ -1072,7 +1072,7 @@ int cache_replace_block(struct cache_t *cache, int set, memory_trace *info)
   switch(cache->policy)
   {
     case cache_policy_lru:
-      return cache_replace_block_lru(CACHE_SET_DATA_LRU(CACHE_SET(cache, set)));
+      return cache_replace_block_lru(CACHE_SET_DATA_LRU(CACHE_SET(cache, set)), info);
 
     case cache_policy_stridelru:
       return cache_replace_block_stridelru(CACHE_SET_DATA_STRIDELRU(CACHE_SET(cache, set)));

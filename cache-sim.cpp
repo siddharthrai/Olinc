@@ -30,6 +30,8 @@ InterStreamReuse *reuse_pp_cbk = NULL; /* Callback for TT reuse */
   NumericStatistic <ub8> *i_xcevct;    /* X stream evict by C */
   NumericStatistic <ub8> *i_xzevct;    /* X stream evict by Z */
   NumericStatistic <ub8> *i_xtevct;    /* X stream evict by T */
+  NumericStatistic <ub8> *i_xpevct;    /* X stream evict by P */
+  NumericStatistic <ub8> *i_xrevct;    /* X stream evict by other streams */
   NumericStatistic <ub8> *i_sevct;     /* Input intra stream evict */
   NumericStatistic <ub8> *i_zevct;     /* Blocks evicted without reuse */
   NumericStatistic <ub8> *i_xhit;      /* Input inter stream hit */
@@ -46,6 +48,8 @@ InterStreamReuse *reuse_pp_cbk = NULL; /* Callback for TT reuse */
   NumericStatistic <ub8> *c_zevct;     /* Color evict with out reuse */
   NumericStatistic <ub8> *c_xzevct;    /* X stream evict by Z */
   NumericStatistic <ub8> *c_xtevct;    /* X stream evict by T */
+  NumericStatistic <ub8> *c_xpevct;    /* X stream evict by P */
+  NumericStatistic <ub8> *c_xrevct;    /* X stream evict by other streams */
   NumericStatistic <ub8> *c_xhit;      /* Color inter stream hit */
   NumericStatistic <ub8> *c_zchit;     /* Color Z stream hit */
   NumericStatistic <ub8> *c_tchit;     /* Color T stream hit */
@@ -86,6 +90,8 @@ InterStreamReuse *reuse_pp_cbk = NULL; /* Callback for TT reuse */
   NumericStatistic <ub8> *z_zevct;     /* Depth evict without reuse */
   NumericStatistic <ub8> *z_xcevct;    /* X stream evict by C */
   NumericStatistic <ub8> *z_xtevct;    /* X stream evict by T */
+  NumericStatistic <ub8> *z_xpevct;    /* X stream evict by P */
+  NumericStatistic <ub8> *z_xrevct;    /* X stream evict by other streams */
   NumericStatistic <ub8> *z_xhit;      /* Depth intra stream evict */
   NumericStatistic <ub8> *z_czhit;     /* Depth C stream evict */
   NumericStatistic <ub8> *z_tzhit;     /* Depth T stream evict */
@@ -163,8 +169,10 @@ InterStreamReuse *reuse_pp_cbk = NULL; /* Callback for TT reuse */
   NumericStatistic <ub8> *n_sevct;     /* Instruction intra stream evict */
   NumericStatistic <ub8> *n_zevct;     /* Instruction evict without reuse */
   NumericStatistic <ub8> *n_xcevct;    /* X stream evict by C */
-  NumericStatistic <ub8> *n_xzevct;    /* X stream evict by T */
-  NumericStatistic <ub8> *n_xtevct;    /* X stream evict by C */
+  NumericStatistic <ub8> *n_xzevct;    /* X stream evict by Z */
+  NumericStatistic <ub8> *n_xtevct;    /* X stream evict by T */
+  NumericStatistic <ub8> *n_xpevct;    /* X stream evict by P */
+  NumericStatistic <ub8> *n_xrevct;    /* X stream evict by other streams */
   NumericStatistic <ub8> *n_xhit;      /* Instruction inter stream hit */
 
   NumericStatistic <ub8> *h_access;    /* HZ stream access */
@@ -176,8 +184,10 @@ InterStreamReuse *reuse_pp_cbk = NULL; /* Callback for TT reuse */
   NumericStatistic <ub8> *h_sevct;     /* HZ intra stream evict */
   NumericStatistic <ub8> *h_zevct;     /* HZ evict without reuse */
   NumericStatistic <ub8> *h_xcevct;    /* X stream evict by C */
-  NumericStatistic <ub8> *h_xzevct;    /* X stream evict by T */
-  NumericStatistic <ub8> *h_xtevct;    /* X stream evict by C */
+  NumericStatistic <ub8> *h_xzevct;    /* X stream evict by Z */
+  NumericStatistic <ub8> *h_xtevct;    /* X stream evict by T */
+  NumericStatistic <ub8> *h_xpevct;    /* X stream evict by P */
+  NumericStatistic <ub8> *h_xrevct;    /* X stream evict by other streams */
   NumericStatistic <ub8> *h_xhit;      /* HZ inter stream hit */
 
   NumericStatistic <ub8> *b_access;    /* Blitter stream access */
@@ -191,8 +201,10 @@ InterStreamReuse *reuse_pp_cbk = NULL; /* Callback for TT reuse */
   NumericStatistic <ub8> *b_sevct;     /* Blitter intra stream evict */
   NumericStatistic <ub8> *b_zevct;     /* Blitter evict without reuse */
   NumericStatistic <ub8> *b_xcevct;    /* X stream evict by C */
-  NumericStatistic <ub8> *b_xzevct;    /* X stream evict by T */
-  NumericStatistic <ub8> *b_xtevct;    /* X stream evict by C */
+  NumericStatistic <ub8> *b_xzevct;    /* X stream evict by Z */
+  NumericStatistic <ub8> *b_xtevct;    /* X stream evict by T */
+  NumericStatistic <ub8> *b_xpevct;    /* X stream evict by P */
+  NumericStatistic <ub8> *b_xrevct;    /* X stream evict by other streams */
   NumericStatistic <ub8> *b_xhit;      /* Blitter inter stream hit */
   NumericStatistic <ub8> *b_cbhit;     /* Blitter C stream hit */
   NumericStatistic <ub8> *b_zbhit;     /* Blitter Z stream hit */
@@ -207,8 +219,10 @@ InterStreamReuse *reuse_pp_cbk = NULL; /* Callback for TT reuse */
   NumericStatistic <ub8> *d_sevct;     /* DAC intra stream evict */
   NumericStatistic <ub8> *d_zevct;     /* DAC evict without reuse */
   NumericStatistic <ub8> *d_xcevct;    /* X stream evict by C */
-  NumericStatistic <ub8> *d_xzevct;    /* X stream evict by T */
-  NumericStatistic <ub8> *d_xtevct;    /* X stream evict by C */
+  NumericStatistic <ub8> *d_xzevct;    /* X stream evict by Z */
+  NumericStatistic <ub8> *d_xtevct;    /* X stream evict by T */
+  NumericStatistic <ub8> *d_xpevct;    /* X stream evict by P */
+  NumericStatistic <ub8> *d_xrevct;    /* X stream evict by other streams */
   NumericStatistic <ub8> *d_xhit;      /* DAC inter stream hit */
   NumericStatistic <ub8> *d_zdhit;     /* DAC Z stream hit */
   NumericStatistic <ub8> *d_tdhit;     /* DAC T stream hit */
@@ -224,8 +238,10 @@ InterStreamReuse *reuse_pp_cbk = NULL; /* Callback for TT reuse */
   NumericStatistic <ub8> *x_sevct;     /* Index intra stream evict */
   NumericStatistic <ub8> *x_zevct;     /* Index evict without reuse */
   NumericStatistic <ub8> *x_xcevct;    /* X stream evict by C */
-  NumericStatistic <ub8> *x_xzevct;    /* X stream evict by T */
-  NumericStatistic <ub8> *x_xtevct;    /* X stream evict by C */
+  NumericStatistic <ub8> *x_xzevct;    /* X stream evict by Z */
+  NumericStatistic <ub8> *x_xtevct;    /* X stream evict by T */
+  NumericStatistic <ub8> *x_xpevct;    /* X stream evict by P */
+  NumericStatistic <ub8> *x_xrevct;    /* X stream evict by other streams */
   NumericStatistic <ub8> *x_xhit;      /* Index inter stream hit */
 
   NumericStatistic <ub8> *p_access;    /* CPU stream access */ 
@@ -237,11 +253,13 @@ InterStreamReuse *reuse_pp_cbk = NULL; /* Callback for TT reuse */
   NumericStatistic <ub8> *p_sevct;     /* CPU intra stream evict */
   NumericStatistic <ub8> *p_zevct;     /* CPU evict without reuse */
   NumericStatistic <ub8> *p_xcevct;    /* X stream evict by C */
-  NumericStatistic <ub8> *p_xzevct;    /* X stream evict by T */
-  NumericStatistic <ub8> *p_xtevct;    /* X stream evict by C */
+  NumericStatistic <ub8> *p_xzevct;    /* X stream evict by Z */
+  NumericStatistic <ub8> *p_xtevct;    /* X stream evict by T */
   NumericStatistic <ub8> *p_xhit;      /* CPU inter stream hit */
 
   ub8 *per_way_evct[TST + 1];          /* Eviction seen by each way for each stream */
+  
+  ub8 invalid_hits;
 
 cache_access_status cachesim_incl_cache( cachesim_cache *cache, ub8 addr, 
   ub8 rdis, ub1 policy, ub1 strm, memory_trace *info)
@@ -277,11 +295,13 @@ cache_access_status cachesim_incl_cache( cachesim_cache *cache, ub8 addr,
   /* If access is a miss */
   if (!block)
   {
+    assert(info->prefetch == FALSE);
+
     /* If access is not bypassed fill the block */
-    if (info && (info->spill == FALSE || (info->spill == TRUE && IS_SPILL_ALLOCATED(info->stream))))
 #if 0
     if (info)
 #endif
+    if (info && (info->spill == FALSE || (info->spill == TRUE && IS_SPILL_ALLOCATED(info->stream))))
     {
       way = cache_replace_block(cache->cache, indx, info);
       assert(way != -1);
@@ -318,6 +338,7 @@ cache_access_status cachesim_incl_cache( cachesim_cache *cache, ub8 addr,
 
       cache_fill_block(cache->cache, indx, way, addr, cache_block_exclusive,
           strm, info);
+      
       return ret;
     } 
     else
@@ -336,8 +357,24 @@ cache_access_status cachesim_incl_cache( cachesim_cache *cache, ub8 addr,
     ret.epoch     = block->epoch;
     ret.access    = block->access;
     ret.last_rrpv = block->last_rrpv;
+    
+    /**/
+    if (info->fill == TRUE || info->stream == BS)
+    {
+      cache_access_block(cache->cache, indx, block->way, strm, info);
+    }
+    else
+    {
+      /* Obtain old block state */
+      cache_get_block(cache->cache, indx, block->way, &vctm_tag, &vctm_state, 
+        &vctm_stream);
 
-    cache_access_block(cache->cache, indx, block->way, strm, info);
+      assert(vctm_state != cache_block_invalid);
+      
+      /* Set new stream */
+      cache_set_block(cache->cache, indx, block->way, vctm_tag, vctm_state, 
+        strm, info);
+    }
 
     return ret;
   }
@@ -902,6 +939,8 @@ static void resetStatistics()
   i_xcevct->setValue(0);
   i_xzevct->setValue(0);
   i_xtevct->setValue(0);
+  i_xpevct->setValue(0);
+  i_xrevct->setValue(0);
   i_xhit->setValue(0);
 
   c_access->setValue(0);
@@ -916,6 +955,8 @@ static void resetStatistics()
   c_zevct->setValue(0);
   c_xzevct->setValue(0);
   c_xtevct->setValue(0);
+  c_xpevct->setValue(0);
+  c_xrevct->setValue(0);
   c_xhit->setValue(0);
   c_zchit->setValue(0);
   c_tchit->setValue(0);
@@ -956,6 +997,8 @@ static void resetStatistics()
   z_zevct->setValue(0);
   z_xcevct->setValue(0);
   z_xtevct->setValue(0);
+  z_xpevct->setValue(0);
+  z_xrevct->setValue(0);
   z_xhit->setValue(0);
   z_czhit->setValue(0);
   z_tzhit->setValue(0);
@@ -1035,6 +1078,8 @@ static void resetStatistics()
   n_xcevct->setValue(0);
   n_xzevct->setValue(0);
   n_xtevct->setValue(0);
+  n_xpevct->setValue(0);
+  n_xrevct->setValue(0);
   n_xhit->setValue(0);
 
   h_access->setValue(0);
@@ -1048,6 +1093,8 @@ static void resetStatistics()
   h_xcevct->setValue(0);
   h_xzevct->setValue(0);
   h_xtevct->setValue(0);
+  h_xpevct->setValue(0);
+  h_xrevct->setValue(0);
   h_xhit->setValue(0);
 
   d_access->setValue(0);
@@ -1061,6 +1108,8 @@ static void resetStatistics()
   d_xcevct->setValue(0);
   d_xzevct->setValue(0);
   d_xtevct->setValue(0);
+  d_xpevct->setValue(0);
+  d_xrevct->setValue(0);
   d_xhit->setValue(0);
   d_cdhit->setValue(0);
   d_zdhit->setValue(0);
@@ -1078,6 +1127,8 @@ static void resetStatistics()
   b_xcevct->setValue(0);
   b_xzevct->setValue(0);
   b_xtevct->setValue(0);
+  b_xpevct->setValue(0);
+  b_xrevct->setValue(0);
   b_xhit->setValue(0);
   b_bprod->setValue(0);
   b_bcons->setValue(0);
@@ -1096,6 +1147,8 @@ static void resetStatistics()
   x_xcevct->setValue(0);
   x_xzevct->setValue(0);
   x_xtevct->setValue(0);
+  x_xpevct->setValue(0);
+  x_xrevct->setValue(0);
   x_xhit->setValue(0);
 
   p_access->setValue(0);
@@ -1125,6 +1178,8 @@ static void periodicReset()
   i_xcevct->setValue(0);
   i_xzevct->setValue(0);
   i_xtevct->setValue(0);
+  i_xpevct->setValue(0);
+  i_xrevct->setValue(0);
   i_xhit->setValue(0);
 
   c_access->setValue(0);
@@ -1136,6 +1191,8 @@ static void periodicReset()
   c_zevct->setValue(0);
   c_xzevct->setValue(0);
   c_xtevct->setValue(0);
+  c_xpevct->setValue(0);
+  c_xrevct->setValue(0);
   c_xhit->setValue(0);
   c_zchit->setValue(0);
   c_tchit->setValue(0);
@@ -1175,6 +1232,8 @@ static void periodicReset()
   z_zevct->setValue(0);
   z_xcevct->setValue(0);
   z_xtevct->setValue(0);
+  z_xpevct->setValue(0);
+  z_xrevct->setValue(0);
   z_xhit->setValue(0);
   z_czhit->setValue(0);
   z_tzhit->setValue(0);
@@ -1252,6 +1311,8 @@ static void periodicReset()
   n_xcevct->setValue(0);
   n_xzevct->setValue(0);
   n_xtevct->setValue(0);
+  n_xpevct->setValue(0);
+  n_xrevct->setValue(0);
   n_xhit->setValue(0);
 
   h_access->setValue(0);
@@ -1264,6 +1325,8 @@ static void periodicReset()
   h_xcevct->setValue(0);
   h_xzevct->setValue(0);
   h_xtevct->setValue(0);
+  h_xpevct->setValue(0);
+  h_xrevct->setValue(0);
   h_xhit->setValue(0);
 
   d_access->setValue(0);
@@ -1276,6 +1339,8 @@ static void periodicReset()
   d_xcevct->setValue(0);
   d_xzevct->setValue(0);
   d_xtevct->setValue(0);
+  d_xpevct->setValue(0);
+  d_xrevct->setValue(0);
   d_xhit->setValue(0);
   d_cdhit->setValue(0);
   d_zdhit->setValue(0);
@@ -1292,6 +1357,8 @@ static void periodicReset()
   b_xcevct->setValue(0);
   b_xzevct->setValue(0);
   b_xtevct->setValue(0);
+  b_xpevct->setValue(0);
+  b_xrevct->setValue(0);
   b_xhit->setValue(0);
   b_cbhit->setValue(0);
   b_zbhit->setValue(0);
@@ -1307,6 +1374,8 @@ static void periodicReset()
   x_xcevct->setValue(0);
   x_xzevct->setValue(0);
   x_xtevct->setValue(0);
+  x_xpevct->setValue(0);
+  x_xrevct->setValue(0);
   x_xhit->setValue(0);
 
   p_access->setValue(0);
@@ -1366,8 +1435,9 @@ int main(int argc, char **argv)
   rdis              = 0;
   inscnt            = 0;
   trc_file_name     = NULL;
-  config_file_name  = NULL;;
-
+  config_file_name  = NULL;
+  invalid_hits      = 0;
+  
   while ((opt = getopt(argc, argv, "f:t:")) != -1)
   {
     switch (opt)
@@ -1491,6 +1561,8 @@ int main(int argc, char **argv)
   i_xcevct    = &sm->getNumericStatistic<ub8>("CH_XCevict", ub8(0), "UC", "I"); /* Input stream access */
   i_xzevct    = &sm->getNumericStatistic<ub8>("CH_XZevict", ub8(0), "UC", "I"); /* Input stream access */
   i_xtevct    = &sm->getNumericStatistic<ub8>("CH_XTevict", ub8(0), "UC", "I"); /* Input stream access */
+  i_xpevct    = &sm->getNumericStatistic<ub8>("CH_XPevict", ub8(0), "UC", "I"); /* Input stream access */
+  i_xrevct    = &sm->getNumericStatistic<ub8>("CH_XRevict", ub8(0), "UC", "I"); /* Input stream access */
   i_xhit      = &sm->getNumericStatistic<ub8>("CH_Xhit", ub8(0), "UC", "I");    /* Input stream access */
 
   c_access    = &sm->getNumericStatistic<ub8>("CH_Access", ub8(0), "UC", "C");  /* Input stream access */
@@ -1505,6 +1577,8 @@ int main(int argc, char **argv)
   c_zevct     = &sm->getNumericStatistic<ub8>("CH_Zevict", ub8(0), "UC", "C");  /* Input stream access */
   c_xzevct    = &sm->getNumericStatistic<ub8>("CH_XZevict", ub8(0), "UC", "C"); /* Input stream access */
   c_xtevct    = &sm->getNumericStatistic<ub8>("CH_XTevict", ub8(0), "UC", "C"); /* Input stream access */
+  c_xpevct    = &sm->getNumericStatistic<ub8>("CH_XPevict", ub8(0), "UC", "C"); /* Input stream access */
+  c_xrevct    = &sm->getNumericStatistic<ub8>("CH_XRevict", ub8(0), "UC", "C"); /* Input stream access */
   c_xhit      = &sm->getNumericStatistic<ub8>("CH_Xhit", ub8(0), "UC", "C");    /* Input stream access */
   c_zchit     = &sm->getNumericStatistic<ub8>("CH_ZChit", ub8(0), "UC", "C");   /* Input stream access */
   c_tchit     = &sm->getNumericStatistic<ub8>("CH_TChit", ub8(0), "UC", "C");   /* Input stream access */
@@ -1545,6 +1619,8 @@ int main(int argc, char **argv)
   z_zevct     = &sm->getNumericStatistic<ub8>("CH_Zevict", ub8(0), "UC", "Z");  /* Input stream access */
   z_xcevct    = &sm->getNumericStatistic<ub8>("CH_XCevict", ub8(0), "UC", "Z"); /* Input stream access */
   z_xtevct    = &sm->getNumericStatistic<ub8>("CH_XTevict", ub8(0), "UC", "Z"); /* Input stream access */
+  z_xpevct    = &sm->getNumericStatistic<ub8>("CH_XPevict", ub8(0), "UC", "Z"); /* Input stream access */
+  z_xrevct    = &sm->getNumericStatistic<ub8>("CH_XRevict", ub8(0), "UC", "Z"); /* Input stream access */
   z_xhit      = &sm->getNumericStatistic<ub8>("CH_Xhit", ub8(0), "UC", "Z");    /* Input stream access */
   z_czhit     = &sm->getNumericStatistic<ub8>("CH_CZhit", ub8(0), "UC", "Z");   /* Input stream access */
   z_tzhit     = &sm->getNumericStatistic<ub8>("CH_TZhit", ub8(0), "UC", "Z");   /* Input stream access */
@@ -1624,6 +1700,8 @@ int main(int argc, char **argv)
   n_xcevct    = &sm->getNumericStatistic<ub8>("CH_XCevict", ub8(0), "UC", "N"); /* Input stream access */
   n_xzevct    = &sm->getNumericStatistic<ub8>("CH_XZevict", ub8(0), "UC", "N"); /* Input stream access */
   n_xtevct    = &sm->getNumericStatistic<ub8>("CH_XTevict", ub8(0), "UC", "N"); /* Input stream access */
+  n_xpevct    = &sm->getNumericStatistic<ub8>("CH_XPevict", ub8(0), "UC", "N"); /* Input stream access */
+  n_xrevct    = &sm->getNumericStatistic<ub8>("CH_XRevict", ub8(0), "UC", "N"); /* Input stream access */
   n_xhit      = &sm->getNumericStatistic<ub8>("CH_Xhit", ub8(0), "UC", "N");    /* Input stream access */
 
   h_access    = &sm->getNumericStatistic<ub8>("CH_Access", ub8(0), "UC", "H");  /* Input stream access */
@@ -1637,6 +1715,8 @@ int main(int argc, char **argv)
   h_xcevct    = &sm->getNumericStatistic<ub8>("CH_XCevict", ub8(0), "UC", "H"); /* Input stream access */
   h_xzevct    = &sm->getNumericStatistic<ub8>("CH_XZevict", ub8(0), "UC", "H"); /* Input stream access */
   h_xtevct    = &sm->getNumericStatistic<ub8>("CH_XTevict", ub8(0), "UC", "H"); /* Input stream access */
+  h_xpevct    = &sm->getNumericStatistic<ub8>("CH_XPevict", ub8(0), "UC", "H"); /* Input stream access */
+  h_xrevct    = &sm->getNumericStatistic<ub8>("CH_XRevict", ub8(0), "UC", "H"); /* Input stream access */
   h_xhit      = &sm->getNumericStatistic<ub8>("CH_Xhit", ub8(0), "UC", "H");    /* Input stream access */
 
   d_access    = &sm->getNumericStatistic<ub8>("CH_Access", ub8(0), "UC", "D");  /* Input stream access */
@@ -1650,6 +1730,8 @@ int main(int argc, char **argv)
   d_xcevct    = &sm->getNumericStatistic<ub8>("CH_XCevict", ub8(0), "UC", "D"); /* Input stream access */
   d_xzevct    = &sm->getNumericStatistic<ub8>("CH_XZevict", ub8(0), "UC", "D"); /* Input stream access */
   d_xtevct    = &sm->getNumericStatistic<ub8>("CH_XTevict", ub8(0), "UC", "D"); /* Input stream access */
+  d_xpevct    = &sm->getNumericStatistic<ub8>("CH_XPevict", ub8(0), "UC", "D"); /* Input stream access */
+  d_xrevct    = &sm->getNumericStatistic<ub8>("CH_XRevict", ub8(0), "UC", "D"); /* Input stream access */
   d_xhit      = &sm->getNumericStatistic<ub8>("CH_Xhit", ub8(0), "UC", "D");    /* Input stream access */
   d_cdhit      = &sm->getNumericStatistic<ub8>("CH_CDhit", ub8(0), "UC", "D");  /* Input stream access */
   d_zdhit      = &sm->getNumericStatistic<ub8>("CH_ZDhit", ub8(0), "UC", "D");  /* Input stream access */
@@ -1667,6 +1749,8 @@ int main(int argc, char **argv)
   b_xcevct    = &sm->getNumericStatistic<ub8>("CH_XCevict", ub8(0), "UC", "B"); /* Input stream access */
   b_xzevct    = &sm->getNumericStatistic<ub8>("CH_XZevict", ub8(0), "UC", "B"); /* Input stream access */
   b_xtevct    = &sm->getNumericStatistic<ub8>("CH_XTevict", ub8(0), "UC", "B"); /* Input stream access */
+  b_xpevct    = &sm->getNumericStatistic<ub8>("CH_XPevict", ub8(0), "UC", "B"); /* Input stream access */
+  b_xrevct    = &sm->getNumericStatistic<ub8>("CH_XRevict", ub8(0), "UC", "B"); /* Input stream access */
   b_xhit      = &sm->getNumericStatistic<ub8>("CH_Xhit", ub8(0), "UC", "B");    /* Input stream access */
   b_bprod     = &sm->getNumericStatistic<ub8>("CH_BProd", ub8(0), "UC", "B");   /* Input stream access */
   b_bcons     = &sm->getNumericStatistic<ub8>("CH_BCons", ub8(0), "UC", "B");   /* Input stream access */
@@ -1685,6 +1769,8 @@ int main(int argc, char **argv)
   x_xcevct    = &sm->getNumericStatistic<ub8>("CH_XCevict", ub8(0), "UC", "X"); /* Input stream access */
   x_xzevct    = &sm->getNumericStatistic<ub8>("CH_XZevict", ub8(0), "UC", "X"); /* Input stream access */
   x_xtevct    = &sm->getNumericStatistic<ub8>("CH_XTevict", ub8(0), "UC", "X"); /* Input stream access */
+  x_xpevct    = &sm->getNumericStatistic<ub8>("CH_XPevict", ub8(0), "UC", "X"); /* Input stream access */
+  x_xrevct    = &sm->getNumericStatistic<ub8>("CH_XRevict", ub8(0), "UC", "X"); /* Input stream access */
   x_xhit      = &sm->getNumericStatistic<ub8>("CH_Xhit", ub8(0), "UC", "X");    /* Input stream access */
 
   p_access    = &sm->getNumericStatistic<ub8>("CH_Access", ub8(0), "UC", "P");  /* Input stream access */
@@ -1723,8 +1809,6 @@ int main(int argc, char **argv)
       CLRSTRUCT(l3cache); 
       CLRSTRUCT(per_unit_miss); 
       CLRSTRUCT(acc_per_unit); 
-
-      inscnt = 0;
 
       set_cache_params(&params, &(sim_params.lcP), cache_sizes[c_cache], cache_ways[c_way], cache_set);
 
@@ -2229,8 +2313,8 @@ int main(int argc, char **argv)
                     if (info.stream != PS)
                       (*p_xevct)++;
 
-                    assert(p_blocks->getValue());
-                    (*p_blocks)--;
+                    if (p_blocks->getValue())
+                      (*p_blocks)--;
                   }
                   else
                   {
@@ -2254,6 +2338,20 @@ int main(int argc, char **argv)
                             {
                               (*i_xtevct)++;
                             }
+                            else
+                            {
+                              if (info.stream == PS)
+                              {
+                                (*i_xpevct)++;
+                              }
+                              else
+                              {
+                                if (info.stream != IS)
+                                {
+                                  (*i_xrevct)++;
+                                }
+                              }
+                            }
                           }
                         }
 
@@ -2274,6 +2372,20 @@ int main(int argc, char **argv)
                           {
                             (*c_xtevct)++;
                           }
+                          else
+                          {
+                            if (info.stream == PS)
+                            {
+                              (*c_xpevct)++;
+                            }
+                            else
+                            {
+                              if (info.stream != CS)
+                              {
+                                (*c_xrevct)++;
+                              }
+                            }
+                          }
                         }
 
                         assert(c_blocks->getValue(1) && info.stream != CS);
@@ -2293,6 +2405,20 @@ int main(int argc, char **argv)
                           if (info.stream == TS)
                           {
                             (*z_xtevct)++;
+                          }
+                          else
+                          {
+                            if (info.stream == PS)
+                            {
+                              (*z_xpevct)++;
+                            }
+                            else
+                            {
+                              if (info.stream != ZS)
+                              {
+                                (*z_xrevct)++;
+                              }
+                            }
                           }
                         }
 
@@ -2339,6 +2465,20 @@ int main(int argc, char **argv)
                             {
                               (*n_xtevct)++;
                             }
+                            else
+                            {
+                              if (info.stream == PS)
+                              {
+                                (*n_xpevct)++;
+                              }
+                              else
+                              {
+                                if (info.stream != NS)
+                                {
+                                  (*n_xrevct)++;
+                                }
+                              }
+                            }
                           }
                         }
 
@@ -2364,6 +2504,20 @@ int main(int argc, char **argv)
                             if (info.stream == TS)
                             {
                               (*h_xtevct)++;
+                            }
+                            else
+                            {
+                              if (info.stream == PS)
+                              {
+                                (*h_xpevct)++;
+                              }
+                              else
+                              {
+                                if (info.stream != HS)
+                                {
+                                  (*h_xrevct)++;
+                                }
+                              }
                             }
                           }
                         }
@@ -2391,6 +2545,20 @@ int main(int argc, char **argv)
                             {
                               (*b_xtevct)++;
                             }
+                            else
+                            {
+                              if (info.stream == PS)
+                              {
+                                (*b_xpevct)++;
+                              }
+                              else
+                              {
+                                if (info.stream != BS)
+                                {
+                                  (*b_xrevct)++;
+                                }
+                              }
+                            }
                           }
                         }
 
@@ -2416,6 +2584,20 @@ int main(int argc, char **argv)
                             if (info.stream == TS)
                             {
                               (*d_xtevct)++;
+                            }
+                            else
+                            {
+                              if (info.stream == PS)
+                              {
+                                (*d_xpevct)++;
+                              }
+                              else
+                              {
+                                if (info.stream != DS)
+                                {
+                                  (*d_xrevct)++;
+                                }
+                              }
                             }
                           }
                         }
@@ -2443,6 +2625,20 @@ int main(int argc, char **argv)
                             if (info.stream == TS)
                             {
                               (*x_xtevct)++;
+                            }
+                            else
+                            {
+                              if (info.stream == PS)
+                              {
+                                (*x_xpevct)++;
+                              }
+                              else
+                              {
+                                if (info.stream != XS)
+                                {
+                                  (*x_xrevct)++;
+                                }
+                              }
                             }
                           }
                         }

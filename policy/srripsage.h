@@ -121,7 +121,8 @@ typedef struct cache_policy_srripsage_gdata_t
   ub1 demote_at_head[TST + 1];                /* True if block is to be demoted at the head of the arrival list */
   ub1 demote_on_hit[TST + 1];                 /* True if block is to be filled at the head of the arrival list */
   ub8 *rrpv_blocks;                           /* #blocks at each RRPV */
-  ub8 fills_at_head[TST + 1];                 /* True if block is to be filled at the head of the arrival list */
+  ub8 fills_at_head[TST + 1];                 /* # block filled at the head of the arrival list */
+  ub8 fills_at_tail[TST + 1];                 /* # block filled at the tail of the arrival list */
   ub8 dems_at_head[TST + 1];                  /* True if block is to be filled at the head of the arrival list */
   ub8 fail_demotion[TST + 1];                 /* Premature demotions */
 
@@ -139,13 +140,16 @@ typedef struct cache_policy_srripsage_gdata_t
   struct saturating_counter_t cb_ctr;             /* CB reuse counter */
   struct saturating_counter_t bc_ctr;             /* CB reuse counter */
   struct saturating_counter_t ct_ctr;             /* CT reuse counter */
-  struct saturating_counter_t bt_ctr;             /* CT reuse counter */
-  struct saturating_counter_t tb_ctr;             /* CT reuse counter */
-  struct saturating_counter_t zt_ctr;             /* CT reuse counter */
+  struct saturating_counter_t bt_ctr;             /* BT reuse counter */
+  struct saturating_counter_t tb_ctr;             /* TB reuse counter */
+  struct saturating_counter_t zt_ctr;             /* ZT reuse counter */
 
   struct saturating_counter_t gfath_ctr;          /* Global dueling Counter for fills */
   struct saturating_counter_t gfathm_ctr;         /* Global dueling Counter for misses */
   struct saturating_counter_t gdem_ctr;           /* Global dueling Counter for demotions */
+
+  struct saturating_counter_t fill_list_fctr[TST + 1];  /* Fill-list fill counter */
+  struct saturating_counter_t fill_list_hctr[TST + 1];  /* Fill-list hit counter */
 }srripsage_gdata;
 
 #undef MAX_THR
@@ -441,4 +445,6 @@ int cache_get_new_rrpv_srripsage(srripsage_data *policy_data,
 
 int cache_count_block_srripsage(srripsage_data *policy_data, ub1 strm);
 
+ub1 cache_override_fill_at_head(srripsage_data *policy_data, 
+    srripsage_gdata *global_data, memory_trace *info);
 #endif	/* MEM_SYSTEM_CACHE_H */

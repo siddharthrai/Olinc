@@ -34,8 +34,6 @@
 #include "cache-block.h"
 #include "srrip.h"
 #include "brrip.h"
-#include "sap.h"
-#include "sdp.h"
 #include <stdio.h>
 
 /* Head node of a list, which corresponds to a particular RRPV */
@@ -92,7 +90,6 @@ typedef struct cache_policy_gsdrrip_gdata_t
   sctr         *psel;                 /* Policy selection counter */
   gsdrrip_stats stats;                /* GSDRRIP statistics */
   brrip_gdata   brrip;                /* BRRIP cache wide data */
-  sdp_gdata     sdp;                  /* SDP cache wide data for SAP like stats */
 }gsdrrip_gdata;
 
 /*

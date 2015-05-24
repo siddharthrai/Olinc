@@ -42,6 +42,18 @@ struct cache_block_t
   /* TRUE, if block has been demoted */
   unsigned char demote;
 
+  /* TRUE, if block has been demoted to head */
+  unsigned char fill_at_head;
+
+  /* TRUE, if block has been demoted to tail */
+  unsigned char fill_at_tail;
+
+  /* TRUE, if block has been demoted to head */
+  unsigned char demote_at_head;
+
+  /* TRUE, if block has been demoted to tail */
+  unsigned char demote_at_tail;
+
   /* Cache block state for coherence, tag and way-id. */
   enum cache_block_state_t state;
 

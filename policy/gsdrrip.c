@@ -27,10 +27,10 @@
 #include "gsdrrip.h"
 #include "zlib.h"
 
-#define PSEL_WIDTH    (10)
-#define PSEL_MIN_VAL  (0x00)  
-#define PSEL_MAX_VAL  (0x3ff)  
-#define PSEL_MID_VAL  (512)
+#define PSEL_WIDTH              (10)
+#define PSEL_MIN_VAL            (0x00)  
+#define PSEL_MAX_VAL            (0x3ff)  
+#define PSEL_MID_VAL            (512)
 
 #define SRRIP_SAMPLED_SET       (0)
 #define BRRIP_SAMPLED_SET       (1)
@@ -38,37 +38,37 @@
 #define CACHE_SET(cache, set)   (&((cache)->sets[set]))
 #define CACHE_BLOCK(set, way)   (&((set)->blocks[way]))
 
-#define GST_UNK                       (0)
-#define GST1                          (1)
-#define GST2                          (2)
-#define GST3                          (3)
-#define GST4                          (4)
-#define GST5                          (5)
-#define GST6                          (6)
-#define GST7                          (7)
-#define GST8                          (8)
-#define GST9                          (9)
+#define GST_UNK                 (0)
+#define GST1                    (1)
+#define GST2                    (2)
+#define GST3                    (3)
+#define GST4                    (4)
+#define GST5                    (5)
+#define GST6                    (6)
+#define GST7                    (7)
+#define GST8                    (8)
+#define GST9                    (9)
 
-#define GST_UNKNOWN_SET               (0)
-#define GST1_SRRIP_SAMPLED_SET        (1)
-#define GST1_BRRIP_SAMPLED_SET        (2)
-#define GST2_SRRIP_SAMPLED_SET        (3)
-#define GST2_BRRIP_SAMPLED_SET        (4)
-#define GST3_SRRIP_SAMPLED_SET        (5)
-#define GST3_BRRIP_SAMPLED_SET        (6)
-#define GST4_SRRIP_SAMPLED_SET        (7)
-#define GST4_BRRIP_SAMPLED_SET        (8)
-#define GST5_SRRIP_SAMPLED_SET        (9)
-#define GST5_BRRIP_SAMPLED_SET        (10)
-#define GST6_SRRIP_SAMPLED_SET        (11)
-#define GST6_BRRIP_SAMPLED_SET        (12)
-#define GST7_SRRIP_SAMPLED_SET        (13)
-#define GST7_BRRIP_SAMPLED_SET        (14)
-#define GST8_SRRIP_SAMPLED_SET        (15)
-#define GST8_BRRIP_SAMPLED_SET        (16)
-#define GST9_SRRIP_SAMPLED_SET        (17)
-#define GST9_BRRIP_SAMPLED_SET        (18)
-#define GST_FOLLOWER_SET              (19)
+#define GST_UNKNOWN_SET         (0)
+#define GST1_SRRIP_SAMPLED_SET  (1)
+#define GST1_BRRIP_SAMPLED_SET  (2)
+#define GST2_SRRIP_SAMPLED_SET  (3)
+#define GST2_BRRIP_SAMPLED_SET  (4)
+#define GST3_SRRIP_SAMPLED_SET  (5)
+#define GST3_BRRIP_SAMPLED_SET  (6)
+#define GST4_SRRIP_SAMPLED_SET  (7)
+#define GST4_BRRIP_SAMPLED_SET  (8)
+#define GST5_SRRIP_SAMPLED_SET  (9)
+#define GST5_BRRIP_SAMPLED_SET  (10)
+#define GST6_SRRIP_SAMPLED_SET  (11)
+#define GST6_BRRIP_SAMPLED_SET  (12)
+#define GST7_SRRIP_SAMPLED_SET  (13)
+#define GST7_BRRIP_SAMPLED_SET  (14)
+#define GST8_SRRIP_SAMPLED_SET  (15)
+#define GST8_BRRIP_SAMPLED_SET  (16)
+#define GST9_SRRIP_SAMPLED_SET  (17)
+#define GST9_BRRIP_SAMPLED_SET  (18)
+#define GST_FOLLOWER_SET        (19)
 
 /*
  * Private Functions
@@ -222,7 +222,7 @@ static int get_set_type_gsdrrip(long long int indx, ub4 gsdrrip_samples)
     return GST9_BRRIP_SAMPLED_SET;
   }
 
-  return SDP_FOLLOWER_SET;
+  return GST_FOLLOWER_SET;
 }
 
 static ub1 cache_get_gsdrrip_stream(gsdrrip_gdata *global_data, ub1 stream, 
@@ -397,7 +397,7 @@ static void cache_init_brrip_from_gsdrrip(struct cache_params *params, brrip_dat
   BRRIP_DATA_SPILL_RRPV(policy_data)  = params->spill_rrpv;
 
   /* Create array of blocks */
-  BRRIP_DATA_BLOCKS(policy_data) = GSDRRIP_DATA_BLOCKS(gsdrrip_policy_data);
+  BRRIP_DATA_BLOCKS(policy_data)    = GSDRRIP_DATA_BLOCKS(gsdrrip_policy_data);
 
   BRRIP_DATA_FREE_HLST(policy_data) = GSDRRIP_DATA_FREE_HLST(gsdrrip_policy_data);
   BRRIP_DATA_FREE_TLST(policy_data) = GSDRRIP_DATA_FREE_TLST(gsdrrip_policy_data);

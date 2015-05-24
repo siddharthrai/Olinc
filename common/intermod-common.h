@@ -634,8 +634,8 @@ typedef struct memory_trace
   ub1   dbuf;         /* True if address belong to default buffer */
   ub1   fill;         /* True if block is to be read */
   ub1   spill;        /* True if block is written */
-  ub1   prefetch;     /* True for prefetch */
-  ub1   dirty;        /* True if writeback is dirty */
+  ub1   prefetch;     /* True for pre-fetch */
+  ub1   dirty;        /* True if write-back is dirty */
   ub1   sdp_sample;   /* SDP sampled set */
   void *policy_data;  /* Policy specific data */
 }memory_trace;
