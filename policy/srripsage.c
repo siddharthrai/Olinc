@@ -82,6 +82,42 @@ do                                                                      \
   (block)->state    = (state_in);                                       \
 }while(0)
 
+
+void cache_fill_nru_block(rrip_list *head, struct cache_block_t *block)
+{
+  struct cache_block_t *current;
+  ub1 all_nru;
+
+  current = head->head;
+  all_nru = TRUE;
+  /* Go through the list, if bit for all blocks is reset, set it for them 
+   * and reset for new block
+   * */
+
+  while (current)
+  {
+    if (current->nru) 
+    {
+      all_nru = FALSE;
+      break;
+    }
+
+    current = current->prev;
+  }
+
+  current = head->head;
+  if (all_nru)
+  {
+    while (current) 
+    {
+      current->nru = TRUE; 
+      current = current->prev;
+    }
+  }
+
+  block->nru = FALSE;
+}
+
 int get_min_wayid_from_head(struct cache_block_t *head)
 {
   struct cache_block_t *node;
@@ -102,6 +138,31 @@ int get_min_wayid_from_head(struct cache_block_t *head)
   }
 
   return min_wayid;
+}
+
+struct cache_block_t* get_nru_from_head(struct cache_block_t *head)
+{
+  struct cache_block_t *node;
+  struct cache_block_t *ret_node;
+  int    min_wayid;
+
+  assert(head);
+
+  node      = head;
+  ret_node  = NULL;
+  min_wayid = 0xff;
+
+  while (node)
+  {
+    if (node->nru && node->way < min_wayid)
+    {
+      ret_node = node;
+    }
+
+    node = node->prev;
+  }
+  
+  return ret_node;
 }
 
 int get_min_wayid_from_tail(struct cache_block_t *tail)
@@ -220,6 +281,10 @@ do                                                                    \
             {                                                         \
               (g)->fail_demotion[rpl_node->stream]++;                 \
             }                                                         \
+            else                                                      \
+            {                                                         \
+              (g)->valid_demotion[rpl_node->stream]++;                \
+            }                                                         \
                                                                       \
             cache_add_reuse_blocks((g), OP_DEMOTE, rpl_node->stream); \
                                                                       \
@@ -310,6 +375,10 @@ do                                                                    \
             {                                                         \
               (g)->fail_demotion[rpl_node->stream]++;                 \
             }                                                         \
+            else                                                      \
+            {                                                         \
+              (g)->valid_demotion[rpl_node->stream]++;                \
+            }                                                         \
                                                                       \
             cache_add_reuse_blocks((g), OP_DEMOTE, rpl_node->stream); \
                                                                       \
@@ -399,6 +468,10 @@ do                                                                    \
             if (((p)->evictions - rpl_node->recency) < RCY_THR((p), (g), rpl_node->stream))\
             {                                                         \
               (g)->fail_demotion[rpl_node->stream]++;                 \
+            }                                                         \
+            else                                                      \
+            {                                                         \
+              (g)->valid_demotion[rpl_node->stream]++;                \
             }                                                         \
                                                                       \
             CACHE_APPEND_TO_QUEUE(rpl_node, head_ptr[i + dif], tail_ptr[i + dif]);\
@@ -882,6 +955,7 @@ void cache_init_srripsage(int set_indx, struct cache_params *params,
     memset(global_data->fills_at_tail, 0, sizeof(ub8) * (TST + 1));
     memset(global_data->dems_at_head, 0, sizeof(ub8) * (TST + 1));
     memset(global_data->fail_demotion, 0, sizeof(ub8) * (TST + 1));
+    memset(global_data->valid_demotion, 0, sizeof(ub8) * (TST + 1));
 
     /* Reset reuse data used for learning for reuses at RRPV 0 */
     memset(global_data->per_stream_reuse_blocks, 0, sizeof(ub8) * (TST + 1));
@@ -1411,6 +1485,10 @@ end:
     printf("FDMC:%8ld FDMZ:%8ld FDMT:%8ld FDMB:%8ld FDMP:%8ld\n", global_data->fail_demotion[CS], 
         global_data->fail_demotion[ZS], global_data->fail_demotion[TS],
         global_data->fail_demotion[BS], global_data->fail_demotion[PS]);
+
+    printf("VDMC:%8ld VDMZ:%8ld VDMT:%8ld VDMB:%8ld VDMP:%8ld\n", global_data->valid_demotion[CS], 
+        global_data->valid_demotion[ZS], global_data->valid_demotion[TS],
+        global_data->valid_demotion[BS], global_data->valid_demotion[PS]);
 
     printf("DCTRC:%6d DCTRZ:%6d DCTRT:%6d DCTRB:%6d DCTRP:%6d\n", 
         SAT_CTR_VAL(global_data->dem_ctr[CS]), 
@@ -2079,6 +2157,18 @@ end:
       }
     }
 
+    if (global_data->fill_at_head[ZS] == TRUE && global_data->fill_at_head[TS] == TRUE)
+    {
+      if (global_data->bm_ctr % 8 == 0)
+      {
+        global_data->fill_at_head[ZS]  = TRUE;
+      }
+      else
+      {
+        global_data->fill_at_head[ZS]  = FALSE;
+      }
+    }
+
 #if 0
     if (global_data->fill_at_head[TS] == TRUE)
     {
@@ -2301,8 +2391,8 @@ static void fill_in_followers(srripsage_data *policy_data,
           SRRIPSAGE_DATA_VALID_HEAD(policy_data)[rrpv], 
           SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv]);
 
-       global_data->fills_at_tail[info->stream] += 1;
-       block->fill_at_tail = TRUE;
+      global_data->fills_at_tail[info->stream] += 1;
+      block->fill_at_tail = TRUE;
     }
   }
 
@@ -2360,6 +2450,7 @@ void cache_fill_block_srripsage(srripsage_data *policy_data,
     block->demote_at_tail = FALSE;
     block->fill_at_head   = FALSE;
     block->fill_at_tail   = FALSE;
+    block->nru            = FALSE;
 
     switch (strm)
     {
@@ -2408,7 +2499,7 @@ void cache_fill_block_srripsage(srripsage_data *policy_data,
         CACHE_APPEND_TO_QUEUE(block, 
             SRRIPSAGE_DATA_VALID_HEAD(policy_data)[rrpv], 
             SRRIPSAGE_DATA_VALID_TAIL(policy_data)[rrpv]);
-
+        
         block->fill_at_tail = TRUE;
       }
     }
@@ -2812,6 +2903,12 @@ void cache_access_block_srripsage(srripsage_data *policy_data,
       CACHE_APPEND_TO_QUEUE(blk, SRRIPSAGE_DATA_VALID_HEAD(policy_data)[new_rrpv], 
           SRRIPSAGE_DATA_VALID_TAIL(policy_data)[new_rrpv]);
     }
+  }    
+
+  /* Update NRU bit */
+  if (new_rrpv == !SRRIPSAGE_DATA_MAX_RRPV(policy_data))
+  {
+    cache_fill_nru_block(&SRRIPSAGE_DATA_VALID_HEAD(policy_data)[new_rrpv], blk);
   }
 
   if (strm == TS)
