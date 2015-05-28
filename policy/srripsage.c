@@ -258,7 +258,6 @@ do                                                                    \
       {                                                               \
         struct cache_block_t *node = (head_ptr)[i].head;              \
                                                                       \
-                                                                      \
         if (node)                                                     \
         {                                                             \
             min_wayid = get_min_wayid_from_head(node);                \
@@ -318,7 +317,14 @@ do                                                                    \
                                                                       \
             cache_add_reuse_blocks((g), OP_DEMOTE, rpl_node->stream); \
                                                                       \
-            CACHE_PREPEND_TO_QUEUE(rpl_node, (head_ptr)[i + dif], (tail_ptr)[i + dif]);\
+            if (i + dif == 2)                                         \
+            {                                                         \
+              CACHE_PREPEND_TO_QUEUE(rpl_node, (head_ptr)[i + dif], (tail_ptr)[i + dif]);\
+            }                                                         \
+            else                                                      \
+            {                                                         \
+              CACHE_APPEND_TO_QUEUE(rpl_node, (head_ptr)[i + dif], (tail_ptr)[i + dif]);\
+            }                                                         \
         }                                                             \
       }                                                               \
     }                                                                 \
@@ -501,6 +507,8 @@ do                                                                    \
           rpl_node->data    = &(head_ptr[i + dif]);                   \
           rpl_node->demote  = TRUE;                                   \
                                                                       \
+          if (i + dif == 2)                                           \
+          {                                                           \
           if ((g)->demote_at_head[rpl_node->stream] == FALSE)         \
           {                                                           \
             if ((g)->bm_ctr == 0)                                     \
@@ -517,6 +525,12 @@ do                                                                    \
           else                                                        \
           {                                                           \
             CACHE_PREPEND_TO_QUEUE(rpl_node, (head_ptr)[i + dif], (tail_ptr)[i + dif]);\
+            rpl_node->demote_at_head = TRUE;                          \
+          }                                                           \
+          }                                                           \
+          else                                                        \
+          {                                                           \
+            CACHE_APPEND_TO_QUEUE(rpl_node, (head_ptr)[i + dif], (tail_ptr)[i + dif]);\
             rpl_node->demote_at_head = TRUE;                          \
           }                                                           \
         }                                                             \
