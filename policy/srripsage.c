@@ -482,17 +482,16 @@ void demote_vnru_to_head_or_tail(rrip_list *head_ptr, rrip_list *tail_ptr,
   if (nru_node)
   {                                                           
     CACHE_REMOVE_FROM_QUEUE(nru_node, head_ptr[HIT_LIST_INDX], tail_ptr[HIT_LIST_INDX]);
-
+    
+    /* Move block from hit list to fill list head */
     if ((g)->demote_at_head[nru_node->stream] == FALSE)
     {
-      CACHE_APPEND_TO_QUEUE(nru_node, head_ptr[FILL_LIST_TAILINDX], tail_ptr[FILL_LIST_TAILINDX]);
+      CACHE_APPEND_TO_QUEUE(nru_node, head_ptr[FILL_LIST_HEADINDX], tail_ptr[FILL_LIST_HEADINDX]);
     }
     else
     {
       CACHE_PREPEND_TO_QUEUE(nru_node, head_ptr[FILL_LIST_HEADINDX], tail_ptr[FILL_LIST_HEADINDX]);
     }
-
-    (g)->valid_demotion[nru_node->stream]++;                
   }
 }
 
@@ -523,7 +522,7 @@ void demote_anru_to_head_or_tail(rrip_list *head_ptr, rrip_list *tail_ptr,
 
   if ((g)->demote_at_head[rpl_node->stream] == FALSE)
   {
-    CACHE_PREPEND_TO_QUEUE(rpl_node, head_ptr[FILL_LIST_TAILINDX], tail_ptr[FILL_LIST_TAILINDX]);
+    CACHE_APPEND_TO_QUEUE(rpl_node, head_ptr[FILL_LIST_HEADINDX], tail_ptr[FILL_LIST_HEADINDX]);
   }
   else
   {
