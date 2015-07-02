@@ -337,6 +337,12 @@ bool ConfigLoader::parseLCSectionParameter(LChParameters *lcP)
     if (!parseBooleanParameter("UseVa", id, lcP->useVa))
         return FALSE;
 
+    if (!parseBooleanParameter("UseBS", id, lcP->useBs))
+        return FALSE;
+
+    if (!parseBooleanParameter("UseStep", id, lcP->useStep))
+        return FALSE;
+
     if ( !paramsTracker.wasAnyParamSectionDefined() ) {
         stringstream ss;
         ss << "Parameter '" << id << "' in section [LLC] is not supported";
@@ -550,6 +556,14 @@ bool ConfigLoader::parseCachePolicy(char *paramName, char *id, enum cache_policy
         }
         
         /*  Return boolean parameter.  */
+        if (!strcmp(auxStr, "SRRIPBS"))
+        {
+          val = cache_policy_srripbs;
+
+          goto end;
+        }
+        
+        /*  Return boolean parameter.  */
         if (!strcmp(auxStr, "SRRIPSAGE"))
         {
           val = cache_policy_srripsage;
@@ -649,6 +663,38 @@ bool ConfigLoader::parseCachePolicy(char *paramName, char *id, enum cache_policy
         if (!strcmp(auxStr, "GSHP"))
         {
           val = cache_policy_gshp;
+
+          goto end;
+        }
+
+        /*  Return boolean parameter.  */
+        if (!strcmp(auxStr, "SAPSIMPLE"))
+        {
+          val = cache_policy_sapsimple;
+
+          goto end;
+        }
+       
+        /*  Return boolean parameter.  */
+        if (!strcmp(auxStr, "SAPDBP"))
+        {
+          val = cache_policy_sapdbp;
+
+          goto end;
+        }
+
+        /*  Return boolean parameter.  */
+        if (!strcmp(auxStr, "SAPPRIORITY"))
+        {
+          val = cache_policy_sappriority;
+
+          goto end;
+        }
+       
+        /*  Return boolean parameter.  */
+        if (!strcmp(auxStr, "SAPPRIDEPRI"))
+        {
+          val = cache_policy_sappridepri;
 
           goto end;
         }

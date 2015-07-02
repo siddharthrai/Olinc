@@ -345,7 +345,7 @@ void cache_fill_block_tapdrrip(tapdrrip_data *policy_data, tapdrrip_gdata *globa
   }
 
   /* Fill block in all component policies */
-  cache_fill_block_srrip(&(policy_data->srrip), way, tag, state,
+  cache_fill_block_srrip(&(policy_data->srrip), &(global_data->srrip), way, tag, state,
     STREAM_ID(info), info);
   cache_fill_block_brrip(&(policy_data->brrip),&(global_data->brrip), way, tag,
     state, STREAM_ID(info), info);
@@ -363,7 +363,7 @@ int cache_replace_block_tapdrrip(tapdrrip_data *policy_data,
   {
     case cache_policy_srrip:
 
-      return cache_replace_block_srrip(&(policy_data->srrip));
+      return cache_replace_block_srrip(&(policy_data->srrip), &(global_data->srrip));
       break; 
 
     case cache_policy_brrip:
@@ -388,7 +388,7 @@ int cache_replace_block_tapdrrip(tapdrrip_data *policy_data,
       {
         /* Follow SRRIP */  
         global_data->srrip_followed += 1;
-        return cache_replace_block_srrip(&(policy_data->srrip));
+        return cache_replace_block_srrip(&(policy_data->srrip), &(global_data->srrip));
       }
       else
       {
@@ -423,8 +423,9 @@ void cache_access_block_tapdrrip(tapdrrip_data *policy_data,
       cache_policy_bypass);
   }
 
-  cache_access_block_srrip(&(policy_data->srrip), way, strm, info);
-  cache_access_block_brrip(&(policy_data->brrip), way, strm, info);
+  cache_access_block_srrip(&(policy_data->srrip), &(global_data->srrip), way,
+      strm, info);
+  cache_access_block_brrip(&(policy_data->brrip), &(global_data->brrip), way, strm, info);
 }
 
 /* Update state of block. */

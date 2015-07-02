@@ -88,6 +88,7 @@ typedef struct cache_policy_srripdbp_gdata_t
   ub8    texture_1_real;                        /* # Texture 1 hit predicted */
   ub8    texture_2_real;                        /* # Texture 1 hit predicted */
   ub8    texture_3_real;                        /* # Texture 1 hit predicted */
+  srrip_gdata srrip;                            /* SRRIP global data */
 }srripdbp_gdata;
 
 /*

@@ -261,7 +261,7 @@ void cache_fill_block_gshp(gshp_data *policy_data, gshp_gdata *global_data,
   if (policy_data->following == cache_policy_srrip)
   {
     /* Follow RRIP policy */
-    cache_fill_block_srrip((srrip_data *)policy_data, way, tag, state, strm, info);
+    cache_fill_block_srrip((srrip_data *)policy_data, &(global_data->srrip), way, tag, state, strm, info);
 
     /* Update global counters only for graphics stream */
     if (strm != PS)
@@ -303,7 +303,7 @@ int cache_replace_block_gshp(gshp_data *policy_data, gshp_gdata *global_data)
   
   if (policy_data->following == cache_policy_srrip)
   {
-    return cache_replace_block_srrip((srrip_data *)policy_data);
+    return cache_replace_block_srrip((srrip_data *)policy_data, &(global_data->srrip));
   }
   else
   {
@@ -360,12 +360,14 @@ void cache_access_block_gshp(gshp_data *policy_data, gshp_gdata *global_data,
   if (policy_data->following == cache_policy_srrip)
   {
     /* Follow SRRIP policy */
-    cache_access_block_srrip((srrip_data *)policy_data, way, strm, info);
+    cache_access_block_srrip((srrip_data *)policy_data, &(global_data->srrip), 
+        way, strm, info);
 
     /* Update global counters for graphics streams */
     if (strm != PS)
     {
-      cache_update_hit_counter_gshp((srrip_data *)policy_data, global_data, way, strm); 
+      cache_update_hit_counter_gshp((srrip_data *)policy_data, global_data, 
+          way, strm); 
     }
   }
   else

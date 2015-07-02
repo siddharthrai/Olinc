@@ -81,7 +81,9 @@ struct LChParameters
   sb1  *statFile;               /* Statistics collection file */
   ub1   stream;                 /* Stream to be simulated */
   bool  useVa;                  /* True, if va is to be used */
-  enum cache_policy_t policy;   /* Cache policy */
+  bool  useBs;                  /* True, if baseline samples are used */
+  bool  useStep;                /* True, if step function is to be used in sappridepri policy */
+  enum  cache_policy_t policy;  /* Cache policy */
 };
 
 struct SimParameters

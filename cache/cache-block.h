@@ -24,6 +24,9 @@ struct cache_block_t
   /* Stream last accessed the block */
   unsigned int stream;
 
+  /* Stream filled the block */
+  unsigned int src_stream;
+
   /* Stream last accessed the block */
   unsigned int sap_stream;
   
@@ -84,6 +87,7 @@ struct cache_block_t
   long long    x_stream_use;    /* X stream use of block */ 
   long long    s_stream_use;    /* X stream use of block */ 
   int          last_rrpv;       /* Keeps track of last assigned RRPV */
+  int          fill_rrpv;       /* Keeps track of fill RRPV */
 
   /* Cache block busy flag. When set this flag instructs the cache
    * replacement policy to not evict the block as there is a request

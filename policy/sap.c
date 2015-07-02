@@ -906,7 +906,7 @@ int cache_replace_block_sap(sap_data *policy_data, sap_gdata *global_data,
       return (min_wayid != INVALID_WAYID) ? min_wayid : -1;
 
     case cache_policy_srrip:
-      min_wayid =  cache_replace_block_srrip(&(policy_data->srrip));
+      min_wayid =  cache_replace_block_srrip(&(policy_data->srrip), &(global_data->srrip));
 
       if (min_wayid != INVALID_WAYID)
       {
@@ -1015,7 +1015,8 @@ void cache_fill_block_sap(sap_data *policy_data, sap_gdata *global_data,
       break;
 
     case cache_policy_srrip:
-      cache_fill_block_srrip(&(policy_data->srrip), way, tag, state, stream, info);
+      cache_fill_block_srrip(&(policy_data->srrip), &(global_data->srrip), way,
+          tag, state, stream, info);
       
       /* Obtain block to update SAP stream, this is done to collect SAP 
        * specific stats on eviction */
@@ -1122,7 +1123,8 @@ void cache_access_block_sap( sap_data *policy_data, sap_gdata *global_data,
       cache_update_sap_access_stall_stats(global_data, info, psetrecat);
 
     case cache_policy_srrip:
-      cache_access_block_srrip(&(policy_data->srrip), way, stream, info);
+      cache_access_block_srrip(&(policy_data->srrip), &(global_data->srrip),
+          way, stream, info);
       break;
 
     default:

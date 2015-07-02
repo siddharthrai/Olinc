@@ -636,7 +636,7 @@ typedef struct memory_trace
   ub1   spill;        /* True if block is written */
   ub1   prefetch;     /* True for pre-fetch */
   ub1   dirty;        /* True if write-back is dirty */
-  ub1   sdp_sample;   /* SDP sampled set */
+  ub1   sap_stream;   /* stream identified by new policy (member of enum sap_stream)*/
   void *policy_data;  /* Policy specific data */
 }memory_trace;
 

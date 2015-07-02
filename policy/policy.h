@@ -184,6 +184,9 @@ typedef enum cache_policy_t
         cache_policy_srrip,
         
         /* Insertion at MAXRRPV - 1, eviction form MAXRRPV */
+        cache_policy_srripbs,
+        
+        /* Insertion at MAXRRPV - 1, eviction form MAXRRPV */
         cache_policy_srripm,
         
         /* Insertion at MAXRRPV - 1, eviction form MAXRRPV */
@@ -252,7 +255,22 @@ typedef enum cache_policy_t
         cache_policy_xsppin,
         
         /* X stream with DBP */
-        cache_policy_xspdbp
+        cache_policy_xspdbp,
+
+        /* Stream aware simple policy */
+        cache_policy_sapsimple,
+        
+        /* Stream aware dead block predictor policy */
+        cache_policy_sapdbp,
+
+        /* Stream aware dead block predictor policy */
+        cache_policy_customsrrip,
+
+        /* Stream aware dead block predictor policy */
+        cache_policy_sappriority,
+
+        /* Stream aware dead block predictor policy */
+        cache_policy_sappridepri
 }cache_policy_t;
 
 typedef struct list_head_t

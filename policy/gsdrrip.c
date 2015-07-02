@@ -929,7 +929,7 @@ void cache_fill_block_gsdrrip(gsdrrip_data *policy_data, gsdrrip_gdata *global_d
   switch (GET_CURRENT_POLICY(policy_data, global_data, GSSTRM(global_data, info)))
   {
     case cache_policy_srrip:
-      cache_fill_block_srrip(&(policy_data->srrip), way, tag, state, strm, 
+      cache_fill_block_srrip(&(policy_data->srrip), &(global_data->srrip), way, tag, state, strm, 
         info);
       
       /* For GSDRRIP, BRRIP access counter is incremented on access to all sets
@@ -991,7 +991,7 @@ int cache_replace_block_gsdrrip(gsdrrip_data *policy_data,
   switch (GET_CURRENT_POLICY(policy_data, global_data, GSSTRM(global_data, info)))
   {
     case cache_policy_srrip:
-      ret_way = cache_replace_block_srrip(&(policy_data->srrip));
+      ret_way = cache_replace_block_srrip(&(policy_data->srrip), &(global_data->srrip));
       break; 
 
     case cache_policy_brrip:
@@ -1050,11 +1050,12 @@ void cache_access_block_gsdrrip(gsdrrip_data *policy_data,
   switch (GET_CURRENT_POLICY(policy_data, global_data, GSSTRM(global_data, info)))
   {
     case cache_policy_srrip:
-      cache_access_block_srrip(&(policy_data->srrip), way, strm, info);
+      cache_access_block_srrip(&(policy_data->srrip), &(global_data->srrip), way, strm, info);
       break;
 
     case cache_policy_brrip:
-      cache_access_block_brrip(&(policy_data->brrip), way, strm, info);
+      cache_access_block_brrip(&(policy_data->brrip), &(global_data->brrip), 
+          way, strm, info);
       break;
 
     default:

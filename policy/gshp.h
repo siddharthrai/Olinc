@@ -74,7 +74,7 @@ typedef struct cache_policy_gshp_gdata_t
   struct saturating_counter_t rt_prod_ctr;      /* Render target produced */
   struct saturating_counter_t rt_cons_ctr;      /* Render target consumed */
   struct saturating_counter_t acc_all_ctr;      /* Total accesses */
-
+  srrip_gdata srrip;
 }gshp_gdata;
 
 /* GSHP cache management handlers */

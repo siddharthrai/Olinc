@@ -424,7 +424,7 @@ int cache_replace_block_helmdrrip(helmdrrip_data *policy_data,
   {
     case cache_policy_srrip:
 
-      return cache_replace_block_srrip(&(policy_data->srrip));
+      return cache_replace_block_srrip(&(policy_data->srrip), &(global_data->srrip));
       break; 
 
     case cache_policy_brrip:
@@ -440,7 +440,7 @@ int cache_replace_block_helmdrrip(helmdrrip_data *policy_data,
       {
         /* Follow SRRIP */  
         global_data->srrip_followed += 1;
-        return cache_replace_block_srrip(&(policy_data->srrip));
+        return cache_replace_block_srrip(&(policy_data->srrip), &(global_data->srrip));
       }
       else
       {
@@ -467,8 +467,8 @@ void cache_access_block_helmdrrip(helmdrrip_data *policy_data,
   assert(policy_data);
   assert(global_data);
   
-  cache_access_block_srrip(&(policy_data->srrip), way, strm, info);
-  cache_access_block_brrip(&(policy_data->brrip), way, strm, info);
+  cache_access_block_srrip(&(policy_data->srrip), &(global_data->srrip), way, strm, info);
+  cache_access_block_brrip(&(policy_data->brrip), &(global_data->brrip), way, strm, info);
 }
 
 /* Update state of block. */

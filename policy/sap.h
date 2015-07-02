@@ -133,6 +133,7 @@ typedef struct cache_policy_sap_gdata_t
   ub1 sdp_psetmrt;        /* If set, use miss rate threshold for P set */
   ub1 sdp_psethrt;        /* If set, use hit rate threshold for P set */
   sctr access_ctr;        /* Access counter */
+  srrip_gdata srrip;      /* SRRIP global data */
 }sap_gdata;
 
 /*

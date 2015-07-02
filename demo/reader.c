@@ -1,188 +1,71 @@
 #include "zlib.h"
 #include "assert.h"
-#include "../common/intermod-common.h"
+#include "stdio.h"
+#include "unistd.h"
+#include "string.h"
+#include "stdlib.h"
+#include "../export-trace/export.h"
 
 int main(int argc, char **argv)
 {
-  gzFile *trc_file;
-
-  int   i;
-  long  dbuf_access;      /* # default RT access */
-  long  dbuf_write;       /* # default RT write */
-  long  nondbuf_access;   /* # non-default RT access */
-  long  nondbuf_write;    /* # non-default RT write */
-  long  dbuf_c_access;    /* # default RT access */
-  long  dbuf_c_write;     /* # default RT write */
-  long  nondbuf_c_access; /* # non-default RT access */
-  long  nondbuf_c_write;  /* # non-default RT write */
-  long  dbuf_z_access;    /* # default RT access */
-  long  dbuf_z_write;     /* # default RT write */
-  long  nondbuf_z_access; /* # non-default RT access */
-  long  nondbuf_z_write;  /* # non-default RT write */
-  long  dbuf_b_access;    /* # default RT access */
-  long  dbuf_b_write;     /* # default RT write */
-  long  nondbuf_b_access; /* # non-default RT access */
-  long  nondbuf_b_write;  /* # non-default RT write */
-  long  prev_block;       /* Address of the previous block */
-
-  memory_trace trace;
+  sb1*          trc_file_name;/* Trace file name */
+  gzFile*       trc_file;     /* Trace file */
+  memory_trace  trace;        /* Memory trace */
+  sb4           opt;          /* Current option value */
+  ub1           opts;         /* # options */
   
-  printf("Opening tracefile %s\n", argv[1]);
-  trc_file = gzopen(argv[1], "rb9");
+  opts = 0;
+  
+  /* Parse command line arguments */
+  while ((opt = getopt(argc, argv, "f:h:")) != -1)
+  {
+    opts++;
+
+    switch (opt)
+    {
+      case 'f':
+        trc_file_name = (sb1 *) malloc(strlen(optarg) + 1);
+        strncpy(trc_file_name, optarg, strlen(optarg));
+        printf("Opening trace file f:%s\n", trc_file_name);
+        break;
+
+      case 'h':
+        printf("Syntax: reader -f file_name\n", opt);
+        exit(EXIT_FAILURE);
+        break;
+
+      default:
+        printf("Invalid option %c\n", opt);
+        printf("Syntax: reader -f file_name\n", opt);
+        exit(EXIT_FAILURE);
+    }
+  }
+  
+  /* Ensure there is only one argument */
+  if (opts != 1)
+  {
+    printf("Syntax: reader -f file_name\n", opt);
+    exit(EXIT_FAILURE);
+  }
+
+  trc_file = gzopen(trc_file_name, "rb9");
   assert(trc_file);
   
-  nondbuf_access    = 0;
-  nondbuf_write     = 0;
-  dbuf_access       = 0;
-  dbuf_write        = 0;
-  nondbuf_c_access  = 0;
-  nondbuf_c_write   = 0;
-  dbuf_c_access     = 0;
-  dbuf_c_write      = 0;
-  nondbuf_z_access  = 0;
-  nondbuf_z_write   = 0;
-  dbuf_z_access     = 0;
-  dbuf_z_write      = 0;
-  nondbuf_b_access  = 0;
-  nondbuf_b_write   = 0;
-  dbuf_b_access     = 0;
-  dbuf_b_write      = 0;
-  prev_block        = 0;
-  
-  long int seq;
-  
-  seq = 0;
-
+  /* Read entire trace file */
   while (!gzeof(trc_file))
   {
     assert(gzread(trc_file, &trace, sizeof(memory_trace)) != -1);
     if (!gzeof(trc_file))
     {
-#if 0
-      printf("VTL Address %lx\n", trace.vtl_addr);
-#endif      
-      if (trace.dbuf == FALSE)
+      if (trace.fill == TRUE && trace.sap_stream)
       {
-        if (trace.stream == CS)
-        {
-          nondbuf_c_access += 1;
-
-          if (trace.spill)
-          {
-            nondbuf_c_write += 1;
-          }
-        }
-        else
-        {
-          if (trace.stream == ZS)
-          {
-            nondbuf_z_access += 1;
-
-            if (trace.spill)
-            {
-              nondbuf_z_write += 1;
-            }
-          }
-          else
-          {
-            if (trace.stream == BS)
-            {
-              nondbuf_b_access += 1;
-
-              if (trace.spill)
-              {
-                nondbuf_b_write += 1;
-              }
-            }
-            else
-            {
-              nondbuf_access += 1;
-
-              if (trace.spill)
-              {
-                nondbuf_write += 1;
-              }
-            }
-          }
-        }
+        printf("Original Stream %2s ", stream_name[trace.stream]);
+        printf("Phy Address %10lx ", trace.vtl_addr);
+        printf("Vtl Address %10lx ", trace.vtl_addr);
+        printf("Classified stream  %s\n", sap_stream_name[trace.sap_stream]); 
       }
-      else
-      {
-        if (trace.stream == CS)
-        {
-          dbuf_c_access += 1;
-
-          if (trace.spill)
-          {
-            dbuf_c_write += 1;
-          }
-        }
-        else
-        {
-          if(trace.stream == ZS)
-          {
-            dbuf_z_access += 1;
-
-            if (trace.spill)
-            {
-              dbuf_z_write += 1;
-            }
-          }
-          else
-          {
-            if(trace.stream == BS)
-            {
-              dbuf_b_access += 1;
-
-              if (trace.spill)
-              {
-                dbuf_b_write += 1;
-              }
-            }
-            else
-            {
-              dbuf_access += 1;
-
-              if (trace.spill)
-              {
-                dbuf_write += 1;
-              }
-            }
-          }
-        }
-      }
-      
-      if (trace.spill && trace.fill && trace.stream == CS)
-      {
-        printf("%ld\n", trace.address); 
-      }
-
-#if 0
-      if (trace.spill && trace.stream == ZS)
-      {
-        printf("zS spill \n"); 
-      }
-      if (trace.stream == BS)
-      {
-        printf("BS write \n"); 
-      }
-#endif
-
-      prev_block = trace.vtl_addr;
-
-      seq++;
     }
   }
 
   gzclose(trc_file);
-#if 0
-  printf("Color: DBuf access: %ld | NonDBuf access: %ld\n", dbuf_c_access, nondbuf_c_access);
-  printf("Color: DBuf write: %ld | NonDBuf write: %ld\n", dbuf_c_write, nondbuf_c_write);
-  printf("Depth: DBuf access: %ld | NonDBuf access: %ld\n", dbuf_z_access, nondbuf_z_access);
-  printf("Depth: DBuf write: %ld | NonDBuf write: %ld\n", dbuf_z_write, nondbuf_z_write);
-  printf("Blitter: DBuf access: %ld | NonDBuf access: %ld\n", dbuf_b_access, nondbuf_b_access);
-  printf("Blitter: DBuf write: %ld | NonDBuf write: %ld\n", dbuf_b_write, nondbuf_b_write);
-  printf("Other: DBuf access: %ld | NonDBuf access: %ld\n", dbuf_access, nondbuf_access);
-  printf("Other: DBuf write: %ld | NonDBuf write: %ld\n", dbuf_write, nondbuf_write);
-#endif
 }

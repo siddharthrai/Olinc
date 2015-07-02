@@ -45,6 +45,8 @@ struct cache_params
   ub1     rpl_on_miss;            /* Src stream for stride LRU */
   ub1     use_long_bv;            /* Src stream for stride LRU */
   ub4     gsdrrip_streams;        /* Streams for graphics stream aware DRRIP */
+  ub1     bs_epoch;               /* TRUE, if only baseline samples are used for epoch */
+  ub1     use_step;               /* TRUE, if step function is to be used in sappridepri */
 };
 
 #endif	/* MEM_SYSTEM_CACHE_H */

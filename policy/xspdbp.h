@@ -85,6 +85,7 @@ typedef struct cache_policy_xspdbp_gdata_t
   ub8    texture_more_hit;                      /* # Texture more than two hits */
   ub4    bm_ctr;                                /* Current value of a counter */
   ub4    bm_thr;                                /* Bimodal threshold */
+  srrip_gdata srrip;                            /* SRRIP global data */
 }xspdbp_gdata;
 
 /*

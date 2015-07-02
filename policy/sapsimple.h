@@ -17,8 +17,8 @@
  * USA.
  */
 
-#ifndef MEM_SYSTEM_DRRIP_H
-#define	MEM_SYSTEM_DRRIP_H
+#ifndef MEM_SYSTEM_SAPSIMPLE_H
+#define	MEM_SYSTEM_SAPSIMPLE_H
 
 #ifdef __cplusplus
 # define EXPORT_C extern "C"
@@ -38,43 +38,49 @@
 #include "sdp.h"
 #include <stdio.h>
 
-/* Head node of a list, which corresponds to a particular RRPV */
-typedef struct cache_list_head_drrip_t
+/* Streams specific to SAPSIMPLE. SAPSIMPLE controller remaps global stream id to SAPSIMPLE 
+ * specific ids */
+typedef enum sapsimple_stream
 {
-  ub4 rrpv;
-  struct cache_block_t *head;
-}drrip_list;
+  sapsimple_stream_u = 0,
+  sapsimple_stream_x,
+  sapsimple_stream_y,
+  sapsimple_stream_p,
+  sapsimple_stream_q,
+  sapsimple_stream_r
+}sapsimple_stream;
 
-/* DRRIP statistics */
-typedef struct cache_policy_drrip_stats_t
+/* SAPSIMPLE statistics */
+typedef struct cache_policy_sapsimple_stats_t
 {
-  FILE *drrip_stat_file;      /* Samples used for SRRIP */
-  ub8   drrip_srrip_samples;  /* Samples used for SRRIP */
-  ub8   drrip_brrip_samples;  /* Samples used for BRRIP */
-  ub8   sample_srrip_fill;    /* Fills in SRRIP samples */
-  ub8   sample_brrip_fill;    /* Fills in BRRIP samples */
-  ub8   sample_srrip_hit;     /* Fills in SRRIP samples */
-  ub8   sample_brrip_hit;     /* Fills in BRRIP samples */
-  ub8   drrip_srrip_fill;     /* Fills using SRRIP */
-  ub8   drrip_brrip_fill;     /* Fills using BRRIP */
-  ub8   drrip_fill_2;         /* DRRIP fill at RRPV 2 */
-  ub8   drrip_fill_3;         /* DRRIP fill at RRPV 3 */
-  ub1   drrip_hdr_printed;    /* True if header has been printed */
-  ub8   next_schedule;        /* Cycle to schedule stat collection */
-}drrip_stats;
+  FILE *sapsimple_stat_file;      /* Samples used for SRRIP */
+  ub8   sapsimple_srrip_samples;  /* Samples used for SRRIP */
+  ub8   sapsimple_brrip_samples;  /* Samples used for BRRIP */
+  ub8   sample_srrip_fill;        /* Fills in SRRIP samples */
+  ub8   sample_brrip_fill;        /* Fills in BRRIP samples */
+  ub8   sample_srrip_hit;         /* Fills in SRRIP samples */
+  ub8   sample_brrip_hit;         /* Fills in BRRIP samples */
+  ub8   sapsimple_srrip_fill;     /* Fills using SRRIP */
+  ub8   sapsimple_brrip_fill;     /* Fills using BRRIP */
+  ub8   sapsimple_fill_2;         /* SAPSIMPLE fill at RRPV 2 */
+  ub8   sapsimple_fill_3;         /* SAPSIMPLE fill at RRPV 3 */
+  ub1   sapsimple_hdr_printed;    /* True if header has been printed */
+  ub8   next_schedule;            /* Cycle to schedule stat collection */
+}sapsimple_stats;
 
-#define DRRIP_DATA_BLOCKS(data)     ((data)->blocks)
-#define DRRIP_DATA_VALID_HEAD(data) ((data)->valid_head)
-#define DRRIP_DATA_VALID_TAIL(data) ((data)->valid_tail)
-#define DRRIP_DATA_FREE_HLST(data)  ((data)->free_head)
-#define DRRIP_DATA_FREE_TLST(data)  ((data)->free_tail)
-#define DRRIP_DATA_FREE_HEAD(data)  ((data)->free_head->head)
-#define DRRIP_DATA_FREE_TAIL(data)  ((data)->free_tail->head)
+#define SAPSIMPLE_DATA_BLOCKS(data)     ((data)->blocks)
+#define SAPSIMPLE_DATA_VALID_HEAD(data) ((data)->valid_head)
+#define SAPSIMPLE_DATA_VALID_TAIL(data) ((data)->valid_tail)
+#define SAPSIMPLE_DATA_FREE_HLST(data)  ((data)->free_head)
+#define SAPSIMPLE_DATA_FREE_TLST(data)  ((data)->free_tail)
+#define SAPSIMPLE_DATA_FREE_HEAD(data)  ((data)->free_head->head)
+#define SAPSIMPLE_DATA_FREE_TAIL(data)  ((data)->free_tail->head)
 
-/* DRRIP specific data */
-typedef struct cache_policy_drrip_data_t
+/* SAPSIMPLE specific data */
+typedef struct cache_policy_sapsimple_data_t
 {
   cache_policy_t        following;  /* Currently followed policy */
+  ub4                   set_type;   /* Type of the set (sampled / follower)*/
   srrip_data            srrip;      /* SRRIP policy specific data */
   brrip_data            brrip;      /* BRRIP policy specific data */
   rrip_list            *valid_head; /* Head pointers of RRPV specific list */
@@ -82,18 +88,24 @@ typedef struct cache_policy_drrip_data_t
   list_head_t          *free_head;  /* Free list head */
   list_head_t          *free_tail;  /* Free list tail */
   struct cache_block_t *blocks;     /* Actual blocks */
-}drrip_data;
+}sapsimple_data;
 
 /* Policy global data */
-typedef struct cache_policy_drrip_gdata_t
+typedef struct cache_policy_sapsimple_gdata_t
 {
-  sctr        psel;                 /* Policy selection counter */
-  sctr        drrip_psel[TST + 1];  /* Policy selection counter */
-  drrip_stats stats;                /* DRRIP statistics */
-  brrip_gdata brrip;                /* BRRIP cache wide data */
-  srrip_gdata srrip;                /* BRRIP cache wide data */
-  sdp_gdata   sdp;                  /* SDP cache wide data for SAP like stats */
-}drrip_gdata;
+  sctr        sapsimple_ssel[TST + 1];  /* Selection counter for modified policy */
+  sctr        drrip_psel;               /* Policy selection counter */
+  sctr        sapsimple_psel;           /* Per-stream policy selection counter */
+  sapsimple_stats stats;                /* SAPSIMPLE statistics */
+  brrip_gdata brrip;                    /* BRRIP cache wide data */
+  sdp_gdata   sdp;                      /* SDP cache wide data for SAP like stats */
+  srrip_gdata srrip;                    /* SDP cache wide data for SAP like stats */
+
+  sctr **epoch_fctr;                    /* Per stream epoch fill counter */
+  sctr **epoch_hctr;                    /* Per-stream epoch hit counter */
+
+  ub8  access_interval;
+}sapsimple_gdata;
 
 /*
  *
@@ -117,8 +129,8 @@ typedef struct cache_policy_drrip_gdata_t
  * NOTES
  */
 
-void cache_init_drrip(long long int set_indx, struct cache_params *params, 
-  drrip_data *policy_data, drrip_gdata *global_data);
+void cache_init_sapsimple(long long int set_indx, struct cache_params *params, 
+  sapsimple_data *policy_data, sapsimple_gdata *global_data);
 
 /*
  *
@@ -141,50 +153,50 @@ void cache_init_drrip(long long int set_indx, struct cache_params *params,
  *  Nothing
  */
 
-void cache_free_drrip(unsigned int set_indx, drrip_data *policy_data,
-  drrip_gdata *global_data);
+void cache_free_sapsimple(unsigned int set_indx, sapsimple_data *policy_data,
+  sapsimple_gdata *global_data);
 
 /*
  *
  * NAME
  *  
- *  InitDrripStats - Initialize DRRIP stats
+ *  InitDrripStats - Initialize SAPSIMPLE stats
  *
  * DESCRIPTION
  *  
- *  Initialize DRRIP stats
+ *  Initialize SAPSIMPLE stats
  *
  * PARAMETERS
  *  
- *  stats (IN)  - DRRIP statistics
+ *  stats (IN)  - SAPSIMPLE statistics
  *
  * RETURNS
  *  
  *  Nothing
  */
 
-void cache_init_drrip_stats(drrip_stats *stats);
+void cache_init_sapsimple_stats(sapsimple_stats *stats);
 
 /*
  *
  * NAME
  *  
- *  FiniDrripStats - Finalize DRRIP stats
+ *  FiniDrripStats - Finalize SAPSIMPLE stats
  *
  * DESCRIPTION
  *  
- *  Finalize DRRIP stats
+ *  Finalize SAPSIMPLE stats
  *
  * PARAMETERS
  *  
- *  stats (IN)  - DRRIP statistics
+ *  stats (IN)  - SAPSIMPLE statistics
  *
  * RETURNS
  *  
  *  Nothing
  */
 
-void cache_fini_drrip_stats(drrip_stats *stats);
+void cache_fini_sapsimple_stats(sapsimple_stats *stats);
 
 /*
  *
@@ -198,7 +210,7 @@ void cache_fini_drrip_stats(drrip_stats *stats);
  *
  * PARAMETERS
  *  
- *  stats (IN)  - DRRIP statistics
+ *  stats (IN)  - SAPSIMPLE statistics
  *  cycle (IN)  - Current cycle
  *
  * RETURNS
@@ -206,7 +218,7 @@ void cache_fini_drrip_stats(drrip_stats *stats);
  *  Nothing
  */
 
-void cache_dump_drrip_stats(drrip_stats *stats, ub8 cycle);
+void cache_dump_sapsimple_stats(sapsimple_stats *stats, ub8 cycle);
 
 /*
  *
@@ -228,7 +240,7 @@ void cache_dump_drrip_stats(drrip_stats *stats, ub8 cycle);
  *  Pointer to the block 
  */
 
-struct cache_block_t * cache_find_block_drrip(drrip_data *policy_data, long long tag);
+struct cache_block_t * cache_find_block_sapsimple(sapsimple_data *policy_data, long long tag);
 
 /*
  *
@@ -255,7 +267,7 @@ struct cache_block_t * cache_find_block_drrip(drrip_data *policy_data, long long
  *  Nothing
  */
 
-void cache_fill_block_drrip(drrip_data *policy_data, drrip_gdata *global_data, 
+void cache_fill_block_sapsimple(sapsimple_data *policy_data, sapsimple_gdata *global_data, 
   int way, long long tag, enum cache_block_state_t state, int strm,
   memory_trace *info);
 
@@ -280,7 +292,7 @@ void cache_fill_block_drrip(drrip_data *policy_data, drrip_gdata *global_data,
  *
  */
 
-int  cache_replace_block_drrip(drrip_data *policy_data, drrip_gdata *global_data);
+int  cache_replace_block_sapsimple(sapsimple_data *policy_data, sapsimple_gdata *global_data);
 
 /*
  *
@@ -306,7 +318,7 @@ int  cache_replace_block_drrip(drrip_data *policy_data, drrip_gdata *global_data
  *
  */
 
-void cache_access_block_drrip(drrip_data *policy_data, drrip_gdata *global_data,
+void cache_access_block_sapsimple(sapsimple_data *policy_data, sapsimple_gdata *global_data,
   int way, int strm, memory_trace *info);
 
 /*
@@ -332,8 +344,8 @@ void cache_access_block_drrip(drrip_data *policy_data, drrip_gdata *global_data,
  *  Complete block info
  */
 
-struct cache_block_t cache_get_block_drrip(drrip_data *policy_data, 
-  drrip_gdata *global_data, int way, long long *tag_ptr, 
+struct cache_block_t cache_get_block_sapsimple(sapsimple_data *policy_data, 
+  sapsimple_gdata *global_data, int way, long long *tag_ptr, 
   enum cache_block_state_t *state_ptr, int *stream_ptr);
 
 /*
@@ -360,9 +372,11 @@ struct cache_block_t cache_get_block_drrip(drrip_data *policy_data,
  *  Nothing
  */
 
-void cache_set_block_drrip(drrip_data *policy_data, drrip_gdata *global_data, 
+void cache_set_block_sapsimple(sapsimple_data *policy_data, sapsimple_gdata *global_data, 
   int way, long long tag, enum cache_block_state_t state, ub1 stream, 
   memory_trace *info);
+
+sapsimple_stream get_sapsimple_stream(memory_trace *info);
 
 #undef EXPORT_C
 #endif	/* MEM_SYSTEM_CACHE_H */

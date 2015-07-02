@@ -124,6 +124,7 @@ typedef struct cache_policy_srripsage_gdata_t
   ub8 fills_at_head[TST + 1];                 /* # block filled at the head of the arrival list */
   ub8 fills_at_tail[TST + 1];                 /* # block filled at the tail of the arrival list */
   ub8 dems_at_head[TST + 1];                  /* True if block is to be filled at the head of the arrival list */
+  ub8 dems_at_tail[TST + 1];                  /* True if block is to be filled at the head of the arrival list */
   ub8 fail_demotion[TST + 1];                 /* Premature demotions */
   ub8 valid_demotion[TST + 1];                /* Expected demotions */
 
@@ -151,6 +152,8 @@ typedef struct cache_policy_srripsage_gdata_t
 
   struct saturating_counter_t fill_list_fctr[TST + 1];  /* Fill-list fill counter */
   struct saturating_counter_t fill_list_hctr[TST + 1];  /* Fill-list hit counter */
+
+  srrip_gdata srrip;                              /* SRRIP global data */
 }srripsage_gdata;
 
 #undef MAX_THR

@@ -6,3 +6,4 @@ optimal
 reader
 writer
 *.gz
+export-trace

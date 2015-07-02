@@ -212,7 +212,8 @@ void cache_init_gspc(long long int set_indx, struct cache_params *params, gspc_d
   if (get_set_type_gspc(set_indx) == SAMPLED_SET)
   {
     /* Initialize srrip policy for the set */
-    cache_init_srrip(params, &(policy_data->srrip_policy_data));
+    cache_init_srrip(set_indx, params, &(policy_data->srrip_policy_data), 
+        &(global_data->srrip));
     policy_data->following = cache_policy_srrip;
   }
   else
@@ -322,7 +323,7 @@ void cache_fill_block_gspc(gspc_data *policy_data, gspc_gdata *global_data,
   if (policy_data->following == cache_policy_srrip)
   {
     /* Follow RRIP policy */
-    cache_fill_block_srrip(&(policy_data->srrip_policy_data), way, tag, 
+    cache_fill_block_srrip(&(policy_data->srrip_policy_data), &(global_data->srrip), way, tag, 
       state, strm, info);
 
     /* Update global counters */
@@ -373,7 +374,8 @@ int cache_replace_block_gspc(gspc_data *policy_data, gspc_gdata *global_data)
   
   if (policy_data->following == cache_policy_srrip)
   {
-    return cache_replace_block_srrip(&(policy_data->srrip_policy_data));
+    return cache_replace_block_srrip(&(policy_data->srrip_policy_data), 
+        &(global_data->srrip));
   }
   else
   {
@@ -429,8 +431,8 @@ void cache_access_block_gspc(gspc_data *policy_data,
   if (policy_data->following == cache_policy_srrip)
   {
     /* Follow SRRIP policy */
-    cache_access_block_srrip(&(policy_data->srrip_policy_data), way, strm, 
-      info);
+    cache_access_block_srrip(&(policy_data->srrip_policy_data), 
+        &(global_data->srrip), way, strm, info);
 
     /* Update global counters */
     if (info && info->fill == TRUE)
@@ -765,6 +767,7 @@ int cache_get_fill_rrpv_gspc(gspc_data *policy_data, gspc_gdata *global_data, in
   switch (strm)    
   {
     case CS:
+      break;
 #define PROD_CTR(data) ((float)SAT_CTR_VAL(data->rt_prod_ctr))
 #define CONS_CTR(data) ((float)SAT_CTR_VAL(data->rt_cons_ctr))
 
@@ -796,7 +799,7 @@ int cache_get_fill_rrpv_gspc(gspc_data *policy_data, gspc_gdata *global_data, in
       break;
 
     case BS:
-
+      break;
 #define PROD_CTR(data) ((float)SAT_CTR_VAL(data->bt_prod_ctr))
 #define CONS_CTR(data) ((float)SAT_CTR_VAL(data->bt_cons_ctr))
 

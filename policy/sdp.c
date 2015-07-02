@@ -486,7 +486,6 @@ void cache_free_sdp(long long int set_indx, sdp_data *policy_data, sdp_gdata *gl
 
 struct cache_block_t* cache_find_block_sdp(sdp_data *policy_data, long long tag, memory_trace *info)
 {
-  info->sdp_sample = policy_data->sdp_sample_type;
   return cache_find_block_sap(&(policy_data->sap), tag);
 }
 

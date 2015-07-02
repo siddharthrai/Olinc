@@ -29,6 +29,11 @@
 #define CACHE_BLOCK(set, way)   (&((set)->blocks[way]))
 #define BYPASS_RRPV             (-1)
 
+#define PSEL_WIDTH              (20)
+#define PSEL_MIN_VAL            (0x00)  
+#define PSEL_MAX_VAL            (0xfffff)  
+#define PSEL_MID_VAL            (1 << 19)
+
 #define CACHE_UPDATE_BLOCK_STATE(block, tag, va, state_in)    \
 do                                                            \
 {                                                             \
@@ -126,11 +131,29 @@ do                                                                              
 
 int cs_blocks = 0;
 
-void cache_init_srrip(struct cache_params *params, srrip_data *policy_data)
+void cache_init_srrip(ub4 set_indx, struct cache_params *params, srrip_data *policy_data, 
+    srrip_gdata *global_data)
 {
   /* Ensure valid arguments */
   assert(params);
   assert(policy_data);
+  
+  if (set_indx == 0)
+  {
+    for (ub1 s = NN; s <= TST; s++)
+    {
+      for (ub1 i = 0; i < EPOCH_COUNT; i++)
+      {
+        /* Initialize epoch fill counter */
+        global_data->epoch_fctr   = NULL;
+        global_data->epoch_hctr   = NULL;
+        global_data->epoch_valid  = NULL;
+      }
+    }
+
+    global_data->epoch_count  = EPOCH_COUNT;
+    global_data->max_epoch    = MAX_EPOCH;
+  }
 
   /* For RRIP blocks are organized in per RRPV list */
 #define MAX_RRPV        (params->max_rrpv)
@@ -148,6 +171,7 @@ void cache_init_srrip(struct cache_params *params, srrip_data *policy_data)
   /* Set max RRPV for the set */
   SRRIP_DATA_MAX_RRPV(policy_data)    = MAX_RRPV;
   SRRIP_DATA_SPILL_RRPV(policy_data)  = params->spill_rrpv;
+  SRRIP_DATA_USE_EPOCH(policy_data)   = FALSE;
 
   assert(params->spill_rrpv <= MAX_RRPV);
 
@@ -219,7 +243,7 @@ void cache_free_srrip(srrip_data *policy_data)
   }
 }
 
-struct cache_block_t * cache_find_block_srrip(srrip_data *policy_data, long long tag)
+struct cache_block_t* cache_find_block_srrip(srrip_data *policy_data, long long tag)
 {
   int     max_rrpv;
   struct  cache_block_t *head;
@@ -245,8 +269,9 @@ end:
   return node;
 }
 
-void cache_fill_block_srrip(srrip_data *policy_data, int way, long long tag, 
-  enum cache_block_state_t state, int strm, memory_trace *info)
+void cache_fill_block_srrip(srrip_data *policy_data, srrip_gdata *global_data,
+    int way, long long tag, enum cache_block_state_t state, int strm, 
+    memory_trace *info)
 {
   struct cache_block_t *block;
   int                   rrpv;
@@ -257,12 +282,14 @@ void cache_fill_block_srrip(srrip_data *policy_data, int way, long long tag,
 
   /* Obtain SRRIP specific data */
   block = &(SRRIP_DATA_BLOCKS(policy_data)[way]);
+  block->epoch  = 0;
+  block->access = 0;
   
   assert(block->stream == 0);
 
   /* Get RRPV to be assigned to the new block */
 
-  rrpv = cache_get_fill_rrpv_srrip(policy_data, info);
+  rrpv = cache_get_fill_rrpv_srrip(policy_data, global_data, info, block->epoch);
 
 #if 0
   if (info && info->spill == TRUE)
@@ -283,8 +310,8 @@ void cache_fill_block_srrip(srrip_data *policy_data, int way, long long tag,
     /* Update new block state and stream */
     CACHE_UPDATE_BLOCK_STATE(block, tag, info->vtl_addr, state);
     CACHE_UPDATE_BLOCK_STREAM(block, strm);
-    block->dirty  = (info && info->spill) ? 1 : 0;
-    block->epoch  = 0;
+    block->dirty      = (info && info->spill) ? 1 : 0;
+    block->last_rrpv  = rrpv;
 
     /* Insert block in to the corresponding RRPV queue */
     CACHE_APPEND_TO_QUEUE(block, 
@@ -295,7 +322,7 @@ void cache_fill_block_srrip(srrip_data *policy_data, int way, long long tag,
   SRRIP_DATA_CFPOLICY(policy_data) = SRRIP_DATA_DFPOLICY(policy_data);
 }
 
-int cache_replace_block_srrip(srrip_data *policy_data)
+int cache_replace_block_srrip(srrip_data *policy_data, srrip_gdata *global_data)
 {
   struct cache_block_t *block;
   int    rrpv;
@@ -358,13 +385,13 @@ int cache_replace_block_srrip(srrip_data *policy_data)
         panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
     }
   }
-
+  
   /* If no non busy block can be found, return -1 */
   return (min_wayid != ~(0)) ? min_wayid : -1;
 }
 
-void cache_access_block_srrip(srrip_data *policy_data, int way, int strm,
-  memory_trace *info)
+void cache_access_block_srrip(srrip_data *policy_data, srrip_gdata *global_data,
+    int way, int strm, memory_trace *info)
 {
   struct cache_block_t *blk   = NULL;
   struct cache_block_t *next  = NULL;
@@ -388,29 +415,38 @@ void cache_access_block_srrip(srrip_data *policy_data, int way, int strm,
       old_rrpv = (((rrip_list *)(blk->data))->rrpv);
       new_rrpv = old_rrpv;
 
-      /* Get new RRPV using policy specific function */
-      new_rrpv = cache_get_new_rrpv_srrip(old_rrpv);
-
-      /* Update block queue if block got new RRPV */
-      if (new_rrpv != old_rrpv)
-      {
-        CACHE_REMOVE_FROM_QUEUE(blk, SRRIP_DATA_VALID_HEAD(policy_data)[old_rrpv],
-            SRRIP_DATA_VALID_TAIL(policy_data)[old_rrpv]);
-        CACHE_APPEND_TO_QUEUE(blk, SRRIP_DATA_VALID_HEAD(policy_data)[new_rrpv], 
-            SRRIP_DATA_VALID_TAIL(policy_data)[new_rrpv]);
-      }
-
       if (info && blk->stream == info->stream)
       {
-        blk->epoch  = (blk->epoch == 3) ? 3 : blk->epoch + 1;
+#define MX_EP(g)  ((g)->max_epoch)
+
+        blk->epoch  = (blk->epoch == MX_EP(global_data)) ? MX_EP(global_data) : blk->epoch + 1;
+
+#undef MX_EP
       }
       else
       {
         blk->epoch = 0;
       }
 
+      /* Get new RRPV using policy specific function */
+      new_rrpv = cache_get_new_rrpv_srrip(policy_data, global_data, info, 
+          blk->epoch);
+    
+      /* Update block queue if block got new RRPV */
+      if (new_rrpv != old_rrpv)
+      {
+        blk->last_rrpv = new_rrpv;
+
+        CACHE_REMOVE_FROM_QUEUE(blk, SRRIP_DATA_VALID_HEAD(policy_data)[old_rrpv],
+            SRRIP_DATA_VALID_TAIL(policy_data)[old_rrpv]);
+        CACHE_APPEND_TO_QUEUE(blk, SRRIP_DATA_VALID_HEAD(policy_data)[new_rrpv], 
+            SRRIP_DATA_VALID_TAIL(policy_data)[new_rrpv]);
+      }
+
       CACHE_UPDATE_BLOCK_STREAM(blk, strm);
-      blk->dirty  = (info && info->dirty) ? 1 : 0;
+
+      blk->dirty   = (info && info->dirty) ? 1 : 0;
+      blk->access += 1;
       break;
 
     case cache_policy_bypass:
@@ -421,8 +457,11 @@ void cache_access_block_srrip(srrip_data *policy_data, int way, int strm,
   }
 }
 
-int cache_get_fill_rrpv_srrip(srrip_data *policy_data, memory_trace *info)
+int cache_get_fill_rrpv_srrip(srrip_data *policy_data, 
+    srrip_gdata *global_data, memory_trace *info, ub4 epoch)
 {
+  sb4 ret_rrpv;
+
   switch (SRRIP_DATA_CFPOLICY(policy_data))
   {
     case cache_policy_lru:
@@ -432,8 +471,39 @@ int cache_get_fill_rrpv_srrip(srrip_data *policy_data, memory_trace *info)
       return SRRIP_DATA_MAX_RRPV(policy_data);
 
     case cache_policy_srrip:
+#if 0
+#define VALID_EPOCH(g, i)  ((g)->epoch_valid && (g)->epoch_valid[(i)->stream])
+
+      /* If epoch counter are valid use them to decide fill RRPV */
+      if (policy_data->use_epoch && VALID_EPOCH(global_data, info))
+      {
+        assert(global_data->epoch_fctr[info->stream]);
+        assert(global_data->epoch_hctr[info->stream]);
+
+#define FILL_VAL(g, i, e)  (SAT_CTR_VAL((g)->epoch_fctr[(i)->stream][e]))
+#define HIT_VAL(g, i, e)   (SAT_CTR_VAL((g)->epoch_hctr[(i)->stream][e]))
+
+        if (FILL_VAL(global_data, info, epoch) > 32 * HIT_VAL(global_data, info, epoch))
+        {
+          ret_rrpv = SRRIP_DATA_MAX_RRPV(policy_data);
+        }
+        else
+        {
+          ret_rrpv = SRRIP_DATA_MAX_RRPV(policy_data) - 1;
+        }
+
+#undef FILL_VAL
+#undef HIT_VAL
+      }
+      else
+      {
+        ret_rrpv =  SRRIP_DATA_MAX_RRPV(policy_data) - 1;
+      }
+#endif
       return SRRIP_DATA_MAX_RRPV(policy_data) - 1;
-    
+
+#undef VALID_EPOCH
+
     case cache_policy_bypass:
       /* Not to insert */
       return BYPASS_RRPV;  
@@ -449,9 +519,36 @@ int cache_get_replacement_rrpv_srrip(srrip_data *policy_data)
   return SRRIP_DATA_MAX_RRPV(policy_data);
 }
 
-int cache_get_new_rrpv_srrip(int old_rrpv)
+int cache_get_new_rrpv_srrip(srrip_data *policy_data, srrip_gdata *global_data, 
+    memory_trace *info, ub4 epoch)
 {
-  return 0;
+  sb4 ret_rrpv;
+
+  ret_rrpv = 0;
+
+#define VALID_EPOCH(g, i) ((g)->epoch_valid && (g)->epoch_valid[(i)->stream])
+
+  /* If epoch counter is valid use epoch based DBP */
+  if (policy_data->use_epoch && VALID_EPOCH(global_data, info))
+  {
+    assert(global_data->epoch_fctr[info->stream]);
+    assert(global_data->epoch_hctr[info->stream]);
+
+#define FILL_VAL(g, i, e)  (SAT_CTR_VAL((g)->epoch_fctr[(i)->stream][e]))
+#define HIT_VAL(g, i, e)   (SAT_CTR_VAL((g)->epoch_hctr[(i)->stream][e]))
+
+    if (FILL_VAL(global_data, info, epoch) > 32 * HIT_VAL(global_data, info, epoch))
+    {
+      ret_rrpv = SRRIP_DATA_MAX_RRPV(policy_data);
+    }
+
+#undef FILL_VAL
+#undef HIT_VAL
+  }
+
+#undef VALID_EPOCH
+
+  return ret_rrpv;
 }
 
 /* Update state of block. */
@@ -564,3 +661,8 @@ void cache_set_current_replacement_policy_srrip(srrip_data *policy_data, cache_p
 
   SRRIP_DATA_CRPOLICY(policy_data) = policy;
 }
+
+#undef PSEL_WIDTH
+#undef PSEL_MIN_VAL
+#undef PSEL_MAX_VAL
+#undef PSEL_MID_VAL

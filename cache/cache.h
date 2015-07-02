@@ -37,26 +37,33 @@
 extern struct str_map_t cache_policy_map;
 extern struct str_map_t cache_block_state_map;
 
-#define CACHE_DIP_GDATA(cache)        (&(cache->policy_data.dip))
-#define CACHE_DRRIP_GDATA(cache)      (&(cache->policy_data.drrip))
-#define CACHE_BRRIP_GDATA(cache)      (&(cache->policy_data.brrip))
-#define CACHE_GSDRRIP_GDATA(cache)    (&(cache->policy_data.gsdrrip))
-#define CACHE_GSPC_GDATA(cache)       (&(cache->policy_data.gspc))
-#define CACHE_GSPCM_GDATA(cache)      (&(cache->policy_data.gspcm))
-#define CACHE_GSPCT_GDATA(cache)      (&(cache->policy_data.gspct))
-#define CACHE_GSHP_GDATA(cache)       (&(cache->policy_data.gshp))
-#define CACHE_UCP_GDATA(cache)        (&(cache->policy_data.ucp))
-#define CACHE_TAPUCP_GDATA(cache)     (&(cache->policy_data.tapucp))
-#define CACHE_TAPDRRIP_GDATA(cache)   (&(cache->policy_data.tapdrrip))
-#define CACHE_HELMDRRIP_GDATA(cache)  (&(cache->policy_data.helmdrrip))
-#define CACHE_SAP_GDATA(cache)        (&(cache->policy_data.sap))
-#define CACHE_SDP_GDATA(cache)        (&(cache->policy_data.sdp))
-#define CACHE_PASRRIP_GDATA(cache)    (&(cache->policy_data.pasrrip))
-#define CACHE_SRRIPDBP_GDATA(cache)   (&(cache->policy_data.srripdbp))
-#define CACHE_SRRIPSAGE_GDATA(cache)  (&(cache->policy_data.srripsage))
-#define CACHE_XSP_GDATA(cache)        (&(cache->policy_data.xsp))
-#define CACHE_XSPPIN_GDATA(cache)     (&(cache->policy_data.xsppin))
-#define CACHE_XSPDBP_GDATA(cache)     (&(cache->policy_data.xspdbp))
+#define CACHE_DIP_GDATA(cache)          (&(cache->policy_data.dip))
+#define CACHE_SRRIP_GDATA(cache)        (&(cache->policy_data.srrip))
+#define CACHE_SRRIPBS_GDATA(cache)      (&(cache->policy_data.srripbs))
+#define CACHE_BRRIP_GDATA(cache)        (&(cache->policy_data.brrip))
+#define CACHE_DRRIP_GDATA(cache)        (&(cache->policy_data.drrip))
+#define CACHE_GSDRRIP_GDATA(cache)      (&(cache->policy_data.gsdrrip))
+#define CACHE_GSPC_GDATA(cache)         (&(cache->policy_data.gspc))
+#define CACHE_GSPCM_GDATA(cache)        (&(cache->policy_data.gspcm))
+#define CACHE_GSPCT_GDATA(cache)        (&(cache->policy_data.gspct))
+#define CACHE_GSHP_GDATA(cache)         (&(cache->policy_data.gshp))
+#define CACHE_UCP_GDATA(cache)          (&(cache->policy_data.ucp))
+#define CACHE_TAPUCP_GDATA(cache)       (&(cache->policy_data.tapucp))
+#define CACHE_TAPDRRIP_GDATA(cache)     (&(cache->policy_data.tapdrrip))
+#define CACHE_HELMDRRIP_GDATA(cache)    (&(cache->policy_data.helmdrrip))
+#define CACHE_SAP_GDATA(cache)          (&(cache->policy_data.sap))
+#define CACHE_SDP_GDATA(cache)          (&(cache->policy_data.sdp))
+#define CACHE_PASRRIP_GDATA(cache)      (&(cache->policy_data.pasrrip))
+#define CACHE_SRRIPDBP_GDATA(cache)     (&(cache->policy_data.srripdbp))
+#define CACHE_SRRIPSAGE_GDATA(cache)    (&(cache->policy_data.srripsage))
+#define CACHE_XSP_GDATA(cache)          (&(cache->policy_data.xsp))
+#define CACHE_XSPPIN_GDATA(cache)       (&(cache->policy_data.xsppin))
+#define CACHE_XSPDBP_GDATA(cache)       (&(cache->policy_data.xspdbp))
+#define CACHE_SAPSIMPLE_GDATA(cache)    (&(cache->policy_data.sapsimple))
+#define CACHE_SAPDBP_GDATA(cache)       (&(cache->policy_data.sapdbp))
+#define CACHE_SAPPRIORITY_GDATA(cache)  (&(cache->policy_data.sappriority))
+#define CACHE_SAPPRIDEPRI_GDATA(cache)  (&(cache->policy_data.sappridepri))
+#define CACHE_CUSTOMSRRIP_GDATA(cache)  (&(cache->policy_data.customsrrip))
 
 struct cache_t
 {
@@ -69,26 +76,33 @@ struct cache_t
   /* Policy specific global data */
   struct 
   {
-    dip_gdata       dip;
-    brrip_gdata     brrip;
-    drrip_gdata     drrip;
-    gsdrrip_gdata   gsdrrip;
-    gspc_gdata      gspc;
-    srripdbp_gdata  srripdbp;
-    srripsage_gdata srripsage;
-    gspcm_gdata     gspcm;
-    gspct_gdata     gspct;
-    gshp_gdata      gshp;
-    ucp_gdata       ucp;
-    tapucp_gdata    tapucp;
-    tapdrrip_gdata  tapdrrip;
-    helmdrrip_gdata helmdrrip;
-    sap_gdata       sap;
-    sdp_gdata       sdp;
-    pasrrip_gdata   pasrrip;
-    xsp_gdata       xsp;
-    xsppin_gdata    xsppin;
-    xspdbp_gdata    xspdbp;
+    dip_gdata         dip;
+    srrip_gdata       srrip;
+    srripbs_gdata     srripbs;
+    brrip_gdata       brrip;
+    drrip_gdata       drrip;
+    gsdrrip_gdata     gsdrrip;
+    gspc_gdata        gspc;
+    srripdbp_gdata    srripdbp;
+    srripsage_gdata   srripsage;
+    gspcm_gdata       gspcm;
+    gspct_gdata       gspct;
+    gshp_gdata        gshp;
+    ucp_gdata         ucp;
+    tapucp_gdata      tapucp;
+    tapdrrip_gdata    tapdrrip;
+    helmdrrip_gdata   helmdrrip;
+    sap_gdata         sap;
+    sdp_gdata         sdp;
+    pasrrip_gdata     pasrrip;
+    xsp_gdata         xsp;
+    xsppin_gdata      xsppin;
+    xspdbp_gdata      xspdbp;
+    sapsimple_gdata   sapsimple;
+    sapdbp_gdata      sapdbp;
+    customsrrip_gdata customsrrip;
+    sappriority_gdata sappriority;
+    sappridepri_gdata sappridepri;
   }policy_data;
 
   struct cache_set_t *sets; /* Cache sets */

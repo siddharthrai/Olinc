@@ -129,6 +129,7 @@ void cache_init_brrip(struct cache_params *params, brrip_data *policy_data,
     BRRIP_DATA_MAX_RRPV(policy_data)    = MAX_RRPV;
     BRRIP_DATA_SPILL_RRPV(policy_data)  = params->spill_rrpv;
     BRRIP_DATA_THRESHOLD(policy_data)   = params->threshold;
+    BRRIP_DATA_USE_EPOCH(policy_data)   = FALSE;
 
     /* Initialize head nodes */
     for (int i = 0; i <= MAX_RRPV; i++)
@@ -176,7 +177,15 @@ void cache_init_brrip(struct cache_params *params, brrip_data *policy_data,
     BRRIP_DATA_DRPOLICY(policy_data) = cache_policy_brrip;
     
     SAT_CTR_INI(global_data->access_ctr, 8, 0, 255);
-    global_data->threshold = params->threshold; 
+
+    global_data->threshold    = params->threshold; 
+
+    /* Initialize epoch counter */
+    global_data->epoch_count  = EPOCH_COUNT;
+    global_data->max_epoch    = MAX_EPOCH;
+    global_data->epoch_fctr   = NULL;
+    global_data->epoch_hctr   = NULL;
+    global_data->epoch_valid  = NULL;
 
 #undef MAX_RRPV
 #undef CACHE_ALLOC
@@ -250,11 +259,15 @@ void cache_fill_block_brrip(brrip_data *policy_data, brrip_gdata *global_data,
   /* Update new block state and stream */
   CACHE_UPDATE_BLOCK_STATE(block, tag, info->vtl_addr, state);
   CACHE_UPDATE_BLOCK_STREAM(block, strm);
-  block->dirty = (info && info->spill) ? 1 : 0;
-  block->epoch = 0;
+
+  block->dirty  = (info && info->spill) ? 1 : 0;
+  block->epoch  = 0;
+  block->access = 0;
 
   /* Get RRPV to be assigned to the new block */
-  rrpv = cache_get_fill_rrpv_brrip(policy_data, global_data);
+  rrpv = cache_get_fill_rrpv_brrip(policy_data, global_data, info, block->epoch);
+  
+  block->last_rrpv = rrpv;
 
 #if 0
   if (info && info->fill == TRUE)
@@ -343,7 +356,8 @@ int cache_replace_block_brrip(brrip_data *policy_data)
 }
 
 
-void cache_access_block_brrip(brrip_data *policy_data, int way, int strm, memory_trace *info)
+void cache_access_block_brrip(brrip_data *policy_data, brrip_gdata *global_data,
+    int way, int strm, memory_trace *info)
 {
   struct cache_block_t *blk   = NULL;
   struct cache_block_t *next  = NULL;
@@ -371,11 +385,14 @@ void cache_access_block_brrip(brrip_data *policy_data, int way, int strm, memory
       old_rrpv = (((rrip_list *)(blk->data))->rrpv);
 
       /* Get new RRPV using policy specific function */
-      new_rrpv = cache_get_new_rrpv_brrip(old_rrpv);
+      new_rrpv = cache_get_new_rrpv_brrip(policy_data, global_data, info, 
+          blk->epoch);
         
       /* Update block queue if block got new RRPV */
       if (new_rrpv != old_rrpv)
       {
+        blk->last_rrpv = new_rrpv;
+
         CACHE_REMOVE_FROM_QUEUE(blk, BRRIP_DATA_VALID_HEAD(policy_data)[old_rrpv],
             BRRIP_DATA_VALID_TAIL(policy_data)[old_rrpv]);
         CACHE_APPEND_TO_QUEUE(blk, BRRIP_DATA_VALID_HEAD(policy_data)[new_rrpv], 
@@ -384,7 +401,11 @@ void cache_access_block_brrip(brrip_data *policy_data, int way, int strm, memory
 
       if (info && (blk->stream == info->stream))
       {
-        blk->epoch = (blk->epoch == 3) ? 3 : blk->epoch + 1;
+#define MX_EP(g)  ((g)->max_epoch)
+
+        blk->epoch = (blk->epoch == MX_EP(global_data)) ? MX_EP(global_data) : blk->epoch + 1;
+
+#undef MX_EP
       }
       else
       {
@@ -392,7 +413,8 @@ void cache_access_block_brrip(brrip_data *policy_data, int way, int strm, memory
       }
 
       CACHE_UPDATE_BLOCK_STREAM(blk, strm);
-      blk->dirty = (info && info->dirty) ? 1 : 0;
+      blk->dirty   = (info && info->dirty) ? 1 : 0;
+      blk->access += 1;
       break;
 
     case cache_policy_bypass:
@@ -406,7 +428,8 @@ void cache_access_block_brrip(brrip_data *policy_data, int way, int strm, memory
 }
 
 /* Get fill RRPV */
-int cache_get_fill_rrpv_brrip(brrip_data *policy_data, brrip_gdata *global_data)
+int cache_get_fill_rrpv_brrip(brrip_data *policy_data, 
+    brrip_gdata *global_data, memory_trace *info, ub4 epoch)
 {
   sb4 new_rrpv;
 
@@ -431,11 +454,38 @@ int cache_get_fill_rrpv_brrip(brrip_data *policy_data, brrip_gdata *global_data)
       return BYPASS_RRPV;
 
     case cache_policy_brrip:
+#define VALID_EPOCH(g, i) ((g)->epoch_valid && (g)->epoch_valid[(i)->stream])
+
       /* Block is inserted with long reuse prediction value only if counter 
        * value is 0. */
       if (CTR_VAL(global_data) == 0)
       {
-        new_rrpv = BRRIP_DATA_MAX_RRPV(policy_data) - 1;
+        /* If epoch counter are valid use them to decide fill RRPV */
+        if (policy_data->use_epoch && VALID_EPOCH(global_data, info))
+        {
+          assert(global_data->epoch_fctr[info->stream]);
+          assert(global_data->epoch_hctr[info->stream]);
+
+#define FILL_VAL(g, i, e)  (SAT_CTR_VAL((g)->epoch_fctr[(i)->stream][e]))
+#define HIT_VAL(g, i, e)   (SAT_CTR_VAL((g)->epoch_hctr[(i)->stream][e]))
+
+          if (FILL_VAL(global_data, info, epoch) >  32 * HIT_VAL(global_data, info, epoch))
+          {
+            new_rrpv = BRRIP_DATA_MAX_RRPV(policy_data);
+          }
+          else
+          {
+            new_rrpv = BRRIP_DATA_MAX_RRPV(policy_data) - 1;
+          }
+
+#undef FILL_VAL
+#undef FIT_VAL
+
+        }
+        else
+        {
+          new_rrpv = BRRIP_DATA_MAX_RRPV(policy_data) - 1;
+        }
       }
       else
       {
@@ -455,6 +505,8 @@ int cache_get_fill_rrpv_brrip(brrip_data *policy_data, brrip_gdata *global_data)
       
       return new_rrpv;
 
+#undef VALID_EPOCH
+
     default:
       panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
       return 0;
@@ -470,10 +522,37 @@ int cache_get_replacement_rrpv_brrip(brrip_data *policy_data)
   return BRRIP_DATA_MAX_RRPV(policy_data);
 }
 
-/* Get new RRPV for the block on hit */
-int cache_get_new_rrpv_brrip(int old_rrpv)
+int cache_get_new_rrpv_brrip(brrip_data *policy_data, brrip_gdata *global_data, 
+    memory_trace *info, ub4 epoch)
 {
-  return 0;
+  sb4 ret_rrpv;
+
+  ret_rrpv = 0;
+
+#define VALID_EPOCH(g, i) ((g)->epoch_valid && (g)->epoch_valid[(i)->stream])
+
+  /* If epoch counter is valid use epoch based DBP */
+  if (policy_data->use_epoch && VALID_EPOCH(global_data, info))
+  {
+    assert(global_data->epoch_fctr[info->stream]);
+    assert(global_data->epoch_hctr[info->stream]);
+
+#define FILL_VAL(g, i, e)  (SAT_CTR_VAL((g)->epoch_fctr[(i)->stream][e]))
+#define HIT_VAL(g, i, e)   (SAT_CTR_VAL((g)->epoch_hctr[(i)->stream][e]))
+
+    if (FILL_VAL(global_data, info, epoch) >  32 * HIT_VAL(global_data, info, epoch))
+    {
+      ret_rrpv = BRRIP_DATA_MAX_RRPV(policy_data);
+    }
+
+#undef FILL_VAL
+#undef HIT_VAL
+  }
+
+#undef VALID_EPOCH
+
+  return ret_rrpv;
+
 }
 
 /* Update state of block. */

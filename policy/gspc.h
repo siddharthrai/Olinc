@@ -78,7 +78,8 @@ typedef struct cache_policy_gspc_gdata_t
   struct saturating_counter_t bt_prod_ctr;      /* Render target produced */
   struct saturating_counter_t bt_cons_ctr;      /* Render target consumed */
   struct saturating_counter_t acc_all_ctr;      /* Total accesses */
-
+  
+  srrip_gdata srrip;                            /* SRRIP global data */
 }gspc_gdata;
 
 /*

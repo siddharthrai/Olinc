@@ -17,8 +17,8 @@
  * USA.
  */
 
-#ifndef MEM_SYSTEM_DRRIP_H
-#define	MEM_SYSTEM_DRRIP_H
+#ifndef MEM_SYSTEM_SAPDBP_H
+#define	MEM_SYSTEM_SAPDBP_H
 
 #ifdef __cplusplus
 # define EXPORT_C extern "C"
@@ -38,43 +38,57 @@
 #include "sdp.h"
 #include <stdio.h>
 
-/* Head node of a list, which corresponds to a particular RRPV */
-typedef struct cache_list_head_drrip_t
+/* Streams specific to SAPDBP. SAPDBP controller remaps global stream id to SAPDBP 
+ * specific ids */
+typedef enum sapdbp_stream
 {
-  ub4 rrpv;
-  struct cache_block_t *head;
-}drrip_list;
+  sapdbp_stream_u = 0,
+  sapdbp_stream_x,
+  sapdbp_stream_y,
+  sapdbp_stream_p,
+  sapdbp_stream_q,
+  sapdbp_stream_r
+}sapdbp_stream;
 
-/* DRRIP statistics */
-typedef struct cache_policy_drrip_stats_t
+/* SAPDBP statistics */
+typedef struct cache_policy_sapdbp_stats_t
 {
-  FILE *drrip_stat_file;      /* Samples used for SRRIP */
-  ub8   drrip_srrip_samples;  /* Samples used for SRRIP */
-  ub8   drrip_brrip_samples;  /* Samples used for BRRIP */
-  ub8   sample_srrip_fill;    /* Fills in SRRIP samples */
-  ub8   sample_brrip_fill;    /* Fills in BRRIP samples */
-  ub8   sample_srrip_hit;     /* Fills in SRRIP samples */
-  ub8   sample_brrip_hit;     /* Fills in BRRIP samples */
-  ub8   drrip_srrip_fill;     /* Fills using SRRIP */
-  ub8   drrip_brrip_fill;     /* Fills using BRRIP */
-  ub8   drrip_fill_2;         /* DRRIP fill at RRPV 2 */
-  ub8   drrip_fill_3;         /* DRRIP fill at RRPV 3 */
-  ub1   drrip_hdr_printed;    /* True if header has been printed */
-  ub8   next_schedule;        /* Cycle to schedule stat collection */
-}drrip_stats;
+  FILE *sapdbp_stat_file;       /* Samples used for SRRIP */
+  ub8   sapdbp_srrip_samples;   /* Samples used for SRRIP */
+  ub8   sapdbp_brrip_samples;   /* Samples used for BRRIP */
+  ub8   sample_srrip_fill;      /* Fills in SRRIP samples */
+  ub8   sample_brrip_fill;      /* Fills in BRRIP samples */
+  ub8   sample_srrip_hit;       /* Fills in SRRIP samples */
+  ub8   sample_brrip_hit;       /* Fills in BRRIP samples */
+  ub8   sapdbp_srrip_fill;      /* Fills using SRRIP */
+  ub8   sapdbp_brrip_fill;      /* Fills using BRRIP */
+  ub8   sapdbp_fill_2;          /* SAPDBP fill at RRPV 2 */
+  ub8   sapdbp_fill_3;          /* SAPDBP fill at RRPV 3 */
+  ub8   sapdbp_fill[TST + 1];   /* SAPDBP fill at RRPV 3 */
+  ub8   sapdbp_ps_fill[TST + 1];/* Per-stream fill */
+  ub8   sapdbp_ps_thr[TST + 1]; /* Per-stream thrahing fills */
+  ub8   sapdbp_ps_dep[TST + 1]; /* Per-stream deprioritization */
+  ub1   sapdbp_hdr_printed;     /* True if header has been printed */
+  ub8   epoch_count;            /* #epochs during entire execution */
+  ub8   speedup_count[TST + 1]; /* #speedup */
+  ub8   thrasher_count[TST + 1];/* #thrasher */
+  ub8   dead_blocks[TST + 1];   /* #thrasher */
+  ub8   next_schedule;          /* Cycle to schedule stat collection */
+}sapdbp_stats;
 
-#define DRRIP_DATA_BLOCKS(data)     ((data)->blocks)
-#define DRRIP_DATA_VALID_HEAD(data) ((data)->valid_head)
-#define DRRIP_DATA_VALID_TAIL(data) ((data)->valid_tail)
-#define DRRIP_DATA_FREE_HLST(data)  ((data)->free_head)
-#define DRRIP_DATA_FREE_TLST(data)  ((data)->free_tail)
-#define DRRIP_DATA_FREE_HEAD(data)  ((data)->free_head->head)
-#define DRRIP_DATA_FREE_TAIL(data)  ((data)->free_tail->head)
+#define SAPDBP_DATA_BLOCKS(data)     ((data)->blocks)
+#define SAPDBP_DATA_VALID_HEAD(data) ((data)->valid_head)
+#define SAPDBP_DATA_VALID_TAIL(data) ((data)->valid_tail)
+#define SAPDBP_DATA_FREE_HLST(data)  ((data)->free_head)
+#define SAPDBP_DATA_FREE_TLST(data)  ((data)->free_tail)
+#define SAPDBP_DATA_FREE_HEAD(data)  ((data)->free_head->head)
+#define SAPDBP_DATA_FREE_TAIL(data)  ((data)->free_tail->head)
 
-/* DRRIP specific data */
-typedef struct cache_policy_drrip_data_t
+/* SAPDBP specific data */
+typedef struct cache_policy_sapdbp_data_t
 {
   cache_policy_t        following;  /* Currently followed policy */
+  ub4                   set_type;   /* Type of the set (sampled / follower)*/
   srrip_data            srrip;      /* SRRIP policy specific data */
   brrip_data            brrip;      /* BRRIP policy specific data */
   rrip_list            *valid_head; /* Head pointers of RRPV specific list */
@@ -82,18 +96,30 @@ typedef struct cache_policy_drrip_data_t
   list_head_t          *free_head;  /* Free list head */
   list_head_t          *free_tail;  /* Free list tail */
   struct cache_block_t *blocks;     /* Actual blocks */
-}drrip_data;
+}sapdbp_data;
 
 /* Policy global data */
-typedef struct cache_policy_drrip_gdata_t
+typedef struct cache_policy_sapdbp_gdata_t
 {
-  sctr        psel;                 /* Policy selection counter */
-  sctr        drrip_psel[TST + 1];  /* Policy selection counter */
-  drrip_stats stats;                /* DRRIP statistics */
-  brrip_gdata brrip;                /* BRRIP cache wide data */
-  srrip_gdata srrip;                /* BRRIP cache wide data */
-  sdp_gdata   sdp;                  /* SDP cache wide data for SAP like stats */
-}drrip_gdata;
+  sctr          sapdbp_ssel[TST + 1];   /* Selection counter for modified policy */
+  sctr          drrip_psel;             /* Policy selection counter */
+  sctr          sapdbp_psel;            /* Per-stream policy selection counter */
+  sapdbp_stats  stats;                  /* SAPDBP statistics */
+  brrip_gdata   brrip;                  /* BRRIP cache wide data */
+  sdp_gdata     sdp;                    /* SDP cache wide data for SAP like stats */
+  srrip_gdata   srrip;                  /* SDP cache wide data for SAP like stats */
+  sctr          sapdbp_hint[TST + 1];   /* Accumulation counter for per-stream speedup */
+
+  sctr **epoch_fctr;                    /* Per stream epoch fill counter */
+  sctr **epoch_hctr;                    /* Per-stream epoch hit counter */
+  ub1  *epoch_valid;                    /* Per-stream epoch hit counter */
+  sctr **epoch_xevict;                  /* Per-stream epoch xstream evictions */
+  ub1  *epoch_thrasher;                 /* Per-stream thrashing stream */
+  ub1  *thrasher_stream;                /* TRUE, if stream is thrashing */
+  ub1   speedup_stream;                 /* Stream to be sped up */
+  ub8   access_interval;                /* #Accesses */
+  ub1   bs_epoch;                       /* TRUE, if only baseline samples are used for epoch */
+}sapdbp_gdata;
 
 /*
  *
@@ -117,8 +143,8 @@ typedef struct cache_policy_drrip_gdata_t
  * NOTES
  */
 
-void cache_init_drrip(long long int set_indx, struct cache_params *params, 
-  drrip_data *policy_data, drrip_gdata *global_data);
+void cache_init_sapdbp(long long int set_indx, struct cache_params *params, 
+  sapdbp_data *policy_data, sapdbp_gdata *global_data);
 
 /*
  *
@@ -141,50 +167,50 @@ void cache_init_drrip(long long int set_indx, struct cache_params *params,
  *  Nothing
  */
 
-void cache_free_drrip(unsigned int set_indx, drrip_data *policy_data,
-  drrip_gdata *global_data);
+void cache_free_sapdbp(unsigned int set_indx, sapdbp_data *policy_data,
+  sapdbp_gdata *global_data);
 
 /*
  *
  * NAME
  *  
- *  InitDrripStats - Initialize DRRIP stats
+ *  InitDrripStats - Initialize SAPDBP stats
  *
  * DESCRIPTION
  *  
- *  Initialize DRRIP stats
+ *  Initialize SAPDBP stats
  *
  * PARAMETERS
  *  
- *  stats (IN)  - DRRIP statistics
+ *  stats (IN)  - SAPDBP statistics
  *
  * RETURNS
  *  
  *  Nothing
  */
 
-void cache_init_drrip_stats(drrip_stats *stats);
+void cache_init_sapdbp_stats(sapdbp_stats *stats);
 
 /*
  *
  * NAME
  *  
- *  FiniDrripStats - Finalize DRRIP stats
+ *  FiniDrripStats - Finalize SAPDBP stats
  *
  * DESCRIPTION
  *  
- *  Finalize DRRIP stats
+ *  Finalize SAPDBP stats
  *
  * PARAMETERS
  *  
- *  stats (IN)  - DRRIP statistics
+ *  stats (IN)  - SAPDBP statistics
  *
  * RETURNS
  *  
  *  Nothing
  */
 
-void cache_fini_drrip_stats(drrip_stats *stats);
+void cache_fini_sapdbp_stats(sapdbp_stats *stats);
 
 /*
  *
@@ -198,7 +224,7 @@ void cache_fini_drrip_stats(drrip_stats *stats);
  *
  * PARAMETERS
  *  
- *  stats (IN)  - DRRIP statistics
+ *  stats (IN)  - SAPDBP statistics
  *  cycle (IN)  - Current cycle
  *
  * RETURNS
@@ -206,7 +232,7 @@ void cache_fini_drrip_stats(drrip_stats *stats);
  *  Nothing
  */
 
-void cache_dump_drrip_stats(drrip_stats *stats, ub8 cycle);
+void cache_dump_sapdbp_stats(sapdbp_stats *stats, ub8 cycle);
 
 /*
  *
@@ -221,6 +247,8 @@ void cache_dump_drrip_stats(drrip_stats *stats, ub8 cycle);
  * PARAMETERS
  *  
  *  policy_data (IN)  - Cache set in which block is to be looked
+ *  global_data (IN)  - Cache-wide data 
+ *  info        (IN)  - Access info
  *  tag         (IN)  - Block tag
  *
  * RETURNS
@@ -228,7 +256,8 @@ void cache_dump_drrip_stats(drrip_stats *stats, ub8 cycle);
  *  Pointer to the block 
  */
 
-struct cache_block_t * cache_find_block_drrip(drrip_data *policy_data, long long tag);
+struct cache_block_t * cache_find_block_sapdbp(sapdbp_data *policy_data, 
+    sapdbp_gdata *global_data, memory_trace *info, long long tag);
 
 /*
  *
@@ -255,7 +284,7 @@ struct cache_block_t * cache_find_block_drrip(drrip_data *policy_data, long long
  *  Nothing
  */
 
-void cache_fill_block_drrip(drrip_data *policy_data, drrip_gdata *global_data, 
+void cache_fill_block_sapdbp(sapdbp_data *policy_data, sapdbp_gdata *global_data, 
   int way, long long tag, enum cache_block_state_t state, int strm,
   memory_trace *info);
 
@@ -273,6 +302,7 @@ void cache_fill_block_drrip(drrip_data *policy_data, drrip_gdata *global_data,
  *
  *  policy_data (IN)  - Set of the block 
  *  global_data (IN)  - Cache wide policy data
+ *  info        (IN)  - Access info
  *
  * RETURNS
  *  
@@ -280,7 +310,8 @@ void cache_fill_block_drrip(drrip_data *policy_data, drrip_gdata *global_data,
  *
  */
 
-int  cache_replace_block_drrip(drrip_data *policy_data, drrip_gdata *global_data);
+int  cache_replace_block_sapdbp(sapdbp_data *policy_data, 
+    sapdbp_gdata *global_data, memory_trace *info);
 
 /*
  *
@@ -306,7 +337,7 @@ int  cache_replace_block_drrip(drrip_data *policy_data, drrip_gdata *global_data
  *
  */
 
-void cache_access_block_drrip(drrip_data *policy_data, drrip_gdata *global_data,
+void cache_access_block_sapdbp(sapdbp_data *policy_data, sapdbp_gdata *global_data,
   int way, int strm, memory_trace *info);
 
 /*
@@ -332,8 +363,8 @@ void cache_access_block_drrip(drrip_data *policy_data, drrip_gdata *global_data,
  *  Complete block info
  */
 
-struct cache_block_t cache_get_block_drrip(drrip_data *policy_data, 
-  drrip_gdata *global_data, int way, long long *tag_ptr, 
+struct cache_block_t cache_get_block_sapdbp(sapdbp_data *policy_data, 
+  sapdbp_gdata *global_data, int way, long long *tag_ptr, 
   enum cache_block_state_t *state_ptr, int *stream_ptr);
 
 /*
@@ -360,9 +391,11 @@ struct cache_block_t cache_get_block_drrip(drrip_data *policy_data,
  *  Nothing
  */
 
-void cache_set_block_drrip(drrip_data *policy_data, drrip_gdata *global_data, 
+void cache_set_block_sapdbp(sapdbp_data *policy_data, sapdbp_gdata *global_data, 
   int way, long long tag, enum cache_block_state_t state, ub1 stream, 
   memory_trace *info);
+
+sapdbp_stream get_sapdbp_stream(memory_trace *info);
 
 #undef EXPORT_C
 #endif	/* MEM_SYSTEM_CACHE_H */

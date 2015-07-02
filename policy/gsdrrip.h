@@ -90,6 +90,7 @@ typedef struct cache_policy_gsdrrip_gdata_t
   sctr         *psel;                 /* Policy selection counter */
   gsdrrip_stats stats;                /* GSDRRIP statistics */
   brrip_gdata   brrip;                /* BRRIP cache wide data */
+  srrip_gdata   srrip;                /* BRRIP cache wide data */
 }gsdrrip_gdata;
 
 /*

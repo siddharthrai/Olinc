@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Siddharth Rai
+ * Copyright (C) 2014  Siddharth Rai
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -17,8 +17,8 @@
  * USA.
  */
 
-#ifndef MEM_SYSTEM_BRRIP_H
-#define	MEM_SYSTEM_BRRIP_H
+#ifndef MEM_SYSTEM_SRRIPBS_H
+#define	MEM_SYSTEM_SRRIPBS_H
 
 #include "../common/intermod-common.h"
 #include "../common/sat-counter.h"
@@ -31,62 +31,71 @@
 #define MAX_EPOCH     (10)
 #define EPOCH_COUNT   (MAX_EPOCH - MIN_EPOCH + 1)
 
+#define INTERVAL_SIZE (1000)
+
 /* Head node of a list, which corresponds to a particular RRPV */
-typedef struct cache_list_head_brrip_t
+typedef struct cache_list_head_srripbs_t
 {
   ub4 rrpv;
   struct cache_block_t *head;
-}brrip_list;
+}srripbs_list;
 
-#define BRRIP_DATA_THRESHOLD(data)  ((data)->threshold)
-#define BRRIP_DATA_CFPOLICY(data)   ((data)->current_fill_policy)
-#define BRRIP_DATA_DFPOLICY(data)   ((data)->default_fill_policy)
-#define BRRIP_DATA_CAPOLICY(data)   ((data)->current_access_policy)
-#define BRRIP_DATA_DAPOLICY(data)   ((data)->default_access_policy)
-#define BRRIP_DATA_CRPOLICY(data)   ((data)->current_replacement_policy)
-#define BRRIP_DATA_DRPOLICY(data)   ((data)->default_replacement_policy)
-#define BRRIP_DATA_MAX_RRPV(data)   ((data)->max_rrpv)
-#define BRRIP_DATA_SPILL_RRPV(data) ((data)->spill_rrpv)
-#define BRRIP_DATA_BLOCKS(data)     ((data)->blocks)
-#define BRRIP_DATA_VALID_HEAD(data) ((data)->valid_head)
-#define BRRIP_DATA_VALID_TAIL(data) ((data)->valid_tail)
-#define BRRIP_DATA_FREE_HLST(data)  ((data)->free_head)
-#define BRRIP_DATA_FREE_TLST(data)  ((data)->free_tail)
-#define BRRIP_DATA_FREE_HEAD(data)  ((data)->free_head->head)
-#define BRRIP_DATA_FREE_TAIL(data)  ((data)->free_tail->head)
-#define BRRIP_DATA_USE_EPOCH(data)  ((data)->use_epoch)
+#define SRRIPBS_DATA_CFPOLICY(data)   ((data)->current_fill_policy)
+#define SRRIPBS_DATA_DFPOLICY(data)   ((data)->default_fill_policy)
+#define SRRIPBS_DATA_CAPOLICY(data)   ((data)->current_access_policy)
+#define SRRIPBS_DATA_DAPOLICY(data)   ((data)->default_access_policy)
+#define SRRIPBS_DATA_CRPOLICY(data)   ((data)->current_replacement_policy)
+#define SRRIPBS_DATA_DRPOLICY(data)   ((data)->default_replacement_policy)
+#define SRRIPBS_DATA_MAX_RRPV(data)   ((data)->max_rrpv)
+#define SRRIPBS_DATA_SPILL_RRPV(data) ((data)->spill_rrpv)
+#define SRRIPBS_DATA_BLOCKS(data)     ((data)->blocks)
+#define SRRIPBS_DATA_VALID_HEAD(data) ((data)->valid_head)
+#define SRRIPBS_DATA_VALID_TAIL(data) ((data)->valid_tail)
+#define SRRIPBS_DATA_FREE_HLST(data)  ((data)->free_head)
+#define SRRIPBS_DATA_FREE_TLST(data)  ((data)->free_tail)
+#define SRRIPBS_DATA_FREE_HEAD(data)  ((data)->free_head->head)
+#define SRRIPBS_DATA_FREE_TAIL(data)  ((data)->free_tail->head)
 
 /* RRIP specific data */
-typedef struct cache_policy_brrip_data_t
+typedef struct cache_policy_srripbs_data_t
 {
-  ub4             threshold;                  /* Bimodal threshold */     
-  cache_policy_t  current_fill_policy;        /* If non-default fill policy is enforced */
-  cache_policy_t  default_fill_policy;        /* Default fill policy */
-  cache_policy_t  current_access_policy;      /* If non-default access policy is enforced */
-  cache_policy_t  default_access_policy;      /* Default access policy */
-  cache_policy_t  current_replacement_policy; /* If non-default replacement policy is enforced */
-  cache_policy_t  default_replacement_policy; /* Default replacement policy */
-  ub4             max_rrpv;                   /* Maximum RRPV supported */
-  ub4             spill_rrpv;                 /* Spill RRPV supported */
-  rrip_list      *valid_head;                 /* Head pointers of RRPV specific list */
-  rrip_list      *valid_tail;                 /* Tail pointers of RRPV specific list */
-  list_head_t    *free_head;                  /* Free list head */
-  list_head_t    *free_tail;                  /* Free list tail */
-  ub1             use_epoch;                  /* TRUE, if epoch are used in policy */
-  struct cache_block_t *blocks;               /* Actual blocks */
-}brrip_data;
+  cache_policy_t current_fill_policy;         /* If non-default fill policy is enforced */
+  cache_policy_t default_fill_policy;         /* Default fill policy */
+  cache_policy_t current_access_policy;       /* If non-default fill policy is enforced */
+  cache_policy_t default_access_policy;       /* Default fill policy */
+  cache_policy_t current_replacement_policy;  /* If non-default fill policy is enforced */
+  cache_policy_t default_replacement_policy;  /* Default fill policy */
+  ub4            set_type;                    /* Set type (Sample / Follower) */
+  ub4            max_rrpv;                    /* Maximum RRPV supported */
+  ub4            spill_rrpv;                  /* Spill RRPV supported */
+  rrip_list     *valid_head;                  /* Head pointers of RRPV specific list */
+  rrip_list     *valid_tail;                  /* Tail pointers of RRPV specific list */
+  list_head_t   *free_head;                   /* Free list head */
+  list_head_t   *free_tail;                   /* Free list tail */
 
-/* BRRIP global data */
-typedef struct cache_policy_brrip_gdata_t
+  struct cache_block_t *blocks;               /* Actual blocks */
+}srripbs_data;
+
+/* SRRIPBS cache-wide data */
+typedef struct cache_policy_srripbs_gdata_t
 {
-  ub4  threshold;     /* Bimodal threshold */
-  ub1  epoch_count;   /* Total supported epochs */
-  ub1  max_epoch;     /* Maximum supported epochs */
-  sctr **epoch_fctr;  /* Per-stream epoch fill counter */
-  sctr **epoch_hctr;  /* Per-stream epoch hit counter */
-  ub1  *epoch_valid;  /* Valid epoch list */
-  sctr access_ctr;    /* Current BRRIP access */
-}brrip_gdata;
+  sctr tx_epoch_fctr[EPOCH_COUNT];
+  sctr tx_epoch_ectr[EPOCH_COUNT];
+
+  sctr cs_epoch_fctr[EPOCH_COUNT];
+  sctr cs_epoch_ectr[EPOCH_COUNT];
+
+  sctr zs_epoch_fctr[EPOCH_COUNT];
+  sctr zs_epoch_ectr[EPOCH_COUNT];
+
+  sctr bt_epoch_fctr[EPOCH_COUNT];
+  sctr bt_epoch_ectr[EPOCH_COUNT];
+
+  sctr ps_epoch_fctr[EPOCH_COUNT];
+  sctr ps_epoch_ectr[EPOCH_COUNT];
+
+  ub8  access_interval;
+}srripbs_gdata;
 
 /*
  *
@@ -102,7 +111,7 @@ typedef struct cache_policy_brrip_gdata_t
  *  
  *  params      (IN)  - Policy specific parameters
  *  policy_data (IN)  - Cache set to be initialized 
- *  global_data (IN)  - Cache wide data
+ *  global_data (IN)  - Cache-wide data 
  *
  * RETURNS
  *  
@@ -111,8 +120,8 @@ typedef struct cache_policy_brrip_gdata_t
  * NOTES
  */
 
-void cache_init_brrip(struct cache_params *params, brrip_data *policy_data,
-  brrip_gdata *global_data);
+void cache_init_srripbs(ub4 set_indx, struct cache_params *params, 
+    srripbs_data *policy_data, srripbs_gdata *global_data);
 
 /*
  *
@@ -133,7 +142,7 @@ void cache_init_brrip(struct cache_params *params, brrip_data *policy_data,
  *  Nothing
  */
 
-void cache_free_brrip(brrip_data *policy_data);
+void cache_free_srripbs(srripbs_data *policy_data);
 
 /*
  *
@@ -154,7 +163,8 @@ void cache_free_brrip(brrip_data *policy_data);
  *  
  *  Pointer to the block 
  */
-struct cache_block_t * cache_find_block_brrip(brrip_data *policy_data, long long tag);
+
+struct cache_block_t * cache_find_block_srripbs(srripbs_data *policy_data, long long tag);
 
 /*
  *
@@ -169,7 +179,7 @@ struct cache_block_t * cache_find_block_brrip(brrip_data *policy_data, long long
  * PARAMETERS
  *  
  *  policy_data (IN)  - Set of the block
- *  global_data (IN)  - Cache wide data
+ *  global_data (IN)  - Cache-wide data
  *  way         (IN)  - Way of the block
  *  tag         (IN)  - Tag to be set
  *  state       (IN)  - State to be updated
@@ -181,9 +191,9 @@ struct cache_block_t * cache_find_block_brrip(brrip_data *policy_data, long long
  *  Nothing
  */
 
-void cache_fill_block_brrip(brrip_data *policy_data, brrip_gdata *global_data,
-  int way, long long tag, enum cache_block_state_t state, int strm, 
-  memory_trace *info);
+void cache_fill_block_srripbs(srripbs_data *policy_data, srripbs_gdata *global_data,
+    int way, long long tag, enum cache_block_state_t state, int strm, 
+    memory_trace *info);
 
 /*
  *
@@ -198,6 +208,7 @@ void cache_fill_block_brrip(brrip_data *policy_data, brrip_gdata *global_data,
  * PARAMETERS
  *
  *  policy_data (IN)  - Set of the block 
+ *  global_data (IN)  - Cache-wide data
  *
  * RETURNS
  *  
@@ -205,7 +216,8 @@ void cache_fill_block_brrip(brrip_data *policy_data, brrip_gdata *global_data,
  *
  */
 
-int  cache_replace_block_brrip(brrip_data *policy_data);
+int  cache_replace_block_srripbs(srripbs_data *policy_data, 
+    srripbs_gdata *global_data);
 
 /*
  *
@@ -222,7 +234,7 @@ int  cache_replace_block_brrip(brrip_data *policy_data);
  *  policy_data (IN)  - Set of the block
  *  global_data (IN)  - Cache-wide data
  *  way         (IN)  - Physical way of the block
- *  strm        (IN)  - Stream accessing the block
+ *  strm        (IN)  - Access stream
  *  info        (IN)  - Access info
  *
  * RETURNS
@@ -231,8 +243,8 @@ int  cache_replace_block_brrip(brrip_data *policy_data);
  *
  */
 
-void cache_access_block_brrip(brrip_data *policy_data, brrip_gdata *global_data,
-    int way, int strm, memory_trace *info);
+void cache_access_block_srripbs(srripbs_data *policy_data, 
+    srripbs_gdata *global_data, int way, int strm, memory_trace *info);
 
 /*
  *
@@ -256,8 +268,8 @@ void cache_access_block_brrip(brrip_data *policy_data, brrip_gdata *global_data,
  *  Complete block info
  */
 
-struct cache_block_t cache_get_block_brrip(brrip_data *policy_data, int way, 
-  long long *tag_ptr, enum cache_block_state_t *state_ptr, int *stream);
+struct cache_block_t cache_get_block_srripbs(srripbs_data *policy_data, int way, 
+  long long *tag_ptr, enum cache_block_state_t *state_ptr, int *stream_ptr);
 
 /*
  *
@@ -275,6 +287,7 @@ struct cache_block_t cache_get_block_brrip(brrip_data *policy_data, int way,
  *  way         (IN)  - Way of the block
  *  tag         (IN)  - Block tag
  *  state       (IN)  - New state
+ *  stream      (IN)  - Access stream
  *  info        (IN)  - Access info
  *
  * RETURNS
@@ -282,7 +295,7 @@ struct cache_block_t cache_get_block_brrip(brrip_data *policy_data, int way,
  *  Nothing
  */
 
-void cache_set_block_brrip(brrip_data *policy_data, int way, long long tag, 
+void cache_set_block_srripbs(srripbs_data *policy_data, int way, long long tag,
   enum cache_block_state_t state, ub1 stream, memory_trace *info);
 
 /*
@@ -298,8 +311,6 @@ void cache_set_block_brrip(brrip_data *policy_data, int way, long long tag,
  * PARAMETERS
  *  
  *  policy_data (IN)  - Cache set 
- *  global_data (IN)  - Cache-wide data 
- *  info        (IN)  - Access info
  *
  * RETURNS
  *  
@@ -307,8 +318,7 @@ void cache_set_block_brrip(brrip_data *policy_data, int way, long long tag,
  *
  */
 
-int cache_get_fill_rrpv_brrip(brrip_data *policy_data, 
-    brrip_gdata *global_data, memory_trace *info, ub4 epoch);
+int cache_get_fill_rrpv_srripbs(srripbs_data *policy_data, memory_trace *info);
 
 /*
  *
@@ -329,7 +339,7 @@ int cache_get_fill_rrpv_brrip(brrip_data *policy_data,
  *  Replacement RRPV
  */
 
-int cache_get_replacement_rrpv_brrip(brrip_data *policy_data);
+int cache_get_replacement_rrpv_srripbs(srripbs_data *policy_data);
 
 /*
  *
@@ -343,18 +353,41 @@ int cache_get_replacement_rrpv_brrip(brrip_data *policy_data);
  *
  * PARAMETERS
  *  
- *  policy_data (IN) - Cache set data
+ *  policy_data (IN) - Per set data 
  *  global_data (IN) - Cache-wide data
+ *  old_rrpv    (IN) - Current RRPV of the block
  *  info        (IN) - Access info
- *  epoch       (IN) - Current block epoch
+ *  epoch       (IN) - current epoch
  *
  * RETURNS
  *  
  *  New RRPV
  */
 
-int cache_get_new_rrpv_brrip(brrip_data *policy_data, brrip_gdata *global_data, 
-    memory_trace *info, ub4 epoch);
+int cache_get_new_rrpv_srripbs(srripbs_data *policy_data, 
+    srripbs_gdata *global_data, int old_rrpv, memory_trace *info, ub1 epoch);
+
+/*
+ *
+ * NAME
+ *  
+ *  CountBlocks
+ *
+ * DESCRIPTION
+ *  
+ *  Count blocks
+ *
+ * PARAMETERS
+ *  
+ *  policy_data (IN)  - Policy specific data
+ *  strm        (IN)  - Accessing stream
+ *
+ * RETURNS
+ *  
+ *  Block count
+ */
+
+int cache_count_block_srripbs(srripbs_data *policy_data, ub1 strm);
 
 /*
  *
@@ -376,7 +409,7 @@ int cache_get_new_rrpv_brrip(brrip_data *policy_data, brrip_gdata *global_data,
  *  Nothing
  */
 
-void cache_set_current_fill_policy_brrip(brrip_data *policy_data, cache_policy_t policy);
+void cache_set_current_fill_policy_srripbs(srripbs_data *policy_data, cache_policy_t policy);
 
 /*
  *
@@ -386,7 +419,7 @@ void cache_set_current_fill_policy_brrip(brrip_data *policy_data, cache_policy_t
  *
  * DESCRIPTION
  *  
- *  Sets policy to follow for the next access
+ *  Sets policy to follow for the next fill
  *
  * PARAMETERS
  *  
@@ -398,7 +431,7 @@ void cache_set_current_fill_policy_brrip(brrip_data *policy_data, cache_policy_t
  *  Nothing
  */
 
-void cache_set_current_access_policy_brrip(brrip_data *policy_data, cache_policy_t policy);
+void cache_set_current_access_policy_srripbs(srripbs_data *policy_data, cache_policy_t policy);
 
 /*
  *
@@ -420,6 +453,6 @@ void cache_set_current_access_policy_brrip(brrip_data *policy_data, cache_policy
  *  Nothing
  */
 
-void cache_set_current_replacement_policy_brrip(brrip_data *policy_data, cache_policy_t policy);
+void cache_set_current_replacement_policy_srripbs(srripbs_data *policy_data, cache_policy_t policy);
 
 #endif	/* MEM_SYSTEM_CACHE_H */

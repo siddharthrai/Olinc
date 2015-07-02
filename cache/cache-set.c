@@ -12,6 +12,10 @@ struct cache_block_t* get_cache_blocks(struct cache_set_t *set, cache_policy_t p
     return (SRRIP_DATA_BLOCKS(CACHE_SET_DATA_SRRIP(set)));
     break;
 
+  case cache_policy_srripbs:
+    return (SRRIP_DATA_BLOCKS(CACHE_SET_DATA_SRRIPBS(set)));
+    break;
+
   case cache_policy_brrip:
     return (SRRIP_DATA_BLOCKS(CACHE_SET_DATA_SRRIP(set)));
     break;

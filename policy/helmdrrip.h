@@ -87,6 +87,7 @@ typedef struct cache_policy_helmdrrip_gdata_t
   ub4         core_policy1;                   /* Core id following first policy */
   ub4         core_policy2;                   /* Core id following second policy */  
   brrip_gdata brrip;                          /* BRRIP cache wide data */
+  srrip_gdata srrip;                          /* SRRIP cache wide data */
 }helmdrrip_gdata;
 
 /*

@@ -48,7 +48,7 @@ do                                                            \
  */
 
 struct str_map_t cache_policy_map = {
-        21,
+        24,
         {
                 { "BYPASS", cache_policy_bypass},
                 { "LRU", cache_policy_lru},
@@ -59,6 +59,7 @@ struct str_map_t cache_policy_map = {
                 { "HELMDRRIP", cache_policy_helmdrrip},
                 { "FIFO", cache_policy_fifo},
                 { "SRRIP", cache_policy_srrip},
+                { "SRRIPBS", cache_policy_srripbs},
                 { "SRRIPDBP", cache_policy_srripdbp},
                 { "SRRIPSAGE", cache_policy_srripsage},
                 { "PASRRIP", cache_policy_pasrrip},
@@ -74,7 +75,12 @@ struct str_map_t cache_policy_map = {
                 { "GSPCM", cache_policy_gspcm},
                 { "GSHP", cache_policy_gshp},
                 { "SDP", cache_policy_sdp},
-                { "STRIDELRU", cache_policy_stridelru}
+                { "STRIDELRU", cache_policy_stridelru},
+                { "SAPSIMPLE", cache_policy_sapsimple},
+                { "SAPDBP", cache_policy_sapdbp},
+                { "SAPPRIORITY", cache_policy_sappriority},
+                { "SAPPRIDEPRI", cache_policy_sappridepri},
+                { "CUSOMSRRIP", cache_policy_customsrrip}
         }
 };
 
@@ -212,7 +218,18 @@ struct cache_t* cache_init(struct cache_params *params)
         break;
 
       case cache_policy_srrip:
-        cache_init_srrip(params, CACHE_SET_DATA_SRRIP(cache_set));
+        cache_init_srrip(set, params, CACHE_SET_DATA_SRRIP(cache_set), 
+            CACHE_SRRIP_GDATA(cache));
+        break;
+
+      case cache_policy_customsrrip:
+        cache_init_customsrrip(set, params, CACHE_SET_DATA_CUSTOMSRRIP(cache_set), 
+            CACHE_CUSTOMSRRIP_GDATA(cache));
+        break;
+
+      case cache_policy_srripbs:
+        cache_init_srripbs(set, params, CACHE_SET_DATA_SRRIPBS(cache_set), 
+            CACHE_SRRIPBS_GDATA(cache));
         break;
 
       case cache_policy_pasrrip:
@@ -261,6 +278,26 @@ struct cache_t* cache_init(struct cache_params *params)
       case cache_policy_drrip:
         cache_init_drrip(set, params, CACHE_SET_DATA_DRRIP(cache_set),
             &((cache->policy_data).drrip));
+        break;
+
+      case cache_policy_sapsimple:
+        cache_init_sapsimple(set, params, CACHE_SET_DATA_SAPSIMPLE(cache_set),
+            &((cache->policy_data).sapsimple));
+        break;
+
+      case cache_policy_sapdbp:
+        cache_init_sapdbp(set, params, CACHE_SET_DATA_SAPDBP(cache_set),
+            &((cache->policy_data).sapdbp));
+        break;
+
+      case cache_policy_sappriority:
+        cache_init_sappriority(set, params, CACHE_SET_DATA_SAPPRIORITY(cache_set),
+            &((cache->policy_data).sappriority));
+        break;
+
+      case cache_policy_sappridepri:
+        cache_init_sappridepri(set, params, CACHE_SET_DATA_SAPPRIDEPRI(cache_set),
+            &((cache->policy_data).sappridepri));
         break;
 
       case cache_policy_gsdrrip:
@@ -455,6 +492,14 @@ void cache_free(struct cache_t *cache)
         cache_free_srrip(CACHE_SET_DATA_SRRIP(cache_set));
         break;
 
+      case cache_policy_customsrrip:
+        cache_free_customsrrip(CACHE_SET_DATA_CUSTOMSRRIP(cache_set));
+        break;
+
+      case cache_policy_srripbs:
+        cache_free_srripbs(CACHE_SET_DATA_SRRIPBS(cache_set));
+        break;
+
       case cache_policy_pasrrip:
         cache_free_pasrrip(CACHE_SET_DATA_PASRRIP(cache_set));
         break;
@@ -496,6 +541,26 @@ void cache_free(struct cache_t *cache)
       case cache_policy_drrip:
         cache_free_drrip(set, CACHE_SET_DATA_DRRIP(cache_set), 
           CACHE_DRRIP_GDATA(cache));
+        break;
+
+      case cache_policy_sapsimple:
+        cache_free_sapsimple(set, CACHE_SET_DATA_SAPSIMPLE(cache_set), 
+          CACHE_SAPSIMPLE_GDATA(cache));
+        break;
+
+      case cache_policy_sapdbp:
+        cache_free_sapdbp(set, CACHE_SET_DATA_SAPDBP(cache_set), 
+          CACHE_SAPDBP_GDATA(cache));
+        break;
+
+      case cache_policy_sappriority:
+        cache_free_sappriority(set, CACHE_SET_DATA_SAPPRIORITY(cache_set), 
+          CACHE_SAPPRIORITY_GDATA(cache));
+        break;
+
+      case cache_policy_sappridepri:
+        cache_free_sappridepri(set, CACHE_SET_DATA_SAPPRIDEPRI(cache_set), 
+          CACHE_SAPPRIDEPRI_GDATA(cache));
         break;
 
       case cache_policy_gsdrrip:
@@ -617,6 +682,14 @@ struct cache_block_t * cache_find_block(struct cache_t *cache, int set,
       return cache_find_block_srrip(CACHE_SET_DATA_SRRIP(CACHE_SET(cache, set)), tag);
       break;
 
+    case cache_policy_customsrrip:
+      return cache_find_block_customsrrip(CACHE_SET_DATA_CUSTOMSRRIP(CACHE_SET(cache, set)), tag);
+      break;
+
+    case cache_policy_srripbs:
+      return cache_find_block_srripbs(CACHE_SET_DATA_SRRIPBS(CACHE_SET(cache, set)), tag);
+      break;
+
     case cache_policy_srripm:
       return cache_find_block_srripm(CACHE_SET_DATA_SRRIPM(CACHE_SET(cache, set)), tag);
       break;
@@ -659,6 +732,25 @@ struct cache_block_t * cache_find_block(struct cache_t *cache, int set,
 
     case cache_policy_drrip:
       return cache_find_block_drrip(CACHE_SET_DATA_DRRIP(CACHE_SET(cache, set)), tag);
+      break;
+
+    case cache_policy_sapsimple:
+      return cache_find_block_sapsimple(CACHE_SET_DATA_SAPSIMPLE(CACHE_SET(cache, set)), tag);
+      break;
+
+    case cache_policy_sapdbp:
+      return cache_find_block_sapdbp(CACHE_SET_DATA_SAPDBP(CACHE_SET(cache, set)),
+          CACHE_SAPDBP_GDATA(cache), info, tag);
+      break;
+
+    case cache_policy_sappriority:
+      return cache_find_block_sappriority(CACHE_SET_DATA_SAPPRIORITY(CACHE_SET(cache, set)),
+          CACHE_SAPPRIORITY_GDATA(cache), info, tag);
+      break;
+
+    case cache_policy_sappridepri:
+      return cache_find_block_sappridepri(CACHE_SET_DATA_SAPPRIDEPRI(CACHE_SET(cache, set)),
+          CACHE_SAPPRIDEPRI_GDATA(cache), info, tag);
       break;
 
     case cache_policy_gsdrrip:
@@ -766,11 +858,21 @@ void cache_fill_block( struct cache_t *cache, int set, int way,
       break;
 
     case cache_policy_srrip:
-      cache_fill_block_srrip(CACHE_SET_DATA_SRRIP(CACHE_SET(cache, set)), way,
-          tag, state, stream, info);
+      cache_fill_block_srrip(CACHE_SET_DATA_SRRIP(CACHE_SET(cache, set)), 
+          CACHE_SRRIP_GDATA(cache), way, tag, state, stream, info);
 
       /* For verification */
       UpdateOnFill(&(cache->srrip_policy), set, way);
+      break;
+
+    case cache_policy_customsrrip:
+      cache_fill_block_customsrrip(CACHE_SET_DATA_CUSTOMSRRIP(CACHE_SET(cache, set)), 
+          CACHE_CUSTOMSRRIP_GDATA(cache), way, tag, state, stream, info);
+      break;
+
+    case cache_policy_srripbs:
+      cache_fill_block_srripbs(CACHE_SET_DATA_SRRIPBS(CACHE_SET(cache, set)), 
+          CACHE_SRRIPBS_GDATA(cache), way, tag, state, stream, info);
       break;
 
     case cache_policy_pasrrip:
@@ -829,6 +931,26 @@ void cache_fill_block( struct cache_t *cache, int set, int way,
       assert(SAT_CTR_VAL(CACHE_DRRIP_GDATA(cache)->psel) == cache->drrip_policy._DIPchooser);
       assert(SAT_CTR_VAL(CACHE_DRRIP_GDATA(cache)->brrip.access_ctr) == cache->drrip_policy._BIPcounter);
 #endif
+      break;
+
+    case cache_policy_sapsimple:
+      cache_fill_block_sapsimple(CACHE_SET_DATA_SAPSIMPLE(CACHE_SET(cache, set)), 
+          CACHE_SAPSIMPLE_GDATA(cache), way, tag, state, stream, info);
+      break;
+
+    case cache_policy_sapdbp:
+      cache_fill_block_sapdbp(CACHE_SET_DATA_SAPDBP(CACHE_SET(cache, set)), 
+          CACHE_SAPDBP_GDATA(cache), way, tag, state, stream, info);
+      break;
+
+    case cache_policy_sappriority:
+      cache_fill_block_sappriority(CACHE_SET_DATA_SAPPRIORITY(CACHE_SET(cache, set)), 
+          CACHE_SAPPRIORITY_GDATA(cache), way, tag, state, stream, info);
+      break;
+
+    case cache_policy_sappridepri:
+      cache_fill_block_sappridepri(CACHE_SET_DATA_SAPPRIDEPRI(CACHE_SET(cache, set)), 
+          CACHE_SAPPRIDEPRI_GDATA(cache), way, tag, state, stream, info);
       break;
 
     case cache_policy_gsdrrip:
@@ -943,11 +1065,21 @@ void cache_access_block(struct cache_t *cache, int set, int way, int stream,
       break;
 
     case cache_policy_srrip:
-      cache_access_block_srrip(CACHE_SET_DATA_SRRIP(CACHE_SET(cache, set)), way,
-        stream, info);
+      cache_access_block_srrip(CACHE_SET_DATA_SRRIP(CACHE_SET(cache, set)), 
+          CACHE_SRRIP_GDATA(cache), way, stream, info);
 
       /* For verification */
       UpdateOnHit(&(cache->srrip_policy), set, way);
+      break;
+
+    case cache_policy_customsrrip:
+      cache_access_block_customsrrip(CACHE_SET_DATA_CUSTOMSRRIP(CACHE_SET(cache, set)), 
+          CACHE_CUSTOMSRRIP_GDATA(cache), way, stream, info);
+      break;
+
+    case cache_policy_srripbs:
+      cache_access_block_srripbs(CACHE_SET_DATA_SRRIPBS(CACHE_SET(cache, set)), 
+          CACHE_SRRIPBS_GDATA(cache), way, stream, info);
       break;
 
     case cache_policy_pasrrip:
@@ -991,8 +1123,8 @@ void cache_access_block(struct cache_t *cache, int set, int way, int stream,
       break;
 
     case cache_policy_brrip:
-      cache_access_block_brrip(CACHE_SET_DATA_BRRIP(CACHE_SET(cache, set)), way,
-        stream, info);
+      cache_access_block_brrip(CACHE_SET_DATA_BRRIP(CACHE_SET(cache, set)), 
+        CACHE_BRRIP_GDATA(cache), way, stream, info);
       break;
 
     case cache_policy_drrip:
@@ -1001,6 +1133,26 @@ void cache_access_block(struct cache_t *cache, int set, int way, int stream,
 
       /* For verification */
       DRRIPUpdateOnHit(&(cache->drrip_policy), set, way);
+      break;
+
+    case cache_policy_sapsimple:
+      cache_access_block_sapsimple(CACHE_SET_DATA_SAPSIMPLE(CACHE_SET(cache, set)), 
+        CACHE_SAPSIMPLE_GDATA(cache), way, stream, info);
+      break;
+
+    case cache_policy_sapdbp:
+      cache_access_block_sapdbp(CACHE_SET_DATA_SAPDBP(CACHE_SET(cache, set)), 
+        CACHE_SAPDBP_GDATA(cache), way, stream, info);
+      break;
+
+    case cache_policy_sappriority:
+      cache_access_block_sappriority(CACHE_SET_DATA_SAPPRIORITY(CACHE_SET(cache, set)), 
+        CACHE_SAPPRIORITY_GDATA(cache), way, stream, info);
+      break;
+
+    case cache_policy_sappridepri:
+      cache_access_block_sappridepri(CACHE_SET_DATA_SAPPRIDEPRI(CACHE_SET(cache, set)), 
+        CACHE_SAPPRIDEPRI_GDATA(cache), way, stream, info);
       break;
 
     case cache_policy_gsdrrip:
@@ -1105,11 +1257,21 @@ int cache_replace_block(struct cache_t *cache, int set, memory_trace *info)
 
     case cache_policy_srrip:
       GetReplacementCandidate(&(cache->srrip_policy), set, &verified_way);
-      new_way = cache_replace_block_srrip(CACHE_SET_DATA_SRRIP(CACHE_SET(cache, set)));
+      new_way = cache_replace_block_srrip(CACHE_SET_DATA_SRRIP(CACHE_SET(cache, set)), 
+          CACHE_SRRIP_GDATA(cache));
 #if 0      
       assert(new_way == verified_way);
 #endif
       return new_way;
+
+    case cache_policy_customsrrip:
+      new_way = cache_replace_block_customsrrip(CACHE_SET_DATA_CUSTOMSRRIP(CACHE_SET(cache, set)), 
+          CACHE_CUSTOMSRRIP_GDATA(cache), NN);
+      return new_way;
+
+    case cache_policy_srripbs:
+      return cache_replace_block_srripbs(CACHE_SET_DATA_SRRIPBS(CACHE_SET(cache, set)), 
+          CACHE_SRRIPBS_GDATA(cache));
 
     case cache_policy_pasrrip:
       new_way = cache_replace_block_pasrrip(CACHE_SET_DATA_PASRRIP(CACHE_SET(cache, set)),
@@ -1155,6 +1317,26 @@ int cache_replace_block(struct cache_t *cache, int set, memory_trace *info)
       assert(new_way == verified_way);
 #endif
       return new_way;
+
+    case cache_policy_sapsimple:
+      return cache_replace_block_sapsimple(CACHE_SET_DATA_SAPSIMPLE(CACHE_SET(cache, set)),
+        CACHE_SAPSIMPLE_GDATA(cache));
+      break;
+
+    case cache_policy_sapdbp:
+      return cache_replace_block_sapdbp(CACHE_SET_DATA_SAPDBP(CACHE_SET(cache, set)),
+        CACHE_SAPDBP_GDATA(cache), info);
+      break;
+
+    case cache_policy_sappriority:
+      return cache_replace_block_sappriority(CACHE_SET_DATA_SAPPRIORITY(CACHE_SET(cache, set)),
+        CACHE_SAPPRIORITY_GDATA(cache), info);
+      break;
+
+    case cache_policy_sappridepri:
+      return cache_replace_block_sappridepri(CACHE_SET_DATA_SAPPRIDEPRI(CACHE_SET(cache, set)),
+        CACHE_SAPPRIDEPRI_GDATA(cache), info);
+      break;
 
     case cache_policy_gsdrrip:
       return cache_replace_block_gsdrrip(CACHE_SET_DATA_GSDRRIP(CACHE_SET(cache, set)),
@@ -1254,6 +1436,14 @@ void cache_set_block(struct cache_t *cache, int set, int way, long long tag,
       return cache_set_block_srrip(CACHE_SET_DATA_SRRIP(CACHE_SET(cache, set)),
               way, tag, state, stream, info);
 
+    case cache_policy_customsrrip:
+      return cache_set_block_customsrrip(CACHE_SET_DATA_CUSTOMSRRIP(CACHE_SET(cache, set)),
+              way, tag, state, stream, info);
+
+    case cache_policy_srripbs:
+      return cache_set_block_srripbs(CACHE_SET_DATA_SRRIPBS(CACHE_SET(cache, set)),
+              way, tag, state, stream, info);
+
     case cache_policy_pasrrip:
       return cache_set_block_pasrrip(CACHE_SET_DATA_PASRRIP(CACHE_SET(cache, set)),
               way, tag, state, stream, info);
@@ -1293,6 +1483,22 @@ void cache_set_block(struct cache_t *cache, int set, int way, long long tag,
     case cache_policy_drrip:
       return cache_set_block_drrip(CACHE_SET_DATA_DRRIP(CACHE_SET(cache, set)),
               CACHE_DRRIP_GDATA(cache), way, tag, state, stream, info);
+
+    case cache_policy_sapsimple:
+      return cache_set_block_sapsimple(CACHE_SET_DATA_SAPSIMPLE(CACHE_SET(cache, set)),
+              CACHE_SAPSIMPLE_GDATA(cache), way, tag, state, stream, info);
+
+    case cache_policy_sapdbp:
+      return cache_set_block_sapdbp(CACHE_SET_DATA_SAPDBP(CACHE_SET(cache, set)),
+              CACHE_SAPDBP_GDATA(cache), way, tag, state, stream, info);
+
+    case cache_policy_sappriority:
+      return cache_set_block_sappriority(CACHE_SET_DATA_SAPPRIORITY(CACHE_SET(cache, set)),
+              CACHE_SAPPRIORITY_GDATA(cache), way, tag, state, stream, info);
+
+    case cache_policy_sappridepri:
+      return cache_set_block_sappridepri(CACHE_SET_DATA_SAPPRIDEPRI(CACHE_SET(cache, set)),
+              CACHE_SAPPRIDEPRI_GDATA(cache), way, tag, state, stream, info);
 
     case cache_policy_gsdrrip:
       return cache_set_block_gsdrrip(CACHE_SET_DATA_GSDRRIP(CACHE_SET(cache, set)),
@@ -1392,6 +1598,14 @@ struct cache_block_t cache_get_block(struct cache_t *cache, int set, int way,
       return cache_get_block_srrip(CACHE_SET_DATA_SRRIP(CACHE_SET(cache, set)),
         way, tag_ptr, state_ptr, stream_ptr);
 
+    case cache_policy_customsrrip:
+      return cache_get_block_customsrrip(CACHE_SET_DATA_CUSTOMSRRIP(CACHE_SET(cache, set)),
+        way, tag_ptr, state_ptr, stream_ptr);
+
+    case cache_policy_srripbs:
+      return cache_get_block_srripbs(CACHE_SET_DATA_SRRIPBS(CACHE_SET(cache, set)),
+        way, tag_ptr, state_ptr, stream_ptr);
+
     case cache_policy_pasrrip:
       return cache_get_block_pasrrip(CACHE_SET_DATA_PASRRIP(CACHE_SET(cache, set)),
         way, tag_ptr, state_ptr, stream_ptr);
@@ -1431,6 +1645,22 @@ struct cache_block_t cache_get_block(struct cache_t *cache, int set, int way,
     case cache_policy_drrip:
       return cache_get_block_drrip(CACHE_SET_DATA_DRRIP(CACHE_SET(cache, set)),
         CACHE_DRRIP_GDATA(cache), way, tag_ptr, state_ptr, stream_ptr);
+
+    case cache_policy_sapsimple:
+      return cache_get_block_sapsimple(CACHE_SET_DATA_SAPSIMPLE(CACHE_SET(cache, set)),
+        CACHE_SAPSIMPLE_GDATA(cache), way, tag_ptr, state_ptr, stream_ptr);
+
+    case cache_policy_sapdbp:
+      return cache_get_block_sapdbp(CACHE_SET_DATA_SAPDBP(CACHE_SET(cache, set)),
+        CACHE_SAPDBP_GDATA(cache), way, tag_ptr, state_ptr, stream_ptr);
+
+    case cache_policy_sappriority:
+      return cache_get_block_sappriority(CACHE_SET_DATA_SAPPRIORITY(CACHE_SET(cache, set)),
+        CACHE_SAPPRIORITY_GDATA(cache), way, tag_ptr, state_ptr, stream_ptr);
+
+    case cache_policy_sappridepri:
+      return cache_get_block_sappridepri(CACHE_SET_DATA_SAPPRIDEPRI(CACHE_SET(cache, set)),
+        CACHE_SAPPRIDEPRI_GDATA(cache), way, tag_ptr, state_ptr, stream_ptr);
 
     case cache_policy_gsdrrip:
       return cache_get_block_gsdrrip(CACHE_SET_DATA_GSDRRIP(CACHE_SET(cache, set)),

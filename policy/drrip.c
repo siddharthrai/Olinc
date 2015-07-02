@@ -73,9 +73,9 @@ static int get_set_type_drrip(long long int indx)
   int msb_bits;
   int mid_bits;
 
-  lsb_bits = indx & 0x0f;
-  msb_bits = (indx >> 6) & 0x0f;
-  mid_bits = (indx >> 4) & 0x03;
+  lsb_bits = indx & 0x07;
+  msb_bits = (indx >> 7) & 0x07;
+  mid_bits = (indx >> 3) & 0x0f;
 
   if (lsb_bits == msb_bits && mid_bits == 0)
   {
@@ -83,7 +83,7 @@ static int get_set_type_drrip(long long int indx)
   }
   else
   {
-    if (lsb_bits == (~msb_bits & 0x0f) && mid_bits == 0)
+    if (lsb_bits == (~msb_bits & 0x07) && mid_bits == 0)
     {
       return BRRIP_SAMPLED_SET;
     }
@@ -152,13 +152,27 @@ void cache_dump_drrip_stats(drrip_stats *stats, ub8 cycle)
 }
 
 /* Initialize SRRIP from DRRIP policy data */
-static void cache_init_srrip_from_drrip(struct cache_params *params, srrip_data *policy_data,
-  drrip_data *drrip_policy_data)
+static void cache_init_srrip_from_drrip(ub4 set_indx, 
+    struct cache_params *params, srrip_data *policy_data, 
+    srrip_gdata *global_data, drrip_data *drrip_policy_data)
 {
   /* Ensure valid arguments */
   assert(params);
   assert(policy_data);
   assert(drrip_policy_data);
+
+  if (set_indx == 0)
+  {
+    for (ub1 s = NN; s <= TST; s++)
+    {
+      for (ub1 i = 0; i < EPOCH_COUNT; i++)
+      {
+        /* Initialize epoch fill counter */
+        global_data->epoch_fctr = NULL;
+        global_data->epoch_hctr = NULL;
+      }
+    }
+  }
 
   /* Create per rrpv buckets */
   SRRIP_DATA_VALID_HEAD(policy_data) = DRRIP_DATA_VALID_HEAD(drrip_policy_data);
@@ -238,6 +252,13 @@ void cache_init_drrip(long long int set_indx, struct cache_params *params, drrip
     /* Initialize policy selection counter */
     SAT_CTR_INI(global_data->psel, PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
     SAT_CTR_SET(global_data->psel, PSEL_MID_VAL);
+    
+    for (ub4 i = 0; i <= TST; i++) 
+    {
+      /* Initialize policy selection counter */
+      SAT_CTR_INI(global_data->drrip_psel[i], PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
+      SAT_CTR_SET(global_data->drrip_psel[i], PSEL_MID_VAL);
+    }
 
     global_data->stats.drrip_srrip_samples = 0;
     global_data->stats.drrip_brrip_samples = 0;
@@ -347,7 +368,8 @@ void cache_init_drrip(long long int set_indx, struct cache_params *params, drrip
   {
     case SRRIP_SAMPLED_SET:
       /* Initialize SRRIP and BRRIP per policy data using DRRIP data */
-      cache_init_srrip_from_drrip(params, &(policy_data->srrip), policy_data);
+      cache_init_srrip_from_drrip(set_indx, params, &(policy_data->srrip), 
+          &(global_data->srrip), policy_data);
       cache_init_brrip_from_drrip(params, &(policy_data->brrip), policy_data);
 
       /* Set policy followed by sample */
@@ -360,7 +382,8 @@ void cache_init_drrip(long long int set_indx, struct cache_params *params, drrip
 
     case BRRIP_SAMPLED_SET:
       /* Initialize SRRIP and BRRIP per policy data using DRRIP data */
-      cache_init_srrip_from_drrip(params, &(policy_data->srrip), policy_data);
+      cache_init_srrip_from_drrip(set_indx, params, &(policy_data->srrip), 
+          &(global_data->srrip), policy_data);
       cache_init_brrip_from_drrip(params, &(policy_data->brrip), policy_data);
       
       /* Set policy followed by sample */
@@ -372,7 +395,8 @@ void cache_init_drrip(long long int set_indx, struct cache_params *params, drrip
       break;
 
     case FOLLOWER_SET:
-      cache_init_srrip_from_drrip(params, &(policy_data->srrip), policy_data);
+      cache_init_srrip_from_drrip(set_indx, params, &(policy_data->srrip),
+          &(global_data->srrip), policy_data);
       cache_init_brrip_from_drrip(params, &(policy_data->brrip), policy_data);
       policy_data->following = cache_policy_drrip;
       break;
@@ -442,48 +466,51 @@ void cache_fill_block_drrip(drrip_data *policy_data, drrip_gdata *global_data,
   int way, long long tag, enum cache_block_state_t state, int strm,
   memory_trace  *info)
 {
+  enum cache_policy_t current_policy;
+
   /* Ensure valid arguments */
   assert(policy_data);
   assert(global_data);
 
   assert(policy_data->following == cache_policy_srrip ||
-    policy_data->following == cache_policy_brrip || 
-    policy_data->following == cache_policy_drrip);
-  
-  if (info->pc)
+      policy_data->following == cache_policy_brrip || 
+      policy_data->following == cache_policy_drrip);
+
+  switch (policy_data->following)
   {
-    switch (policy_data->following)
-    {
-      case cache_policy_srrip:
-        /* Increment fill stats for SRRIP */
-        global_data->stats.sample_srrip_fill += 1;
-        SAT_CTR_INC(global_data->psel);
-        break;
+    case cache_policy_srrip:
+      /* Increment fill stats for SRRIP */
+      global_data->stats.sample_srrip_fill += 1;
+      SAT_CTR_INC(global_data->psel);
+      SAT_CTR_INC(global_data->drrip_psel[info->stream]);
+      break;
 
-      case cache_policy_brrip:
-        global_data->stats.sample_brrip_fill += 1;
-        SAT_CTR_DEC(global_data->psel);
-        break;
+    case cache_policy_brrip:
+      global_data->stats.sample_brrip_fill += 1;
+      SAT_CTR_DEC(global_data->psel);
+      SAT_CTR_DEC(global_data->drrip_psel[info->stream]);
+      break;
 
-      case cache_policy_drrip:
-        /* Nothing to do */
-        break;
+    case cache_policy_drrip:
+      /* Nothing to do */
+      break;
 
-      default:
-        panic("Invalid policy function %s line %d\n", __FUNCTION__, __LINE__);
-    }
+    default:
+      panic("Invalid policy function %s line %d\n", __FUNCTION__, __LINE__);
   }
 
 #define CTR_VAL(d)    (SAT_CTR_VAL((d)->brrip.access_ctr))
 #define THRESHOLD(d)  ((d)->brrip.threshold)
 
+  current_policy = GET_CURRENT_POLICY(policy_data, global_data);
+
   /* Fill block in all component policies */
-  switch (GET_CURRENT_POLICY(policy_data, global_data))
+  switch (current_policy)
   {
     case cache_policy_srrip:
-      cache_fill_block_srrip(&(policy_data->srrip), way, tag, state, strm, 
-        info);
-      
+      cache_fill_block_srrip(&(policy_data->srrip), &(global_data->srrip), way, tag, state, strm, 
+          info);
+
       /* For DRRIP, BRRIP access counter is incremented on access to all sets
        * irrespective of the followed policy. So, if followed policy is SRRIP
        * we increment counter here. */
@@ -500,7 +527,7 @@ void cache_fill_block_drrip(drrip_data *policy_data, drrip_gdata *global_data,
       global_data->stats.drrip_srrip_fill += 1;
       global_data->stats.drrip_fill_2     += 1; 
       break;
-    
+
     case cache_policy_brrip:
       /* Find fill RRPV to update stats */
       if (CTR_VAL(global_data) == 0) 
@@ -513,7 +540,7 @@ void cache_fill_block_drrip(drrip_data *policy_data, drrip_gdata *global_data,
       }
 
       cache_fill_block_brrip(&(policy_data->brrip), &(global_data->brrip), way,
-        tag, state, strm, info);
+          tag, state, strm, info);
 
       /* Increment fill stats for SRRIP */
       global_data->stats.drrip_brrip_fill += 1;
@@ -539,7 +566,7 @@ int cache_replace_block_drrip(drrip_data *policy_data, drrip_gdata *global_data)
   switch (GET_CURRENT_POLICY(policy_data, global_data))
   {
     case cache_policy_srrip:
-      ret_way = cache_replace_block_srrip(&(policy_data->srrip));
+      ret_way = cache_replace_block_srrip(&(policy_data->srrip), &(global_data->srrip));
       break; 
 
     case cache_policy_brrip:
@@ -594,11 +621,12 @@ void cache_access_block_drrip(drrip_data *policy_data,
   switch (GET_CURRENT_POLICY(policy_data, global_data)) 
   {
     case cache_policy_srrip:
-      cache_access_block_srrip(&(policy_data->srrip), way, strm, info);
+      cache_access_block_srrip(&(policy_data->srrip), &(global_data->srrip), way, strm, info);
       break;
 
     case cache_policy_brrip:
-      cache_access_block_brrip(&(policy_data->brrip), way, strm, info);
+      cache_access_block_brrip(&(policy_data->brrip), &(global_data->brrip), 
+          way, strm, info);
       break;
 
     default:
