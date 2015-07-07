@@ -57,11 +57,11 @@ int main(int argc, char **argv)
     assert(gzread(trc_file, &trace, sizeof(memory_trace)) != -1);
     if (!gzeof(trc_file))
     {
-      if (trace.fill == TRUE && trace.sap_stream)
+      if (trace.fill == TRUE && trace.stream != PS)
       {
         printf("Original Stream %2s ", stream_name[trace.stream]);
-        printf("Phy Address %10lx ", trace.vtl_addr);
-        printf("Vtl Address %10lx ", trace.vtl_addr);
+        printf("Phy Address %10ld ", trace.address);
+        printf("Vtl Address %10ld ", trace.vtl_addr);
         printf("Classified stream  %s\n", sap_stream_name[trace.sap_stream]); 
       }
     }

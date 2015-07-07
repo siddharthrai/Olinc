@@ -48,7 +48,7 @@ do                                                            \
  */
 
 struct str_map_t cache_policy_map = {
-        24,
+        32,
         {
                 { "BYPASS", cache_policy_bypass},
                 { "LRU", cache_policy_lru},
@@ -80,7 +80,8 @@ struct str_map_t cache_policy_map = {
                 { "SAPDBP", cache_policy_sapdbp},
                 { "SAPPRIORITY", cache_policy_sappriority},
                 { "SAPPRIDEPRI", cache_policy_sappridepri},
-                { "CUSOMSRRIP", cache_policy_customsrrip}
+                { "CUSOMSRRIP", cache_policy_customsrrip},
+                { "SHIP", cache_policy_ship}
         }
 };
 
@@ -351,6 +352,14 @@ struct cache_t* cache_init(struct cache_params *params)
         CACHE_SDP_GDATA(cache)->next_schedule = EVENT_SCHEDULE_CYCLE; 
         break;
 
+      case cache_policy_ship:
+        cache_init_ship(set, params, CACHE_SET_DATA_SHIP(cache_set), 
+            CACHE_SHIP_GDATA(cache));
+
+        /* Set SDP event schedule cycle */
+        CACHE_SDP_GDATA(cache)->next_schedule = EVENT_SCHEDULE_CYCLE; 
+        break;
+
       case cache_policy_bypass:
       case cache_policy_cpulast:
         /* Nothing to do */
@@ -607,6 +616,10 @@ void cache_free(struct cache_t *cache)
         cache_free_sdp(set, CACHE_SET_DATA_SDP(cache_set), CACHE_SDP_GDATA(cache));
         break;
 
+      case cache_policy_ship:
+        cache_free_ship(CACHE_SET_DATA_SHIP(cache_set));
+        break;
+
       case cache_policy_bypass:
       case cache_policy_cpulast:
         /* Nothing to do */
@@ -791,6 +804,10 @@ struct cache_block_t * cache_find_block(struct cache_t *cache, int set,
 
     case cache_policy_sdp:
       return cache_find_block_sdp(CACHE_SET_DATA_SDP(CACHE_SET(cache, set)), tag, info);
+      break;
+
+    case cache_policy_ship:
+      return cache_find_block_ship(CACHE_SET_DATA_SHIP(CACHE_SET(cache, set)), tag);
       break;
 
     case cache_policy_bypass:
@@ -1003,6 +1020,11 @@ void cache_fill_block( struct cache_t *cache, int set, int way,
           CACHE_SDP_GDATA(cache), way, tag, state, stream, info);
       break;
 
+    case cache_policy_ship:
+      cache_fill_block_ship(CACHE_SET_DATA_SHIP(CACHE_SET(cache, set)),
+          CACHE_SHIP_GDATA(cache), way, tag, state, stream, info);
+      break;
+
     case cache_policy_bypass:
     case cache_policy_cpulast:
       /* Nothing to do */
@@ -1205,6 +1227,11 @@ void cache_access_block(struct cache_t *cache, int set, int way, int stream,
         CACHE_SDP_GDATA(cache), way, stream, info);
       break;
 
+    case cache_policy_ship:
+      cache_access_block_ship(CACHE_SET_DATA_SHIP(CACHE_SET(cache, set)), 
+        way, stream, info);
+      break;
+
     case cache_policy_bypass:
     case cache_policy_cpulast:
       /* Nothing to do */
@@ -1377,6 +1404,10 @@ int cache_replace_block(struct cache_t *cache, int set, memory_trace *info)
       return cache_replace_block_sdp(CACHE_SET_DATA_SDP(CACHE_SET(cache, set)), 
         CACHE_SDP_GDATA(cache), info);
 
+    case cache_policy_ship:
+      return cache_replace_block_ship(CACHE_SET_DATA_SHIP(CACHE_SET(cache, set)), 
+        CACHE_SHIP_GDATA(cache));
+
     case cache_policy_bypass:
     case cache_policy_cpulast:
       /* Nothing to do */
@@ -1540,6 +1571,10 @@ void cache_set_block(struct cache_t *cache, int set, int way, long long tag,
       return cache_set_block_sdp(CACHE_SET_DATA_SDP(CACHE_SET(cache, set)),
         CACHE_SDP_GDATA(cache), way, tag, state, stream, info);
 
+    case cache_policy_ship:
+      return cache_set_block_ship(CACHE_SET_DATA_SHIP(CACHE_SET(cache, set)),
+        way, tag, state, stream, info);
+
     case cache_policy_bypass:
     case cache_policy_cpulast:
       /* Nothing to do */
@@ -1701,6 +1736,10 @@ struct cache_block_t cache_get_block(struct cache_t *cache, int set, int way,
     case cache_policy_sdp:
       return cache_get_block_sdp(CACHE_SET_DATA_SDP(CACHE_SET(cache, set)),
         CACHE_SDP_GDATA(cache), way, tag_ptr, state_ptr, stream_ptr);
+
+    case cache_policy_ship:
+      return cache_get_block_ship(CACHE_SET_DATA_SHIP(CACHE_SET(cache, set)),
+        way, tag_ptr, state_ptr, stream_ptr);
 
     case cache_policy_bypass:
     case cache_policy_cpulast:

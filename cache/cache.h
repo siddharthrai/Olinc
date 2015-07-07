@@ -64,6 +64,7 @@ extern struct str_map_t cache_block_state_map;
 #define CACHE_SAPPRIORITY_GDATA(cache)  (&(cache->policy_data.sappriority))
 #define CACHE_SAPPRIDEPRI_GDATA(cache)  (&(cache->policy_data.sappridepri))
 #define CACHE_CUSTOMSRRIP_GDATA(cache)  (&(cache->policy_data.customsrrip))
+#define CACHE_SHIP_GDATA(cache)         (&(cache->policy_data.ship))
 
 struct cache_t
 {
@@ -103,6 +104,7 @@ struct cache_t
     customsrrip_gdata customsrrip;
     sappriority_gdata sappriority;
     sappridepri_gdata sappridepri;
+    ship_gdata        ship;
   }policy_data;
 
   struct cache_set_t *sets; /* Cache sets */

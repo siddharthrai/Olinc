@@ -8,8 +8,9 @@
 #define ST(i)                     ((i)->stream)
 #define SSTU(i)                   ((i)->sap_stream == sapsimple_stream_u)
 #define IS_SPILL_ALLOCATED(i)     (ST(i) == CS || ST(i) == BS || ST(i) == PS)
+#define ACCESS_BYPASS(i)          (ST(i) == PS && SSTU(i))
 #define MAX_REUSE                 (64)
-#define INTERVAL                  (5000)
+#define INTERVAL                  (256 * 1024)
 
 InterStreamReuse *reuse_ct_cbk = NULL; /* Callback for CT reuse */
 InterStreamReuse *reuse_cc_cbk = NULL; /* Callback for CC reuse */
@@ -380,6 +381,7 @@ cache_access_status cachesim_incl_cache( cachesim_cache *cache, ub8 addr,
       ret.epoch     = vctm_block.epoch;
       ret.access    = vctm_block.access;
       ret.last_rrpv = vctm_block.last_rrpv;
+      ret.fill_rrpv = vctm_block.fill_rrpv;
 
       /* If current block is valid */
       if (vctm_state != cache_block_invalid)
@@ -2117,7 +2119,8 @@ int main(int argc, char **argv)
           if ((params.stream == NN || ((params.stream == OS) && 
                   (info.stream == XS || info.stream == DS ||
                    info.stream == BS || info.stream == NS ||
-                   info.stream == HS)) || params.stream == info.stream))
+                   info.stream == HS)) || params.stream == info.stream) && 
+              !ACCESS_BYPASS(&info))
           {
             /* Make a cache access */
 #if 0
@@ -2435,7 +2438,7 @@ int main(int argc, char **argv)
 
                 assert(ret.last_rrpv <= MAX_RRPV);
                 assert(ret.stream <= TST);
-
+                
                 per_rrpv_evct[ret.stream][ret.last_rrpv]++;
 
                 /* Issue callback for reuse */
@@ -3681,6 +3684,7 @@ int main(int argc, char **argv)
 #undef USE_INTER_STREAM_CALLBACK
 #undef MAX_CORES
 #undef IS_SPILL_ALLOCATED
+#undef ACCESS_BYPASS
 #undef ST
 #undef SSTU
 #undef BLCKALIGN

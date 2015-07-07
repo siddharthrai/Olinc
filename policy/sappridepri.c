@@ -923,31 +923,6 @@ static void cache_update_interval_end(sappridepri_gdata *global_data)
     global_data->stats.speedup_epoch_count[global_data->speedup_stream] += 1;
     global_data->stats.speedup_count[global_data->speedup_stream] += 1;
     global_data->stats.thrasher_count[global_data->epoch_thrasher[global_data->speedup_stream]] += 1;
-
-    for (i = 0; i <= TST; i++)
-    {
-      if (i != global_data->speedup_stream)
-      {
-        if (get_prob_in_range(0.0F, global_data->per_stream_fprob[i]))
-        {
-          cache_set_stream_fill_rrpv_customsrrip(&(global_data->customsrrip), i, 
-              global_data->customsrrip.max_rrpv);
-        }
-        else
-        {
-          cache_set_stream_fill_rrpv_customsrrip(&(global_data->customsrrip), i, 
-              global_data->customsrrip.max_rrpv - 1);
-        }
-      }
-    }
-  }
-  else
-  {
-    for (i = 0; i <= TST; i++)
-    {
-      cache_set_stream_fill_rrpv_customsrrip(&(global_data->customsrrip), i, 
-          global_data->customsrrip.max_rrpv - 1);
-    }
   }
 
   /* Reset hit counter array */
@@ -1092,6 +1067,34 @@ static void cache_update_interval_end(sappridepri_gdata *global_data)
     else
     {
       global_data->drrip_stream_h[i] = 0;
+    }
+  }
+
+  if (global_data->speedup_stream != NN)
+  {
+    for (i = NN + 1; i <= TST; i++)
+    {
+      if (i != global_data->speedup_stream)
+      {
+        if (get_prob_in_range(0.0F, global_data->per_stream_fprob[i]))
+        {
+          cache_set_stream_fill_rrpv_customsrrip(&(global_data->customsrrip), i, 
+              global_data->customsrrip.max_rrpv);
+        }
+        else
+        {
+          cache_set_stream_fill_rrpv_customsrrip(&(global_data->customsrrip), i, 
+              global_data->customsrrip.max_rrpv - 1);
+        }
+      }
+    }
+  }
+  else
+  {
+    for (i = NN + 1; i <= TST; i++)
+    {
+      cache_set_stream_fill_rrpv_customsrrip(&(global_data->customsrrip), i, 
+          global_data->customsrrip.max_rrpv - 1);
     }
   }
 
@@ -1274,31 +1277,6 @@ void cache_fill_block_sappridepri(sappridepri_data *policy_data,
       FDRRIP(policy_data->following) || FCUSTOMSRRIP(policy_data->following));
 
   /* Increment stream access */
-#if 0
-  if (++global_data->per_stream_access[info->stream] == global_data->per_stream_fprob[info->stream])
-  if (info->stream != global_data->speedup_stream)
-  {
-    if (get_prob_in_range(0.0F, global_data->per_stream_fprob[info->stream]))
-    {
-      global_data->per_stream_access[info->stream]  = 0;
-
-      if (policy_data->following == cache_policy_customsrrip)
-      {
-        cache_set_stream_fill_rrpv_customsrrip(&(global_data->customsrrip), info->stream, 
-            policy_data->customsrrip.max_rrpv);
-      }
-    }
-    else
-    {
-      if (policy_data->following == cache_policy_customsrrip)
-      {
-        cache_set_stream_fill_rrpv_customsrrip(&(global_data->customsrrip), info->stream, 
-            policy_data->customsrrip.max_rrpv - 1);
-      }
-    }
-  }
-#endif
-
   switch (policy_data->following)
   {
     case cache_policy_srrip:

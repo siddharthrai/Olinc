@@ -47,6 +47,12 @@ struct cache_params
   ub4     gsdrrip_streams;        /* Streams for graphics stream aware DRRIP */
   ub1     bs_epoch;               /* TRUE, if only baseline samples are used for epoch */
   ub1     use_step;               /* TRUE, if step function is to be used in sappridepri */
+  ub4     ship_shct_size;         /* Ship signature history table size */
+  ub4     ship_sig_size;          /* Ship signature size */
+  ub4     ship_entry_size;        /* Ship counter width */
+  ub4     ship_use_mem;           /* Ship-mem flag */
+  ub4     ship_use_pc;            /* Ship-pc flag */
+
 };
 
 #endif	/* MEM_SYSTEM_CACHE_H */

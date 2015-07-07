@@ -34,61 +34,93 @@
 #define PSEL_MAX_VAL            (0xfffff)  
 #define PSEL_MID_VAL            (1 << 19)
 
-#define CACHE_UPDATE_BLOCK_STATE(block, tag, va, state_in)    \
-  do                                                            \
-{                                                             \
-  (block)->tag      = (tag);                                  \
-  (block)->vtl_addr = (va);                                   \
-  (block)->state    = (state_in);                             \
+#define CACHE_UPDATE_BLOCK_STATE(block, tag, va, state_in)          \
+do                                                                  \
+{                                                                   \
+  (block)->tag      = (tag);                                        \
+  (block)->vtl_addr = (va);                                         \
+  (block)->state    = (state_in);                                   \
 }while(0)
 
 #define CACHE_CUSTOMSRRIP_INCREMENT_RRPV(head_ptr, tail_ptr, rrpv)  \
-  do                                                                  \
+do                                                                  \
 {                                                                   \
-  int dif = 0;                                                    \
-  \
-  for (int i = rrpv - 1; i >= 0; i--)                             \
-  {                                                               \
-    assert(i <= rrpv);                                            \
-    \
-    if ((head_ptr)[i].head)                                       \
-    {                                                             \
-      if (!dif)                                                   \
-      {                                                           \
-        dif = rrpv - i;                                           \
-      }                                                           \
-      \
-      assert((tail_ptr)[i].head);                                 \
-      (head_ptr)[i + dif].head  = (head_ptr)[i].head;             \
-      (tail_ptr)[i + dif].head  = (tail_ptr)[i].head;             \
-      (head_ptr)[i].head        = NULL;                           \
-      (tail_ptr)[i].head        = NULL;                           \
-      \
-      struct cache_block_t *node = (head_ptr)[i + dif].head;      \
-      \
-      /* point data to new RRPV head */                           \
-      for (; node; node = node->prev)                             \
-      {                                                           \
-        node->data = &(head_ptr[i + dif]);                        \
-      }                                                           \
-    }                                                             \
-    else                                                          \
-    {                                                             \
-      assert(!((tail_ptr)[i].head));                              \
-    }                                                             \
-  }                                                               \
+  int dif = 0;                                                      \
+                                                                    \
+  for (int i = rrpv - 1; i >= 0; i--)                               \
+  {                                                                 \
+    assert(i <= rrpv);                                              \
+                                                                    \
+    if ((head_ptr)[i].head)                                         \
+    {                                                               \
+      if (!dif)                                                     \
+      {                                                             \
+        dif = rrpv - i;                                             \
+      }                                                             \
+                                                                    \
+      assert((tail_ptr)[i].head);                                   \
+      (head_ptr)[i + dif].head  = (head_ptr)[i].head;               \
+      (tail_ptr)[i + dif].head  = (tail_ptr)[i].head;               \
+      (head_ptr)[i].head        = NULL;                             \
+      (tail_ptr)[i].head        = NULL;                             \
+                                                                    \
+      struct cache_block_t *node = (head_ptr)[i + dif].head;        \
+                                                                    \
+      /* point data to new RRPV head */                             \
+      for (; node; node = node->prev)                               \
+      {                                                             \
+        node->data = &(head_ptr[i + dif]);                          \
+      }                                                             \
+    }                                                               \
+    else                                                            \
+    {                                                               \
+      assert(!((tail_ptr)[i].head));                                \
+    }                                                               \
+  }                                                                 \
 }while(0)
 
-#define CACHE_GET_BLOCK_STREAM(block, strm)                   \
-  do                                                            \
-{                                                             \
-  strm = (block)->stream;                                     \
+#define CACHE_CUSTOMSRRIP_SINCREMENT_RRPV(head_ptr, tail_ptr, rrpv, p, g) \
+do                                                                  \
+{                                                                   \
+  int dif = 0;                                                      \
+  struct cache_block_t *node;                                       \
+                                                                    \
+  for (int i = rrpv - 1; i >= 0; i--)                               \
+  {                                                                 \
+    assert(i <= rrpv);                                              \
+                                                                    \
+    if ((head_ptr)[i].head)                                         \
+    {                                                               \
+      if (!dif)                                                     \
+      {                                                             \
+        dif = rrpv - i;                                             \
+      }                                                             \
+                                                                    \
+      node = (head_ptr)[i].head;                                    \
+                                                                    \
+      /* Insert block in to the corresponding RRPV queue */         \
+      CACHE_REMOVE_FROM_QUEUE(node, head_ptr[i], tail_ptr[i]);      \
+      CACHE_APPEND_TO_QUEUE(node, head_ptr[i + dif], tail_ptr[i + dif]);\
+                                                                    \
+      node->data = &(head_ptr[i + dif]);                            \
+    }                                                               \
+    else                                                            \
+    {                                                               \
+      assert(!((tail_ptr)[i].head));                                \
+    }                                                               \
+  }                                                                 \
 }while(0)
 
-#define CACHE_UPDATE_BLOCK_STREAM(block, strm)                \
-  do                                                            \
-{                                                             \
-  (block)->stream = strm;                                     \
+#define CACHE_GET_BLOCK_STREAM(block, strm)                         \
+do                                                                  \
+{                                                                   \
+  strm = (block)->stream;                                           \
+}while(0)
+
+#define CACHE_UPDATE_BLOCK_STREAM(block, strm)                      \
+  do                                                                \
+{                                                                   \
+  (block)->stream = strm;                                           \
 }while(0)
 
 /*
@@ -99,25 +131,63 @@
  * Private Functions
  */
 #define free_list_remove_block(set, blk)                                                    \
-  do                                                                                          \
+  do                                                                                        \
 {                                                                                           \
-  /* Check: free list must be non empty as it contains the current block. */          \
-  assert(CUSTOMSRRIP_DATA_FREE_HEAD(set) && CUSTOMSRRIP_DATA_FREE_HEAD(set));         \
-  \
-  /* Check: current block must be in invalid state */                                 \
-  assert((blk)->state == cache_block_invalid);                                        \
-  \
+  /* Check: free list must be non empty as it contains the current block. */                \
+  assert(CUSTOMSRRIP_DATA_FREE_HEAD(set) && CUSTOMSRRIP_DATA_FREE_HEAD(set));               \
+                                                                                            \
+  /* Check: current block must be in invalid state */                                       \
+  assert((blk)->state == cache_block_invalid);                                              \
+                                                                                            \
   CACHE_REMOVE_FROM_SQUEUE(blk, CUSTOMSRRIP_DATA_FREE_HEAD(set), CUSTOMSRRIP_DATA_FREE_TAIL(set));\
-  \
-  (blk)->next = NULL;                                                                 \
-  (blk)->prev = NULL;                                                                 \
-  \
-  /* Reset block state */                                                             \
-  (blk)->busy     = 0;                                                                \
-  (blk)->cached   = 0;                                                                \
-  (blk)->prefetch = 0;                                                                \
+                                                                                            \
+  (blk)->next = NULL;                                                                       \
+  (blk)->prev = NULL;                                                                       \
+                                                                                            \
+  /* Reset block state */                                                                   \
+  (blk)->busy     = 0;                                                                      \
+  (blk)->cached   = 0;                                                                      \
+  (blk)->prefetch = 0;                                                                      \
 }while(0);
 
+
+int customsrrip_get_min_wayid_from_head(struct cache_block_t *head)
+{
+  struct cache_block_t *node;
+  int    min_wayid = 0xff;
+
+  assert(head);
+
+  node = head;
+
+  while (node)
+  {
+    if (node->way < min_wayid)
+    {
+      min_wayid = node->way;
+    }
+
+    node = node->prev;
+  }
+
+  return min_wayid;
+}
+
+struct cache_block_t* customsrrip_get_minwayid_block(rrip_list *head_ptr,
+        rrip_list *tail_ptr, sb4 rrpv, customsrrip_data *p, 
+        customsrrip_gdata *g)
+{
+  struct  cache_block_t *ret_node;
+  int     min_wayid;
+
+  assert(head_ptr[rrpv].head);
+
+  /* Obtain an minwayid block */
+  min_wayid = customsrrip_get_min_wayid_from_head(head_ptr[rrpv].head);
+  ret_node  = &((p)->blocks[min_wayid]);
+
+  return ret_node;
+}
 
 void cache_init_customsrrip(ub4 set_indx, struct cache_params *params, customsrrip_data *policy_data, 
     customsrrip_gdata *global_data)
@@ -135,8 +205,10 @@ void cache_init_customsrrip(ub4 set_indx, struct cache_params *params, customsrr
         /* Initialize epoch fill counter */
         global_data->epoch_fctr   = NULL;
         global_data->epoch_hctr   = NULL;
-        global_data->epoch_ctctr  = NULL;
-        global_data->epoch_btctr  = NULL;
+        global_data->epoch_ctfctr = NULL;
+        global_data->epoch_cthctr = NULL;
+        global_data->epoch_btfctr = NULL;
+        global_data->epoch_bthctr = NULL;
         global_data->epoch_valid  = NULL;
       }
 
@@ -147,6 +219,7 @@ void cache_init_customsrrip(ub4 set_indx, struct cache_params *params, customsrr
     global_data->max_epoch    = MAX_EPOCH;
     global_data->max_rrpv     = params->max_rrpv;
     global_data->use_ct_hint  = FALSE;
+    global_data->use_bt_hint  = FALSE;
   }
 
   /* For RRIP blocks are organized in per RRPV list */
@@ -276,21 +349,18 @@ void cache_fill_block_customsrrip(customsrrip_data *policy_data, customsrrip_gda
 
   /* Obtain CUSTOMSRRIP specific data */
   block = &(CUSTOMSRRIP_DATA_BLOCKS(policy_data)[way]);
-  block->epoch  = 0;
-  block->access = 0;
+  assert(block);
+
+  block->epoch        = 0;
+  block->access       = 0;
+  block->is_ct_block  = FALSE;
+  block->is_bt_block  = FALSE;
 
   assert(block->stream == 0);
 
   /* Get RRPV to be assigned to the new block */
 
   rrpv = cache_get_fill_rrpv_customsrrip(policy_data, global_data, info, block->epoch);
-
-#if 0
-  if (info && info->spill == TRUE)
-  {
-    rrpv = CUSTOMSRRIP_DATA_SPILL_RRPV(policy_data);
-  }
-#endif
 
   /* If block is not bypassed */
   if (rrpv != BYPASS_RRPV)
@@ -354,6 +424,10 @@ int cache_replace_block_customsrrip(customsrrip_data *policy_data,
     {
       CACHE_CUSTOMSRRIP_INCREMENT_RRPV(CUSTOMSRRIP_DATA_VALID_HEAD(policy_data), 
           CUSTOMSRRIP_DATA_VALID_TAIL(policy_data), rrpv);
+#if 0
+      CACHE_CUSTOMSRRIP_SINCREMENT_RRPV(CUSTOMSRRIP_DATA_VALID_HEAD(policy_data), 
+          CUSTOMSRRIP_DATA_VALID_TAIL(policy_data), rrpv, policy_data, global_data);
+#endif
     }
 
     switch (CUSTOMSRRIP_DATA_CRPOLICY(policy_data))
@@ -431,9 +505,7 @@ void cache_access_block_customsrrip(customsrrip_data *policy_data,
       old_rrpv = (((rrip_list *)(blk->data))->rrpv);
       new_rrpv = old_rrpv;
 
-#if 0
       if (info && blk->stream == info->stream)
-#endif
       {
 #define MX_EP(g)  ((g)->max_epoch)
 
@@ -441,12 +513,22 @@ void cache_access_block_customsrrip(customsrrip_data *policy_data,
 
 #undef MX_EP
       }
-#if 0
       else
       {
         blk->epoch = 0;
+        
+        /* Set inter-stream bits */
+        if (blk->stream == CS && info->stream == TS)
+        {
+          blk->is_ct_block = TRUE;
+        }
+        
+        if (blk->stream == BS && info->stream == TS)
+        {
+          blk->is_bt_block = TRUE;
+        }
       }
-#endif
+#if 0
       if (global_data->use_ct_hint)
       {
         /* Get new RRPV using policy specific function */
@@ -456,13 +538,21 @@ void cache_access_block_customsrrip(customsrrip_data *policy_data,
         }
         else
         {
-          new_rrpv = cache_get_new_rrpv_customsrrip(policy_data, global_data, info, 
+          if (info->stream == TS)
+          {
+            new_rrpv = CUSTOMSRRIP_DATA_MAX_RRPV(policy_data) - 1;
+          }
+          else
+          {
+            new_rrpv = cache_get_new_rrpv_customsrrip(policy_data, global_data, info, 
               blk->epoch, old_rrpv);
+          }
         }
       }
       else
+#endif
       {
-        new_rrpv = cache_get_new_rrpv_customsrrip(policy_data, global_data, info, 
+        new_rrpv = cache_get_new_rrpv_customsrrip(blk, policy_data, global_data, info, 
             blk->epoch, old_rrpv);
       }
 
@@ -491,6 +581,40 @@ void cache_access_block_customsrrip(customsrrip_data *policy_data,
   }
 }
 
+/* Returns TRUE if random number falls in range [lo, hi] */
+static ub1 get_prob_in_range(uf8 lo, uf8 hi)
+{
+  uf8 val;
+  ub1 ret;
+
+  val = (uf8)random() / RAND_MAX;
+
+  if (lo == 1.0F && hi == 1.0F)
+  {
+    ret = TRUE;
+  }
+  else
+  {
+    if (lo == 0.0F && hi == 0.0F)
+    {
+      ret = FALSE;
+    }
+    else
+    {
+      if (val >= lo && val < hi)
+      {
+        ret = TRUE;
+      }
+      else
+      {
+        ret = FALSE;
+      }
+    }
+  }
+
+  return ret;
+}
+
 int cache_get_fill_rrpv_customsrrip(customsrrip_data *policy_data, 
     customsrrip_gdata *global_data, memory_trace *info, ub4 epoch)
 {
@@ -506,6 +630,7 @@ int cache_get_fill_rrpv_customsrrip(customsrrip_data *policy_data,
 
     case cache_policy_customsrrip:
 #define VALID_EPOCH(g, i)  ((g)->epoch_valid && (g)->epoch_valid[(i)->stream])
+
       /* If epoch counter are valid use them to decide fill RRPV */
       if (policy_data->use_epoch && VALID_EPOCH(global_data, info))
       {
@@ -514,6 +639,7 @@ int cache_get_fill_rrpv_customsrrip(customsrrip_data *policy_data,
 
 #define FILL_VAL(g, i, e)  (SAT_CTR_VAL((g)->epoch_fctr[(i)->stream][e]))
 #define HIT_VAL(g, i, e)   (SAT_CTR_VAL((g)->epoch_hctr[(i)->stream][e]))
+#define HIT_PROB(g, i, e)  ((float)HIT_VAL(g, i, e) / FILL_VAL(g, i, e))
 
         if (FILL_VAL(global_data, info, epoch) > 32 * HIT_VAL(global_data, info, epoch))
         {
@@ -527,20 +653,21 @@ int cache_get_fill_rrpv_customsrrip(customsrrip_data *policy_data,
 
 #undef FILL_VAL
 #undef HIT_VAL
+#undef HIT_PROB
       }
       else
       {
         ret_rrpv =  global_data->fill_rrpv[info->stream];
       }
-
+#if 0
       if (global_data->use_ct_hint)
       {
-        if (info->stream != CS && info->stream != PS)
+        if (info->stream != CS && info->stream != PS && info->stream != TS)
         {
           ret_rrpv = CUSTOMSRRIP_DATA_MAX_RRPV(policy_data);
         }
       }
-
+#endif
       return ret_rrpv;
 
 #undef VALID_EPOCH
@@ -560,7 +687,8 @@ int cache_get_replacement_rrpv_customsrrip(customsrrip_data *policy_data)
   return CUSTOMSRRIP_DATA_MAX_RRPV(policy_data);
 }
 
-int cache_get_new_rrpv_customsrrip(customsrrip_data *policy_data, customsrrip_gdata *global_data, 
+int cache_get_new_rrpv_customsrrip(struct cache_block_t *block, 
+    customsrrip_data *policy_data, customsrrip_gdata *global_data, 
     memory_trace *info, ub4 epoch, ub4 old_rrpv)
 {
   sb4 ret_rrpv;
@@ -568,23 +696,48 @@ int cache_get_new_rrpv_customsrrip(customsrrip_data *policy_data, customsrrip_gd
   ret_rrpv = 0;
 
 #define VALID_EPOCH(g, i) ((g)->epoch_valid && (g)->epoch_valid[(i)->stream])
+
   /* If epoch counter is valid use epoch based DBP */
   if (policy_data->use_epoch && VALID_EPOCH(global_data, info))
   {
     assert(global_data->epoch_fctr[info->stream]);
     assert(global_data->epoch_hctr[info->stream]);
+    assert(global_data->epoch_ctfctr);
+    assert(global_data->epoch_cthctr);
 
-#define FILL_VAL(g, i, e)  (SAT_CTR_VAL((g)->epoch_fctr[(i)->stream][e]))
-#define HIT_VAL(g, i, e)   (SAT_CTR_VAL((g)->epoch_hctr[(i)->stream][e]))
+#define CT(b)                 ((b)->is_ct_block)
+#define CTFILL_VAL(g, e)      (SAT_CTR_VAL((g)->epoch_ctfctr[e]))
+#define SFILL_VAL(g, i, e)    (SAT_CTR_VAL((g)->epoch_fctr[(i)->stream][e]))
+#define FILL_VAL(b, g, i, e)  (CT(b) ? CTFILL_VAL(g, e) : SFILL_VAL(g, i, e))
+#define CTHIT_VAL(g, e)       (SAT_CTR_VAL((g)->epoch_cthctr[e]))
+#define SHIT_VAL(g, i, e)     (SAT_CTR_VAL((g)->epoch_hctr[(i)->stream][e]))
+#define HIT_VAL(b, g, i, e)   (CT(b) ? CTHIT_VAL(g, e) : SHIT_VAL(g, i, e))
+#define HIT_PROB(b, g, i, e)  ((float)HIT_VAL(b, g, i, e) / FILL_VAL(b, g, i, e))
+#define STHR(b, g, i, e)      (32 * HIT_VAL(b, g, i, e))
+#define CTTHR(b, g, i, e)     (32 * HIT_VAL(b, g, i, e))
+#define THR_VAL(b, g, i, e)   (CT(b) ? CTTHR(b, g, i, e) : STHR(b, g, i, e))
 
-    if (FILL_VAL(global_data, info, epoch) > 32 * HIT_VAL(global_data, info, epoch))
+#if 0
+    if (get_prob_in_range(0.0F, HIT_PROB(block, global_data, info, epoch)) == FALSE)
+#endif
+
+    if (FILL_VAL(block, global_data, info, epoch) > THR_VAL(block, global_data, info, epoch))
     {
       ret_rrpv = CUSTOMSRRIP_DATA_MAX_RRPV(policy_data);
       global_data->thrasher_hdemote[info->stream] += 1;
     }
 
+#undef CT
+#undef CTFILL_VAL
+#undef SFILL_VAL
 #undef FILL_VAL
+#undef CTHIT_VAL
+#undef SHIT_VAL
 #undef HIT_VAL
+#undef HIT_PROB
+#undef STHR
+#undef CTTHR
+#undef THR_VAL
   }
 
 #undef VALID_EPOCH

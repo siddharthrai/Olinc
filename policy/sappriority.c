@@ -27,10 +27,11 @@
 #include "sappriority.h"
 #include "zlib.h"
 
-#define MIN_EPOCH     (0)
-#define MAX_EPOCH     (10)
-#define EPOCH_COUNT   (MAX_EPOCH - MIN_EPOCH + 1)
-#define INTERVAL_SIZE (1000)
+#define MIN_EPOCH               (0)
+#define MAX_EPOCH               (10)
+#define EPOCH_COUNT             (MAX_EPOCH - MIN_EPOCH + 1)
+#define INTERVAL_SIZE           (1000)
+#define LARGE_INTERVAL_SIZE     (256 * 1024)
 
 #define PSEL_WIDTH              (10)
 #define PSEL_MIN_VAL            (0x00)  
@@ -45,8 +46,11 @@
 #define SRRIP_SAMPLED_SET       (0)
 #define BRRIP_SAMPLED_SET       (1)
 #define DRRIP_SAMPLED_SET       (2)
-#define PS_SAMPLED_SET          (3)
-#define FOLLOWER_SET            (4)
+#define DBP_SAMPLED_SET         (3)
+#define PS_SAMPLED_SET          (4)
+#define CT_SAMPLED_SET          (5)
+#define BT_SAMPLED_SET          (6)
+#define FOLLOWER_SET            (7)
 
 #define SIGN_SIZE               (14)
 #define REGION_SIZE             (14)
@@ -148,6 +152,21 @@ static ub4 get_set_type_sappriority(long long int indx)
     return DRRIP_SAMPLED_SET;
   }
 #endif
+
+  if (lsb_bits == msb_bits && mid_bits == 2)
+  {
+    return CT_SAMPLED_SET;
+  }
+
+  if (lsb_bits == (~msb_bits & 0x07) && mid_bits == 2)
+  {
+    return BT_SAMPLED_SET;
+  }
+
+  if (lsb_bits == msb_bits && mid_bits == 3)
+  {
+    return DBP_SAMPLED_SET;
+  }
 
   return FOLLOWER_SET;
 }
@@ -299,6 +318,10 @@ static void cache_init_customsrrip_from_sappriority(ub8 set_indx,
         /* Initialize epoch fill counter */
         global_data->epoch_fctr   = sappriority_global_data->epoch_fctr;
         global_data->epoch_hctr   = sappriority_global_data->epoch_hctr;
+        global_data->epoch_ctfctr = sappriority_global_data->epoch_ctfctr;
+        global_data->epoch_cthctr = sappriority_global_data->epoch_cthctr;
+        global_data->epoch_btfctr = sappriority_global_data->epoch_btfctr;
+        global_data->epoch_bthctr = sappriority_global_data->epoch_bthctr;
         global_data->epoch_valid  = sappriority_global_data->epoch_valid;
       }
     }
@@ -307,6 +330,8 @@ static void cache_init_customsrrip_from_sappriority(ub8 set_indx,
     global_data->max_epoch    = MAX_EPOCH; 
     global_data->max_rrpv     = params->max_rrpv; 
     global_data->use_ct_hint  = FALSE;
+    global_data->use_bt_hint  = FALSE;
+    global_data->access_count = 0;
   }
 
   /* Create per rrpv buckets */
@@ -322,7 +347,7 @@ static void cache_init_customsrrip_from_sappriority(ub8 set_indx,
   
   if (sappriority_policy_data->set_type == FOLLOWER_SET)
   {
-    CUSTOMSRRIP_DATA_USE_EPOCH(policy_data) = FALSE;
+    CUSTOMSRRIP_DATA_USE_EPOCH(policy_data) = TRUE;
   }
   else
   {
@@ -503,10 +528,10 @@ void cache_init_sappriority(long long int set_indx, struct cache_params *params,
 
     global_data->epoch_hctr = xcalloc(TST + 1, sizeof(sctr *));
     assert(global_data->epoch_hctr);
-    
+
     global_data->epoch_valid = xcalloc(TST + 1, sizeof(ub1));
     assert(global_data->epoch_valid);
-    
+
     /* Allocate xstream eviction array */
     global_data->epoch_xevict = xcalloc(TST + 1, sizeof(sctr *));
     assert(global_data->epoch_xevict);
@@ -518,12 +543,17 @@ void cache_init_sappriority(long long int set_indx, struct cache_params *params,
     /* Allocate xstream eviction array */
     global_data->thrasher_stream = xcalloc(TST + 1, sizeof(ub1));
     assert(global_data->thrasher_stream);
-    
+
     /* Allocate CT reuse tabe */
     global_data->ctreuse_table = xcalloc(REUSE_TABLE_SIZE, sizeof(ctt));
     assert(global_data->ctreuse_table);
 
     memset(global_data->ctreuse_table, 0, sizeof(ctt) * REUSE_TABLE_SIZE);
+
+    global_data->btreuse_table = xcalloc(REUSE_TABLE_SIZE, sizeof(ctt));
+    assert(global_data->btreuse_table);
+
+    memset(global_data->btreuse_table, 0, sizeof(ctt) * REUSE_TABLE_SIZE);
 
     for (ub1 s = 0; s <= TST; s++)
     {
@@ -532,7 +562,7 @@ void cache_init_sappriority(long long int set_indx, struct cache_params *params,
 
       global_data->epoch_hctr[s] = xcalloc(EPOCH_COUNT, sizeof(sctr));
       assert(global_data->epoch_hctr[s]);
-      
+
       global_data->epoch_valid[s] = FALSE;
 
       for (ub1 i = 0; i < EPOCH_COUNT; i++)
@@ -560,10 +590,41 @@ void cache_init_sappriority(long long int set_indx, struct cache_params *params,
       global_data->bs_epoch             = params->bs_epoch;
     }
 
+    global_data->epoch_ctfctr = xcalloc(EPOCH_COUNT, sizeof(sctr));
+    assert(global_data->epoch_ctfctr);
+
+    global_data->epoch_cthctr = xcalloc(EPOCH_COUNT, sizeof(sctr));
+    assert(global_data->epoch_cthctr);
+
+    global_data->epoch_btfctr = xcalloc(EPOCH_COUNT, sizeof(sctr));
+    assert(global_data->epoch_btfctr);
+
+    global_data->epoch_bthctr = xcalloc(EPOCH_COUNT, sizeof(sctr));
+    assert(global_data->epoch_bthctr);
+
+    for (ub1 i = 0; i < EPOCH_COUNT; i++)
+    {
+      /* Initialize epoch fill counter */
+      SAT_CTR_INI(global_data->epoch_ctfctr[i], PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
+      SAT_CTR_RST(global_data->epoch_ctfctr[i]);
+
+      SAT_CTR_INI(global_data->epoch_btfctr[i], PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
+      SAT_CTR_RST(global_data->epoch_btfctr[i]);
+
+      /* Initialize epoch eviction counter */
+      SAT_CTR_INI(global_data->epoch_cthctr[i], PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
+      SAT_CTR_RST(global_data->epoch_cthctr[i]);
+
+      SAT_CTR_INI(global_data->epoch_bthctr[i], PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
+      SAT_CTR_RST(global_data->epoch_bthctr[i]);
+    }
+
     global_data->access_interval  = 0;
     global_data->c_count          = 0;
     global_data->t_count          = 0;
     global_data->ct_count         = 0;
+    global_data->dbp_sample_fill  = 0;
+    global_data->dbp_threshold    = 32;
 
     /* Initialize policy selection counter */
     SAT_CTR_INI(global_data->drrip_psel, PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
@@ -581,6 +642,9 @@ void cache_init_sappriority(long long int set_indx, struct cache_params *params,
 
       SAT_CTR_INI(global_data->sappriority_hint[i], ECTR_WIDTH, ECTR_MIN_VAL, ECTR_MAX_VAL);
       SAT_CTR_SET(global_data->sappriority_hint[i], ECTR_MIN_VAL);
+
+      global_data->sappriority_tshit[i] = 0;
+      global_data->sappriority_tnhit[i] = 0;
     }
 
     global_data->stats.sappriority_srrip_samples  = 0;
@@ -691,18 +755,6 @@ void cache_init_sappriority(long long int set_indx, struct cache_params *params,
 
   set_type = get_set_type_sappriority(set_indx);
 
-  /* Initialize SRRIP and BRRIP per policy data using SAPPRIORITY data */
-  cache_init_srrip_from_sappriority(set_indx, params, &(policy_data->srrip), 
-      &(global_data->srrip), policy_data, global_data);
-
-  cache_init_customsrrip_from_sappriority(set_indx, params, &(policy_data->customsrrip), 
-      &(global_data->customsrrip), policy_data, global_data);
-
-  cache_init_brrip_from_sappriority(set_indx, params, &(policy_data->brrip), 
-      &(global_data->brrip), policy_data, global_data);
-  
-  global_data->customsrrip.use_ct_hint = TRUE;
-
   switch (set_type)
   {
     case SRRIP_SAMPLED_SET:
@@ -727,7 +779,19 @@ void cache_init_sappriority(long long int set_indx, struct cache_params *params,
       policy_data->following = cache_policy_drrip;
       break;
 
+    case DBP_SAMPLED_SET:
+      policy_data->following = cache_policy_customsrrip;
+      break;
+
     case PS_SAMPLED_SET:
+      policy_data->following = cache_policy_customsrrip;
+      break;
+
+    case CT_SAMPLED_SET:
+      policy_data->following = cache_policy_customsrrip;
+      break;
+
+    case BT_SAMPLED_SET:
       policy_data->following = cache_policy_customsrrip;
       break;
 
@@ -740,6 +804,16 @@ void cache_init_sappriority(long long int set_indx, struct cache_params *params,
   }
 
   policy_data->set_type = set_type;
+
+  /* Initialize SRRIP and BRRIP per policy data using SAPPRIORITY data */
+  cache_init_srrip_from_sappriority(set_indx, params, &(policy_data->srrip), 
+      &(global_data->srrip), policy_data, global_data);
+
+  cache_init_customsrrip_from_sappriority(set_indx, params, &(policy_data->customsrrip), 
+      &(global_data->customsrrip), policy_data, global_data);
+
+  cache_init_brrip_from_sappriority(set_indx, params, &(policy_data->brrip), 
+      &(global_data->brrip), policy_data, global_data);
 }
 
 /* Free all blocks, sets, head and tail buckets */
@@ -774,9 +848,104 @@ void cache_free_sappriority(unsigned int set_indx, sappriority_data *policy_data
 
 static void cache_update_interval_end(sappriority_gdata *global_data)
 {
+  ub1 i;
+
 #if 0
   cache_dump_sappriority_stats(&(global_data->stats), 0);
 #endif
+
+  /* Reset epoch fill and hit counters  */
+  for (i = 0; i < EPOCH_COUNT; i++)
+  {
+    printf("EPOCHF-C%d:%5d EPOCHH-C%d:%5d EPOCHF-Z%d:%5d EPOCHH-Z%d:%5d EPOCHF-T%d:%5d EPOCHH-T%d:%5d\n", 
+        i, SAT_CTR_VAL(global_data->epoch_fctr[CS][i]), 
+        i, SAT_CTR_VAL(global_data->epoch_hctr[CS][i]),
+        i, SAT_CTR_VAL(global_data->epoch_fctr[ZS][i]), 
+        i, SAT_CTR_VAL(global_data->epoch_hctr[ZS][i]),
+        i, SAT_CTR_VAL(global_data->epoch_fctr[TS][i]), 
+        i, SAT_CTR_VAL(global_data->epoch_hctr[TS][i]));
+
+    for (ub1 j = 0; j < TST + 1; j++)
+    {
+      SAT_CTR_HLF(global_data->epoch_fctr[j][i]);
+      SAT_CTR_HLF(global_data->epoch_hctr[j][i]);
+    }
+  }
+
+  /* Reset epoch fill and hit counters  */
+  for (i = 0; i < EPOCH_COUNT; i++)
+  {
+    printf("EPOCHF-CT%d:%5d EPOCHH-CT%d:%5d EPOCHF-BT%d:%5d EPOCHH-BT%d:%5d\n", 
+        i, SAT_CTR_VAL(global_data->epoch_ctfctr[i]), 
+        i, SAT_CTR_VAL(global_data->epoch_cthctr[i]),
+        i, SAT_CTR_VAL(global_data->epoch_btfctr[i]), 
+        i, SAT_CTR_VAL(global_data->epoch_bthctr[i]));
+
+    SAT_CTR_HLF(global_data->epoch_ctfctr[i]);
+    SAT_CTR_HLF(global_data->epoch_cthctr[i]);
+    SAT_CTR_HLF(global_data->epoch_btfctr[i]);
+    SAT_CTR_HLF(global_data->epoch_bthctr[i]);
+  }
+
+  /* Dump thrasher and speedup stats */
+
+  if (global_data->stats.epoch_count)
+  {
+#define PER_SP(g, s) (((g)->stats.speedup_count[(s)] * 100) / (g)->stats.epoch_count)
+#define PER_TH(g, s) (((g)->stats.thrasher_count[(s)] * 100) / (g)->stats.epoch_count)
+
+    printf("SPC; SPZ; SPT; SPB; SPP\n");
+    printf("%ld; %ld; %ld; %ld; %ld\n", 
+        PER_SP(global_data, CS), PER_SP(global_data, ZS), PER_SP(global_data, TS),
+        PER_SP(global_data, BS), PER_SP(global_data, PS)); 
+
+    printf("THC; THZ; THT; THB; THP\n");
+    printf("%ld; %ld; %ld; %ld; %ld\n", 
+        PER_TH(global_data, CS),PER_TH(global_data, ZS), PER_TH(global_data, TS),
+        PER_TH(global_data, BS), PER_TH(global_data, PS)); 
+  }
+
+#define VAL_SHT(s, t) ((s)->speedup_srrip_hit[(t)])       
+#define VAL_PHT(s, t) ((s)->speedup_ps_hit[(t)])       
+#define RATIO(v, s)   ((v == 0.0F) && (s == 0.0F) ? 1 : ((s) == 0.0F) ? 0.0F : (v) / (s))
+#define PHBYSH(s, t)  (RATIO((float)VAL_PHT(s, t), (float)VAL_SHT(s, t)))
+#define SVAL_SHT(s)   ((s)->sample_srrip_hit)       
+#define SVAL_PHT(s)   ((s)->sample_ps_hit)       
+#define SPHBYSH(s)    (RATIO((float)SVAL_PHT(s), (float)SVAL_SHT(s)))
+
+  for (i = NN + 1; i <= TST; i++)
+  {
+    if (global_data->speedup_stream != NN)
+    {
+      global_data->stats.speedup_phbysh[i]      += PHBYSH(&(global_data->stats), i);
+      global_data->stats.speedup_ps_thit[i]     += global_data->stats.speedup_ps_hit[i];
+      global_data->stats.speedup_srrip_thit[i]  += global_data->stats.speedup_srrip_hit[i];
+    }
+
+    global_data->stats.speedup_ps_hit[i]       = 0;
+    global_data->stats.speedup_srrip_hit[i]    = 0;
+  }
+
+  if (global_data->speedup_stream != NN)
+  {
+    global_data->stats.speedup_sphbysh   += SPHBYSH(&(global_data->stats));
+  }
+
+  global_data->stats.sample_ps_hit      = 0;
+  global_data->stats.sample_srrip_hit   = 0;
+
+  printf("CTTABLE: CUSE:%5ld BUSE:%5ld TUSE:%5ld CTUSE:%5ld BTUSE:%5ld\n", global_data->c_count, 
+      global_data->b_count, global_data->t_count, global_data->ct_count, global_data->bt_count);
+
+  printf("PSTHIT-C:%5ld SRRIPTHIT-C:%5ld PSTHIT-Z:%5ld SRRIPTHIT-Z:%5ld PSTHIT-T:%5ld SRRIPTHIT-T:%5ld \n", 
+      global_data->stats.speedup_ps_thit[CS], global_data->stats.speedup_srrip_thit[CS],
+      global_data->stats.speedup_ps_thit[ZS], global_data->stats.speedup_srrip_thit[ZS],
+      global_data->stats.speedup_ps_thit[TS], global_data->stats.speedup_srrip_thit[TS]);
+
+  printf("FWSHIT-C:%5ld FWNHIT-C:%5ld FWSHIT-Z:%5ld FWNHIT-Z:%5ld FWSHIT-T:%5ld FWNHIT-T:%5ld \n", 
+      global_data->sappriority_tshit[CS], global_data->sappriority_tnhit[CS],
+      global_data->sappriority_tshit[ZS], global_data->sappriority_tnhit[ZS],
+      global_data->sappriority_tshit[TS], global_data->sappriority_tnhit[TS]);
 
   /* Reset old thrasher flag for all streams */
   for (ub1 i = 0; i < TST + 1; i++)
@@ -839,12 +1008,14 @@ static void cache_update_interval_end(sappriority_gdata *global_data)
     }                                       \
   }while(0)
 
+#define SSTRM(g)  ((g)->speedup_stream)
+#define ETHR(g)   ((g)->epoch_thrasher[SSTRM(g)])
+
   /* Obtain stream to be spedup */
   ub4 val;
   ub1 new_stream;
   ub1 old_stream;
   ub1 stream_rank[MAX_RANK];
-  ub1 i;
 
   val         = 0;
   new_stream  = NN;
@@ -884,7 +1055,7 @@ static void cache_update_interval_end(sappriority_gdata *global_data)
       cache_set_stream_fill_rrpv_customsrrip(&(global_data->customsrrip), 
           old_stream, (global_data->customsrrip).max_rrpv - 1);
     }
-  
+
     if (new_stream != NN)
     {
       cache_set_stream_fill_rrpv_customsrrip(&(global_data->customsrrip), 
@@ -902,6 +1073,9 @@ static void cache_update_interval_end(sappriority_gdata *global_data)
     global_data->stats.thrasher_count[global_data->epoch_thrasher[global_data->speedup_stream]] += 1;
   }
 
+  printf("SPDSTRM:%5d THRSTRM:%5d\n", global_data->speedup_stream, 
+      ETHR(global_data));
+
   /* Reset hit counter array */
   for (i = 0; i < TST + 1; i++)
   {
@@ -911,80 +1085,26 @@ static void cache_update_interval_end(sappriority_gdata *global_data)
     global_data->epoch_valid[i] = FALSE;
   }
 
-#define SSTRM(g)  ((g)->speedup_stream)
-#define ETHR(g)   ((g)->epoch_thrasher[SSTRM(g)])
-
   /* Set thrashing stream corresponding to selected stream valid */
   assert(ETHR(global_data) <= TST);
 
   if (SSTRM(global_data) != NN)
   {
-    global_data->epoch_valid[ETHR(global_data)] = TRUE;   
-  }
-
-  printf("SPDSTRM:%5d THRSTRM:%5d\n", global_data->speedup_stream, 
-      ETHR(global_data));
-
-  /* Reset epoch fill and hit counters  */
-  for (i = 0; i < EPOCH_COUNT; i++)
-  {
-    printf("EPOCHF-C%d:%5d EPOCHH-C%d:%5d EPOCHF-Z%d:%5d EPOCHH-Z%d:%5d EPOCHF-T%d:%5d EPOCHH-T%d:%5d\n", 
-        i, SAT_CTR_VAL(global_data->epoch_fctr[CS][i]), 
-        i, SAT_CTR_VAL(global_data->epoch_hctr[CS][i]),
-        i, SAT_CTR_VAL(global_data->epoch_fctr[ZS][i]), 
-        i, SAT_CTR_VAL(global_data->epoch_hctr[ZS][i]),
-        i, SAT_CTR_VAL(global_data->epoch_fctr[TS][i]), 
-        i, SAT_CTR_VAL(global_data->epoch_hctr[TS][i]));
-
-    for (ub1 j = 0; j < TST + 1; j++)
+    if (SSTRM(global_data) == TS)
     {
-      SAT_CTR_HLF(global_data->epoch_fctr[j][i]);
-      SAT_CTR_HLF(global_data->epoch_hctr[j][i]);
+      global_data->epoch_valid[ETHR(global_data)] = TRUE;   
+      global_data->customsrrip.use_ct_hint = TRUE;
+      global_data->customsrrip.use_bt_hint = TRUE;
+    }
+    else
+    {
+      global_data->epoch_valid[ETHR(global_data)] = FALSE;   
     }
   }
 
-  global_data->access_interval = 0;
-
-  /* Dump thrasher and speedup stats */
-
-  if (global_data->stats.epoch_count)
-  {
-#define PER_SP(g, s) (((g)->stats.speedup_count[(s)] * 100) / (g)->stats.epoch_count)
-#define PER_TH(g, s) (((g)->stats.thrasher_count[(s)] * 100) / (g)->stats.epoch_count)
-
-    printf("SPC; SPZ; SPT; SPB; SPP\n");
-    printf("%ld; %ld; %ld; %ld; %ld\n", 
-        PER_SP(global_data, CS), PER_SP(global_data, ZS), PER_SP(global_data, TS),
-        PER_SP(global_data, BS), PER_SP(global_data, PS)); 
-
-    printf("THC; THZ; THT; THB; THP\n");
-    printf("%ld; %ld; %ld; %ld; %ld\n", 
-        PER_TH(global_data, CS),PER_TH(global_data, ZS), PER_TH(global_data, TS),
-        PER_TH(global_data, BS), PER_TH(global_data, PS)); 
-  }
-
-#define VAL_SHT(s, t) ((s)->speedup_srrip_hit[(t)])       
-#define VAL_PHT(s, t) ((s)->speedup_ps_hit[(t)])       
-#define PHBYSH(s, t)  (VAL_SHT(s, t) ? (float)VAL_PHT(s, t) / VAL_SHT(s, t) : 0)
-#define SVAL_SHT(s)   ((s)->sample_srrip_hit)       
-#define SVAL_PHT(s)   ((s)->sample_ps_hit)       
-#define SPHBYSH(s)    (SVAL_SHT(s) ? (float)SVAL_PHT(s) / SVAL_SHT(s) : 0)
-
-  for (i = NN + 1; i <= TST; i++)
-  {
-    global_data->stats.speedup_phbysh[i]      += PHBYSH(&(global_data->stats), i);
-    global_data->stats.speedup_ps_thit[i]     += global_data->stats.speedup_ps_hit[i];
-    global_data->stats.speedup_srrip_thit[i]  += global_data->stats.speedup_srrip_hit[i];
-    global_data->stats.speedup_ps_hit[i]       = 0;
-    global_data->stats.speedup_srrip_hit[i]    = 0;
-  }
-
-  global_data->stats.speedup_sphbysh   += SPHBYSH(&(global_data->stats));
-  global_data->stats.sample_ps_hit      = 0;
-  global_data->stats.sample_srrip_hit   = 0;
-
-  printf("CTTABLE: CUSE:%5ld TUSE:%5ld CTUSE:%5ld\n", global_data->c_count, 
-      global_data->t_count, global_data->ct_count);
+  global_data->epoch_valid[TS] = TRUE;   
+  global_data->epoch_valid[BS] = TRUE;   
+  global_data->epoch_valid[ZS] = TRUE;   
 
 #undef ETHR
 #undef SSTRM
@@ -1014,17 +1134,36 @@ static void cache_update_hint_count(sappriority_gdata *global_data, memory_trace
   }
 }
 
+static void cache_update_follower_hit_count(sappriority_gdata *global_data, memory_trace *info)
+{
+  if (SPEEDUP(get_sappriority_stream(info)))
+  {
+    global_data->sappriority_tshit[info->stream] += 1;
+  }
+  else
+  {
+    global_data->sappriority_tnhit[info->stream] += 1;
+  }
+}
+
 #define SIGMAX_VAL          (((1 << SIGN_SIZE) - 1))
 #define SIGNMASK            (SIGMAX_VAL << REGION_SIZE)
 #define SIGNATURE(i)        ((((i)->vtl_addr) & SIGNMASK) >> REGION_SIZE)
-#define C_BIT(g, id)        ((g)->ctreuse_table[id].c_bit)
-#define T_BIT(g, id)        ((g)->ctreuse_table[id].t_bit)
-#define CT_BIT(g, id)       ((g)->ctreuse_table[id].ct_bit)
-#define IS_CT_USE(g, id)    (C_BIT(g, id) == TRUE && T_BIT(g, id) == TRUE)
-#define USE_COUNTED(g, id)  ((g)->ctreuse_table[id].counted)
+#define C_BIT(t, id)        ((t)[id].c_bit)
+#define B_BIT(t, id)        ((t)[id].b_bit)
+#define T_BIT(t, id)        ((t)[id].t_bit)
+#define CT_BIT(t, id)       ((t)[id].ct_bit)
+#define BT_BIT(t, id)       ((t)[id].bt_bit)
+#define IS_CT_USE(t, id)    (C_BIT(t, id) == TRUE && T_BIT(t, id) == TRUE)
+#define IS_BT_USE(t, id)    (B_BIT(t, id) == TRUE && T_BIT(t, id) == TRUE)
+#define USE_COUNTED(t, id)  ((t)[id].counted)
 #define C_USE(g)            ((g)->c_count)
+#define B_USE(g)            ((g)->b_count)
 #define T_USE(g)            ((g)->t_count)
 #define CT_USE(g)           ((g)->ct_count)
+#define BT_USE(g)           ((g)->bt_count)
+#define CT_RTABLE(g)        ((g)->ctreuse_table)
+#define BT_RTABLE(g)        ((g)->btreuse_table)
 
 static void update_ct_reuse(memory_trace *info, sappriority_gdata *global_data)
 {
@@ -1032,39 +1171,40 @@ static void update_ct_reuse(memory_trace *info, sappriority_gdata *global_data)
 
   index = SIGNATURE(info);
   
-  if (info->stream == CS && C_BIT(global_data, index) == FALSE)
+  if (info->stream == CS && C_BIT(CT_RTABLE(global_data), index) == FALSE)
   {
-    C_BIT(global_data, index) = TRUE;
+    C_BIT(CT_RTABLE(global_data), index) = TRUE;
 
     C_USE(global_data) += 1;
   }
 
-  if (info->stream == TS && T_BIT(global_data, index) == FALSE)
+  if (info->stream == TS && T_BIT(CT_RTABLE(global_data), index) == FALSE)
   {
-    T_BIT(global_data, index) = TRUE;
+    T_BIT(CT_RTABLE(global_data), index) = TRUE;
 
     T_USE(global_data) += 1;
   }
 
-  if (IS_CT_USE(global_data, index))
+  if (IS_CT_USE(CT_RTABLE(global_data), index))
   {
-    if (USE_COUNTED(global_data, index) == FALSE)
+    if (USE_COUNTED(CT_RTABLE(global_data), index) == FALSE)
     {
       assert(C_USE(global_data) > 0 && T_USE(global_data) > 0); 
 
-      CT_BIT(global_data, index) = TRUE;
+      CT_BIT(CT_RTABLE(global_data), index) = TRUE;
 
       C_USE(global_data) -= 1;
       T_USE(global_data) -= 1;
 
-      USE_COUNTED(global_data, index) = TRUE;
+      USE_COUNTED(CT_RTABLE(global_data), index) = TRUE;
     }
 
     CT_USE(global_data) += 1;
   }
 }
 
-static ub1 is_ct_block(memory_trace *info, sappriority_gdata *global_data)
+static ub1 is_ct_block(memory_trace *info, sappriority_data *policy_data, 
+    sappriority_gdata *global_data)
 {
   ub8 index;
   ub1 ret;
@@ -1072,7 +1212,62 @@ static ub1 is_ct_block(memory_trace *info, sappriority_gdata *global_data)
   ret   = FALSE;
   index = SIGNATURE(info);
 
-  if (CT_BIT(global_data, index) == TRUE)
+  if (CT_BIT(CT_RTABLE(global_data), index) == TRUE)
+  {
+    ret = TRUE;
+  }
+
+  return ret;
+}
+
+static void update_bt_reuse(memory_trace *info, sappriority_gdata *global_data)
+{
+  ub8 index;
+
+  index = SIGNATURE(info);
+  
+  if (info->stream == BS && B_BIT(BT_RTABLE(global_data), index) == FALSE)
+  {
+    B_BIT(BT_RTABLE(global_data), index) = TRUE;
+
+    B_USE(global_data) += 1;
+  }
+
+  if (info->stream == TS && T_BIT(BT_RTABLE(global_data), index) == FALSE)
+  {
+    T_BIT(BT_RTABLE(global_data), index) = TRUE;
+
+    T_USE(global_data) += 1;
+  }
+
+  if (IS_BT_USE(BT_RTABLE(global_data), index))
+  {
+    if (USE_COUNTED(BT_RTABLE(global_data), index) == FALSE)
+    {
+      assert(B_USE(global_data) > 0 && T_USE(global_data) > 0); 
+
+      BT_BIT(BT_RTABLE(global_data), index) = TRUE;
+
+      B_USE(global_data) -= 1;
+      T_USE(global_data) -= 1;
+
+      USE_COUNTED(BT_RTABLE(global_data), index) = TRUE;
+    }
+
+    BT_USE(global_data) += 1;
+  }
+}
+
+static ub1 is_bt_block(memory_trace *info, sappriority_data *policy_data, 
+    sappriority_gdata *global_data)
+{
+  ub8 index;
+  ub1 ret;
+
+  ret   = FALSE;
+  index = SIGNATURE(info);
+
+  if (BT_BIT(BT_RTABLE(global_data), index) == TRUE)
   {
     ret = TRUE;
   }
@@ -1084,13 +1279,20 @@ static ub1 is_ct_block(memory_trace *info, sappriority_gdata *global_data)
 #undef SIGNMASK
 #undef SIGNATURE
 #undef C_BIT
+#undef B_BIT
 #undef T_BIT
 #undef CT_BIT
+#undef BT_BIT
 #undef IS_CT_USE
+#undef IS_BT_USE
 #undef USE_COUNTED
 #undef C_USE
+#undef B_USE
 #undef T_USE
 #undef CT_USE
+#undef BT_USE
+#undef CT_RTABLE
+#undef BT_RTABLE
 
 struct cache_block_t* cache_find_block_sappriority(sappriority_data *policy_data, 
     sappriority_gdata *global_data, memory_trace *info, long long tag)
@@ -1131,6 +1333,7 @@ end:
     if (++(global_data->access_interval) >= INTERVAL_SIZE)
     {
       cache_update_interval_end(global_data);
+      global_data->access_interval = 0;
     }
   }
   
@@ -1139,11 +1342,16 @@ end:
     update_ct_reuse(info, global_data);
   }
 
+  if (info->stream == TS || (info->stream == BS && info->spill == TRUE))
+  {
+    update_bt_reuse(info, global_data);
+  }
+
   return node;
 }
 
-static void cache_update_hit_epoch_count(sappriority_gdata *global_data, 
-    struct cache_block_t *block)
+static void cache_update_hit_epoch_count(sappriority_data *policy_data, 
+    sappriority_gdata *global_data, struct cache_block_t *block)
 {
   ub1 epoch;
 
@@ -1158,11 +1366,38 @@ static void cache_update_hit_epoch_count(sappriority_gdata *global_data,
     epoch = block->epoch;
   }
 
-  SAT_CTR_INC(global_data->epoch_hctr[block->stream][epoch]);
+  if (policy_data->set_type == CT_SAMPLED_SET)
+  {
+    if (block->is_ct_block)
+    {
+      assert(block->is_bt_block == FALSE);
+
+      SAT_CTR_INC(global_data->epoch_cthctr[epoch]);
+    }
+  }
+  else
+  {
+    if (policy_data->set_type == BT_SAMPLED_SET)
+    {
+      if (block->is_bt_block)
+      {
+        assert(block->is_ct_block == FALSE);
+
+        SAT_CTR_INC(global_data->epoch_bthctr[epoch]);
+      }
+    }
+    else
+    {
+      if (block->is_ct_block == FALSE && block->is_bt_block == FALSE)
+      {
+        SAT_CTR_INC(global_data->epoch_hctr[block->stream][epoch]);
+      }
+    }
+  }
 }
 
-static void cache_update_fill_epoch_count(sappriority_gdata *global_data, 
-    struct cache_block_t *block)
+static void cache_update_fill_epoch_count(sappriority_data *policy_data, 
+    sappriority_gdata *global_data, struct cache_block_t *block)
 {
   ub1 epoch;
 
@@ -1176,8 +1411,35 @@ static void cache_update_fill_epoch_count(sappriority_gdata *global_data,
   {
     epoch = block->epoch;
   }
+  
+  if (policy_data->set_type == CT_SAMPLED_SET)
+  {
+    if (block->is_ct_block)
+    {
+      assert(block->is_bt_block == FALSE);
 
-  SAT_CTR_INC(global_data->epoch_fctr[block->stream][epoch]);
+      SAT_CTR_INC(global_data->epoch_ctfctr[epoch]);
+    }
+  }
+  else
+  {
+    if (policy_data->set_type == BT_SAMPLED_SET)
+    {
+      if (block->is_bt_block)
+      {
+        assert(block->is_ct_block == FALSE);
+
+        SAT_CTR_INC(global_data->epoch_btfctr[epoch]);
+      }
+    }
+    else
+    {
+      if (block->is_ct_block == FALSE && block->is_bt_block == FALSE)
+      {
+        SAT_CTR_INC(global_data->epoch_fctr[block->stream][epoch]);
+      }
+    }
+  }
 }
 
 static void cache_update_xstream_evct_count(sappriority_gdata *global_data, 
@@ -1234,19 +1496,58 @@ void cache_fill_block_sappriority(sappriority_data *policy_data,
   restore_rrpv = FALSE;
 
   /* If block is a CT block */
-  if (info->stream == CS && is_ct_block(info, global_data))
 #if 0
-  if (info->stream == CS)
+  if (policy_data->set_type == CT_SAMPLED_SET)
 #endif
+  {
+    if (global_data->customsrrip.use_ct_hint && info->stream == CS && 
+        info->spill == TRUE && is_ct_block(info, policy_data, global_data))
+    {
+      old_rrpv = global_data->customsrrip.fill_rrpv[info->stream];
+      assert(old_rrpv < global_data->customsrrip.max_rrpv);
+
+      /* Fill block with RRPV 0 */
+      cache_set_stream_fill_rrpv_customsrrip(&(global_data->customsrrip), 
+          info->stream, 0);
+
+      restore_rrpv = TRUE;
+    }
+  }
+
+  /* If block is a BT block */
+#if 0
+  if (policy_data->set_type == BT_SAMPLED_SET)
+#endif
+  {
+    if (global_data->customsrrip.use_bt_hint && info->stream == BS && 
+        info->spill == TRUE && is_bt_block(info, policy_data, global_data))
+    {
+      old_rrpv = global_data->customsrrip.fill_rrpv[info->stream];
+      assert(old_rrpv < global_data->customsrrip.max_rrpv);
+
+      /* Fill block with RRPV 0 */
+      cache_set_stream_fill_rrpv_customsrrip(&(global_data->customsrrip), 
+          info->stream, 0);
+
+      restore_rrpv = TRUE;
+    }
+  }
+
+  /* If block is a CT block */
+  if (policy_data->set_type == DBP_SAMPLED_SET)
   {
     old_rrpv = global_data->customsrrip.fill_rrpv[info->stream];
     assert(old_rrpv < global_data->customsrrip.max_rrpv);
-
+  
     /* Fill block with RRPV 0 */
-    cache_set_stream_fill_rrpv_customsrrip(&(global_data->customsrrip), 
-      info->stream, 0);
+    if (++(global_data->dbp_sample_fill) >= global_data->dbp_threshold)
+    {
+      cache_set_stream_fill_rrpv_customsrrip(&(global_data->customsrrip), 
+          info->stream, 0);
 
-    restore_rrpv = TRUE;
+      global_data->dbp_sample_fill = 0;
+      restore_rrpv = TRUE;
+    }
   }
 
   switch (policy_data->following)
@@ -1351,9 +1652,11 @@ void cache_fill_block_sappriority(sappriority_data *policy_data,
   assert(block);
   
   /* Update epoch counters */
-  if (policy_data->set_type == SRRIP_SAMPLED_SET)
+  if (policy_data->set_type == DBP_SAMPLED_SET || 
+      policy_data->set_type == CT_SAMPLED_SET ||
+      policy_data->set_type == BT_SAMPLED_SET)
   {
-    cache_update_fill_epoch_count(global_data, block);
+    cache_update_fill_epoch_count(policy_data, global_data, block);
 #if 0
     if (++(global_data->access_interval) >= INTERVAL_SIZE)
     {
@@ -1483,9 +1786,11 @@ void cache_access_block_sappriority(sappriority_data *policy_data,
   block = &(policy_data->blocks[way]);
   assert(block);
   
-  if (policy_data->set_type == SRRIP_SAMPLED_SET)
+  if (policy_data->set_type == DBP_SAMPLED_SET || 
+      policy_data->set_type == CT_SAMPLED_SET || 
+      policy_data->set_type == BT_SAMPLED_SET)
   {
-    cache_update_hit_epoch_count(global_data, block);
+    cache_update_hit_epoch_count(policy_data, global_data, block);
   }
 
   switch (GET_CURRENT_POLICY(global_data, policy_data->following)) 
@@ -1513,9 +1818,16 @@ void cache_access_block_sappriority(sappriority_data *policy_data,
   block = &(policy_data->blocks[way]);
   assert(block);
 
-  if (policy_data->set_type == SRRIP_SAMPLED_SET)
+  if (policy_data->set_type == DBP_SAMPLED_SET || 
+      policy_data->set_type == CT_SAMPLED_SET || 
+      policy_data->set_type == BT_SAMPLED_SET)
   {
-    cache_update_fill_epoch_count(global_data, block);
+    cache_update_fill_epoch_count(policy_data, global_data, block);
+  }
+  
+  if (policy_data->set_type == FOLLOWER_SET)
+  {
+    cache_update_follower_hit_count(global_data, info);
   }
 }
 

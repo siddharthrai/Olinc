@@ -270,7 +270,10 @@ typedef enum cache_policy_t
         cache_policy_sappriority,
 
         /* Stream aware dead block predictor policy */
-        cache_policy_sappridepri
+        cache_policy_sappridepri,
+
+        /* Ship policy */
+        cache_policy_ship
 }cache_policy_t;
 
 typedef struct list_head_t

@@ -1,6 +1,37 @@
 #ifndef CACHE_BLOCK_H
 #define CACHE_BLOCK_H
 
+#define CACHE_UPDATE_BLOCK_STATE(block, tag, state_in)        \
+do                                                            \
+{                                                             \
+    (block)->tag   = (tag);                                   \
+    (block)->state = (state_in);                              \
+}while(0)
+
+#define CACHE_GET_BLOCK_STREAM(block, strm)                   \
+do                                                            \
+{                                                             \
+    strm = (block)->stream;                                   \
+}while(0)
+
+#define CACHE_UPDATE_BLOCK_STREAM(block, strm)                \
+do                                                            \
+{                                                             \
+    (block)->stream = strm;                                   \
+}while(0)
+
+#define CACHE_UPDATE_BLOCK_PC(block, pc_in)                   \
+do                                                            \
+{                                                             \
+    (block)->pc = (pc_in);                                    \
+}while(0)
+
+#define CACHE_UPDATE_BLOCK_EVENT(block, event, val)           \
+do                                                            \
+{                                                             \
+    (block)->notify_event[event] = val;                       \
+}while(0)
+
 enum cache_block_state_t
 {
   cache_block_invalid = 0,
@@ -120,6 +151,9 @@ struct cache_block_t
   unsigned long long recency;
 
   unsigned long long pc;
+  
+  /* Ship policy specific signature */
+  unsigned long long ship_sign;
 };
 
 #endif

@@ -114,9 +114,11 @@ typedef struct cache_policy_sappriority_data_t
 
 typedef struct ct_table
 {
-  ub1 c_bit;    /* True, if touched by color block */
-  ub1 t_bit;    /* True, if touched by texture block */
-  ub1 ct_bit;   /* True, if touched by texture block */
+  ub1 c_bit;    /* True, if touched by color stream */
+  ub1 b_bit;    /* True, if touched by blitter stream */
+  ub1 t_bit;    /* True, if touched by texture stream */
+  ub1 ct_bit;   /* True, if touched by CT stream */
+  ub1 bt_bit;   /* True, if touched by BT stream */
   ub1 counted;  /* True if region is already counted */
 }ctt;
 
@@ -133,6 +135,8 @@ typedef struct cache_policy_sappriority_gdata_t
   srrip_gdata       srrip;                      /* SRRIP cache-wide data */
   sdp_gdata         sdp;                        /* SDP cache wide data for SAP like stats */
   sctr              sappriority_hint[TST + 1];  /* Accumulation counter for per-stream speedup */
+  ub8               sappriority_tshit[TST + 1]; /* per-stream hit on speedup */
+  ub8               sappriority_tnhit[TST + 1]; /* per-stream hit without speedup */
   ub8               dbp_sample_fill;            /* Fills in dbp sample */
   ub8               ct_sample_fill;             /* Fills in dbp sample */
   ub8               bt_sample_fill;             /* Fills in dbp sample */
@@ -141,13 +145,18 @@ typedef struct cache_policy_sappriority_gdata_t
 
   sctr **epoch_fctr;                            /* Per stream epoch fill counter */
   sctr **epoch_hctr;                            /* Per-stream epoch hit counter */
-  sctr *epoch_ctctr;                            /* Inter-stream hit counter */
-  sctr *epoch_btctr;                            /* Inter-stream hit counter */
+  sctr *epoch_ctfctr;                           /* Inter-stream hit counter */
+  sctr *epoch_cthctr;                           /* Inter-stream hit counter */
+  sctr *epoch_btfctr;                           /* Inter-stream hit counter */
+  sctr *epoch_bthctr;                           /* Inter-stream hit counter */
 
   ctt  *ctreuse_table;                          /* Color to texture reuse table */
+  ctt  *btreuse_table;                          /* Blitter to texture reuse table */
   ub8   c_count;                                /* #C reuse */
   ub8   t_count;                                /* #T reuse */
+  ub8   b_count;                                /* #B reuse */
   ub8   ct_count;                               /* #CT reuse */
+  ub8   bt_count;                               /* #BT reuse */
   ub8   used_entries;                           /* #entries used */
 
   ub8   follower_fctr[TST + 1];                 /* Per stream follower fill counter */

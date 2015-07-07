@@ -38,6 +38,7 @@
 #include "customsrrip.h"
 #include "sappriority.h"
 #include "sappridepri.h"
+#include "ship.h"
 #include "cache-block.h"
 
 #define CACHE_SET_POLICY(cache_set)           ((cache_set)->policy)
@@ -77,6 +78,7 @@
 #define CACHE_SET_DATA_SAPPRIORITY(cache_set) (&(((cache_set)->policy_data).sappriority))
 #define CACHE_SET_DATA_SAPPRIDEPRI(cache_set) (&(((cache_set)->policy_data).sappridepri))
 #define CACHE_SET_DATA_CUSTOMSRRIP(cache_set) (&(((cache_set)->policy_data).customsrrip))
+#define CACHE_SET_DATA_SHIP(cache_set)        (&(((cache_set)->policy_data).ship))
 
 struct cache_set_t
 {
@@ -119,6 +121,7 @@ struct cache_set_t
     sappriority_data  sappriority;
     sappridepri_data  sappridepri;
     customsrrip_data  customsrrip;
+    ship_data         ship;
   }policy_data;
 };
 

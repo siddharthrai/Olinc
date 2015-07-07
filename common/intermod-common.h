@@ -662,6 +662,7 @@ typedef struct cache_access_status
   sb8 rdis;         /* Current sequence number of the block */
   sb8 prdis;        /* Previous sequence number of the block */
   ub4 last_rrpv;    /* Last RRPV seen by the block */
+  ub4 fill_rrpv;    /* RRPV the block was filled at */
   ub1 is_bt_block;  /* TRUE if block is spilled by blitter */
   ub1 is_ct_block;  /* TRUE if block is spilled by color writer */
   ub1 op;           /* Last operation on block */
