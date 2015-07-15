@@ -3472,7 +3472,7 @@ int main(int argc, char **argv)
             inscnt++;
             (*all_access)++;
 
-            if (!(inscnt % 10000))
+            if (!(inscnt % 100000))
             {
 #if 0
               cout << ".";

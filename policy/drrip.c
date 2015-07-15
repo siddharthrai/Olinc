@@ -62,6 +62,16 @@ do                                                                              
 }while(0);
 
 /* Returns currently followed policy */
+#define PSRRIP                        (cache_policy_srrip)
+#define PBRRIP                        (cache_policy_brrip)
+#define FSRRIP(f)                     (f == cache_policy_srrip)
+#define FBRRIP(f)                     (f == cache_policy_brrip)
+#define FDRRIP(f)                     (f == cache_policy_drrip)
+#define FDYN(f)                       (FDRRIP(f))
+#define SSRRIP(g)                     (SAT_CTR_VAL((g)->drrip_psel) < PSEL_MID_VAL)
+#define DFOLLOW(p, g, f)              ((FSRRIP(f) || (FDYN(f) && SSRRIP(g))) ? PSRRIP : PBRRIP)  
+#define CURRENT_POLICY(p, g, f, s, n) (DFOLLOW(p, g, f))
+#define NEW_POLICY(i)                 (((i)->stream != TS) ? PBRRIP : PSRRIP)
 #define GET_CURRENT_POLICY(d, gd) (((d)->following == cache_policy_srrip ||             \
                                     ((d)->following == cache_policy_drrip &&            \
                                     SAT_CTR_VAL((gd)->psel) < PSEL_MID_VAL)) ?          \
@@ -502,7 +512,11 @@ void cache_fill_block_drrip(drrip_data *policy_data, drrip_gdata *global_data,
 #define CTR_VAL(d)    (SAT_CTR_VAL((d)->brrip.access_ctr))
 #define THRESHOLD(d)  ((d)->brrip.threshold)
 
+#if 0
   current_policy = GET_CURRENT_POLICY(policy_data, global_data);
+#endif
+
+  current_policy = NEW_POLICY(info);
 
   /* Fill block in all component policies */
   switch (current_policy)
@@ -691,6 +705,16 @@ struct cache_block_t cache_get_block_drrip(drrip_data *policy_data, drrip_gdata 
   }
 }
 
+#undef PSRRIP
+#undef PBRRIP
+#undef FSRRIP
+#undef FBRRIP
+#undef FDRRIP
+#undef FDYN
+#undef SSRRIP
+#undef DFOLLOW
+#undef CURRENT_POLICY
+#undef NEW_POLICY
 #undef PSEL_WIDTH
 #undef PSEL_MIN_VAL
 #undef PSEL_MAX_VAL
