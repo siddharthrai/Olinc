@@ -6,9 +6,18 @@
 #define MAX_CORES                 (128)
 #define MAX_RRPV                  (3)
 #define ST(i)                     ((i)->stream)
-#define SSTU(i)                   ((i)->sap_stream == sapsimple_stream_u)
-#define IS_SPILL_ALLOCATED(i)     (ST(i) == CS || ST(i) == BS || ST(i) == PS)
-#define ACCESS_BYPASS(i)          (ST(i) == PS && SSTU(i))
+#define SSTU(i)                   ((i)->spill == TRUE)
+#define CST(i)                    ((i)->stream == CS)
+#define ZST(i)                    ((i)->stream == ZS)
+#define BST(i)                    ((i)->stream == BS)
+#if 0
+#define IS_SPILL_ALLOCATED(i)     (ST(i) == CS || ST(i) == BS || ST(i) == PS || ST(i) == ZS)
+#endif
+#define IS_SPILL_ALLOCATED(i)     (CST(i) || ZST(i) || BST(i))
+#if 0
+#define ACCESS_BYPASS(i)          (!CST(i) && !ZST(i) && !BST(i) && SSTU(i))
+#endif
+#define ACCESS_BYPASS(i)          (FALSE)
 #define MAX_REUSE                 (64)
 #define INTERVAL                  (256 * 1024)
 
@@ -428,12 +437,14 @@ cache_access_status cachesim_incl_cache( cachesim_cache *cache, ub8 addr,
     ret.epoch     = block->epoch;
     ret.access    = block->access;
     ret.last_rrpv = block->last_rrpv;
-    
-    /**/
+
+#if 0    
     if (info->fill == TRUE || info->stream == BS)
+#endif
     {
       cache_access_block(cache->cache, indx, block->way, strm, info);
     }
+#if 0
     else
     {
       /* Obtain old block state */
@@ -446,6 +457,7 @@ cache_access_status cachesim_incl_cache( cachesim_cache *cache, ub8 addr,
       cache_set_block(cache->cache, indx, block->way, vctm_tag, vctm_state, 
         strm, info);
     }
+#endif
 
     return ret;
   }
@@ -466,6 +478,8 @@ void set_cache_params(struct cache_params *params, LChParameters *lcP,
   params->streams       = lcP->streams;
   params->bs_epoch      = lcP->useBs;
   params->use_step      = lcP->useStep;
+  params->sampler_sets  = lcP->samplerSets;
+  params->sampler_ways  = lcP->samplerWays;
 
 #define CS_BYTE(cache_size) (cache_size * 1024)
 #define SS_BYTE(lcP)        (lcP->cacheBlockSize * cache_way)
@@ -3481,14 +3495,14 @@ int main(int argc, char **argv)
 
               sm->dumpValues(cache_sizes[c_cache], 0, CH, stats_stream);
               periodicReset();
-              
+#if 0              
               cout << setw(10) << "ACS: " << per_stream_access[CS] << setw(10) << " AZS: " << per_stream_access[ZS];
               cout << setw(10) << " ATS: " << per_stream_access[TS] << endl;
               cout << setw(10) << "HCS: " << per_stream_hits[CS] << setw(10) << " HZS: " << per_stream_hits[ZS];
               cout << setw(10) << " HTS: " << per_stream_hits[TS] << endl;
-
               CLRSTRUCT(per_stream_hits);
               CLRSTRUCT(per_stream_access);
+#endif
             }
 #undef CH
           }
@@ -3620,11 +3634,11 @@ int main(int argc, char **argv)
       }
 
 #undef CH
-
       printf("Per-stream per-way eviction\n");
 
       for (ub4 i = 0; i <= TST; i++)
       {
+#if 0
         printf("Stream %d\n", i);
 
         for (ub4 j = 0; j < params.ways; j++)
@@ -3632,7 +3646,7 @@ int main(int argc, char **argv)
           printf("%d %lld\n", j, per_way_evct[i][j]);
         }
         printf("\n");
-
+#endif
         /* Deallocate per-way evict array */
         free(per_way_evct[i]);
       }
@@ -3644,6 +3658,7 @@ int main(int argc, char **argv)
   /* Close statistics stream */
   closeStatisticsStream(stats_stream);
   
+#if 0
   printf("Eviction RRPV histogram\n");
 
   for (ub4 i = 0; i <= TST; i++)
@@ -3671,7 +3686,8 @@ int main(int argc, char **argv)
 
     printf("\n");
   }
-  
+#endif  
+
   dump_hist_for_stream(BS);
   dump_hist_for_stream(TS);
   dump_hist_for_stream(ZS);

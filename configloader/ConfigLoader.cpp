@@ -310,6 +310,12 @@ bool ConfigLoader::parseLCSectionParameter(LChParameters *lcP)
     if (!parseDecimalParameter("MaxCacheWays", id, lcP->maxCacheWays))
         return FALSE;
 
+    if (!parseDecimalParameter("SamplerSets", id, lcP->samplerSets))
+        return FALSE;
+
+    if (!parseDecimalParameter("SamplerWays", id, lcP->samplerWays))
+        return FALSE;
+
     if (!parseDecimalParameter("CacheBlockSize", id, lcP->cacheBlockSize))
         return FALSE;
 
@@ -554,6 +560,14 @@ bool ConfigLoader::parseCachePolicy(char *paramName, char *id, enum cache_policy
 
           goto end;
         }
+
+        /*  Return boolean parameter.  */
+        if (!strcmp(auxStr, "SRRIPBYPASS"))
+        {
+          val = cache_policy_srripbypass;
+
+          goto end;
+        }
         
         /*  Return boolean parameter.  */
         if (!strcmp(auxStr, "SRRIPBS"))
@@ -607,6 +621,14 @@ bool ConfigLoader::parseCachePolicy(char *paramName, char *id, enum cache_policy
         if (!strcmp(auxStr, "XSPPIN"))
         {
           val = cache_policy_xsppin;
+
+          goto end;
+        }
+        
+        /*  Return boolean parameter.  */
+        if (!strcmp(auxStr, "STREAMPIN"))
+        {
+          val = cache_policy_streampin;
 
           goto end;
         }
@@ -695,6 +717,14 @@ bool ConfigLoader::parseCachePolicy(char *paramName, char *id, enum cache_policy
         if (!strcmp(auxStr, "SAPPRIDEPRI"))
         {
           val = cache_policy_sappridepri;
+
+          goto end;
+        }
+       
+        /*  Return boolean parameter.  */
+        if (!strcmp(auxStr, "SARP"))
+        {
+          val = cache_policy_sarp;
 
           goto end;
         }

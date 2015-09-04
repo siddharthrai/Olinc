@@ -134,7 +134,9 @@ typedef struct
   ub1       dirty;
   ub1       epoch;
   ub1       is_bt_block;
+  ub1       is_bt_pred;
   ub1       is_ct_block;
+  ub1       is_ct_pred;
   ub8       access;
   ub8       rrpv;
   block_op  op;

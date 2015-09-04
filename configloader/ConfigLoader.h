@@ -76,7 +76,9 @@ struct LChParameters
   ub4   maxCacheWays;           /* Ways per set, 0 for fully associative */
   ub4   max_rrpv;               /* Ways per set, 0 for fully associative */
   ub4   spill_rrpv;             /* RRPV assigned to spills */
-  ub4   threshold;              /* Ways per set, 0 for fully associative */
+  ub4   threshold;              /* Threshold for probabilistic policy */
+  ub4   samplerSets;            /* Sampler sets in sampler based policy */
+  ub4   samplerWays;            /* Sampler ways in sampler based policy */
   ub4   streams;                /* Total number of streams to be simulated */
   sb1  *statFile;               /* Statistics collection file */
   ub1   stream;                 /* Stream to be simulated */

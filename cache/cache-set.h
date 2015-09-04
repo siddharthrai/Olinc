@@ -18,6 +18,7 @@
 #include "pasrrip.h"
 #include "xsp.h"
 #include "xsppin.h"
+#include "streampin.h"
 #include "xspdbp.h"
 #include "brrip.h"
 #include "drrip.h"
@@ -38,7 +39,9 @@
 #include "customsrrip.h"
 #include "sappriority.h"
 #include "sappridepri.h"
+#include "srripbypass.h"
 #include "ship.h"
+#include "sarp.h"
 #include "cache-block.h"
 
 #define CACHE_SET_POLICY(cache_set)           ((cache_set)->policy)
@@ -56,6 +59,7 @@
 #define CACHE_SET_DATA_PASRRIP(cache_set)     (&(((cache_set)->policy_data).pasrrip))
 #define CACHE_SET_DATA_XSP(cache_set)         (&(((cache_set)->policy_data).xsp))
 #define CACHE_SET_DATA_XSPPIN(cache_set)      (&(((cache_set)->policy_data).xsppin))
+#define CACHE_SET_DATA_STREAMPIN(cache_set)   (&(((cache_set)->policy_data).streampin))
 #define CACHE_SET_DATA_XSPDBP(cache_set)      (&(((cache_set)->policy_data).xspdbp))
 #define CACHE_SET_DATA_BRRIP(cache_set)       (&(((cache_set)->policy_data).brrip))
 #define CACHE_SET_DATA_DRRIP(cache_set)       (&(((cache_set)->policy_data).drrip))
@@ -79,6 +83,8 @@
 #define CACHE_SET_DATA_SAPPRIDEPRI(cache_set) (&(((cache_set)->policy_data).sappridepri))
 #define CACHE_SET_DATA_CUSTOMSRRIP(cache_set) (&(((cache_set)->policy_data).customsrrip))
 #define CACHE_SET_DATA_SHIP(cache_set)        (&(((cache_set)->policy_data).ship))
+#define CACHE_SET_DATA_SARP(cache_set)        (&(((cache_set)->policy_data).sarp))
+#define CACHE_SET_DATA_SRRIPBYPASS(cache_set) (&(((cache_set)->policy_data).srripbypass))
 
 struct cache_set_t
 {
@@ -99,6 +105,7 @@ struct cache_set_t
     pasrrip_data      pasrrip;
     xsp_data          xsp;
     xsppin_data       xsppin;
+    streampin_data    streampin;
     xspdbp_data       xspdbp;
     brrip_data        brrip;
     drrip_data        drrip;
@@ -122,6 +129,8 @@ struct cache_set_t
     sappridepri_data  sappridepri;
     customsrrip_data  customsrrip;
     ship_data         ship;
+    sarp_data         sarp;
+    srripbypass_data  srripbypass;
   }policy_data;
 };
 

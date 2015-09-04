@@ -17,8 +17,8 @@
  * USA.
  */
 
-#ifndef MEM_SYSTEM_SRRIP_H
-#define	MEM_SYSTEM_SRRIP_H
+#ifndef MEM_SYSTEM_STREAMPIN_H
+#define	MEM_SYSTEM_STREAMPIN_H
 
 #include "../common/intermod-common.h"
 #include "../common/sat-counter.h"
@@ -26,37 +26,46 @@
 #include "rrip.h"
 #include "cache-param.h"
 #include "cache-block.h"
+#include "stream-region.h"
 
-#define MIN_EPOCH     (0)
-#define MAX_EPOCH     (10)
-#define EPOCH_COUNT   (MAX_EPOCH - MIN_EPOCH + 1)
+/* Streams specific to STREAMPIN. STREAMPIN controller remaps global stream id 
+ * to STREAMPIN specific ids */
+typedef enum streampin_stream
+{
+  streampin_stream_u = 0,
+  streampin_stream_x,
+  streampin_stream_y,
+  streampin_stream_p,
+  streampin_stream_q,
+  streampin_stream_r
+}streampin_stream;
 
 /* Head node of a list, which corresponds to a particular RRPV */
-typedef struct cache_list_head_srrip_t
+typedef struct cache_list_head_streampin_t
 {
   ub4 rrpv;
   struct cache_block_t *head;
-}srrip_list;
+}streampin_list;
 
-#define SRRIP_DATA_CFPOLICY(data)   ((data)->current_fill_policy)
-#define SRRIP_DATA_DFPOLICY(data)   ((data)->default_fill_policy)
-#define SRRIP_DATA_CAPOLICY(data)   ((data)->current_access_policy)
-#define SRRIP_DATA_DAPOLICY(data)   ((data)->default_access_policy)
-#define SRRIP_DATA_CRPOLICY(data)   ((data)->current_replacement_policy)
-#define SRRIP_DATA_DRPOLICY(data)   ((data)->default_replacement_policy)
-#define SRRIP_DATA_MAX_RRPV(data)   ((data)->max_rrpv)
-#define SRRIP_DATA_SPILL_RRPV(data) ((data)->spill_rrpv)
-#define SRRIP_DATA_BLOCKS(data)     ((data)->blocks)
-#define SRRIP_DATA_VALID_HEAD(data) ((data)->valid_head)
-#define SRRIP_DATA_VALID_TAIL(data) ((data)->valid_tail)
-#define SRRIP_DATA_FREE_HLST(data)  ((data)->free_head)
-#define SRRIP_DATA_FREE_TLST(data)  ((data)->free_tail)
-#define SRRIP_DATA_FREE_HEAD(data)  ((data)->free_head->head)
-#define SRRIP_DATA_FREE_TAIL(data)  ((data)->free_tail->head)
-#define SRRIP_DATA_USE_EPOCH(data)  ((data)->use_epoch)
+#define STREAMPIN_DATA_CFPOLICY(data)   ((data)->current_fill_policy)
+#define STREAMPIN_DATA_DFPOLICY(data)   ((data)->default_fill_policy)
+#define STREAMPIN_DATA_CAPOLICY(data)   ((data)->current_access_policy)
+#define STREAMPIN_DATA_DAPOLICY(data)   ((data)->default_access_policy)
+#define STREAMPIN_DATA_CRPOLICY(data)   ((data)->current_replacement_policy)
+#define STREAMPIN_DATA_DRPOLICY(data)   ((data)->default_replacement_policy)
+#define STREAMPIN_DATA_SET_INDEX(data)  ((data)->set_idx)
+#define STREAMPIN_DATA_MAX_RRPV(data)   ((data)->max_rrpv)
+#define STREAMPIN_DATA_WAYS(data)       ((data)->ways)
+#define STREAMPIN_DATA_BLOCKS(data)     ((data)->blocks)
+#define STREAMPIN_DATA_VALID_HEAD(data) ((data)->valid_head)
+#define STREAMPIN_DATA_VALID_TAIL(data) ((data)->valid_tail)
+#define STREAMPIN_DATA_FREE_HLST(data)  ((data)->free_head)
+#define STREAMPIN_DATA_FREE_TLST(data)  ((data)->free_tail)
+#define STREAMPIN_DATA_FREE_HEAD(data)  ((data)->free_head->head)
+#define STREAMPIN_DATA_FREE_TAIL(data)  ((data)->free_tail->head)
 
 /* RRIP specific data */
-typedef struct cache_policy_srrip_data_t
+typedef struct cache_policy_streampin_data_t
 {
   cache_policy_t current_fill_policy;         /* If non-default fill policy is enforced */
   cache_policy_t default_fill_policy;         /* Default fill policy */
@@ -64,25 +73,56 @@ typedef struct cache_policy_srrip_data_t
   cache_policy_t default_access_policy;       /* Default fill policy */
   cache_policy_t current_replacement_policy;  /* If non-default fill policy is enforced */
   cache_policy_t default_replacement_policy;  /* Default fill policy */
+  ub4            set_idx;                     /* Set index */
   ub4            max_rrpv;                    /* Maximum RRPV supported */
-  ub4            spill_rrpv;                  /* Spill RRPV supported */
+  ub4            ways;                        /* Number of ways */
   rrip_list     *valid_head;                  /* Head pointers of RRPV specific list */
   rrip_list     *valid_tail;                  /* Tail pointers of RRPV specific list */
   list_head_t   *free_head;                   /* Free list head */
   list_head_t   *free_tail;                   /* Free list tail */
-  ub1            use_epoch;                   /* TRUE, if epoch is used in the policy */
+  ub4            threshold;                   /* Threshold for bimodal policy */
+  ub4            current_ctr;                 /* Threshold for bimodal policy */
+  ub8            fills[TST + 1];              /* Per-stream fills */
+  ub8            max_fills;                   /* Per-stream maximum fills */
+  ub8            min_fills;                   /* Per-stream minimum fills */
   struct cache_block_t *blocks;               /* Actual blocks */
-}srrip_data;
+}streampin_data;
 
-/* SRRIP cache-wide data */
-typedef struct cache_policy_srrip_gdata_t
+/* STREAMPIN cache wide data */
+typedef struct cache_policy_streampin_gdata_t
 {
-  ub1    epoch_count; /* Total supported epochs */
-  ub1    max_epoch;   /* Maximum supported epochs */
-  sctr **epoch_fctr;  /* Epoch-wise fill counter */
-  sctr **epoch_hctr;  /* Epoch-wise hit counter */
-  ub1   *epoch_valid; /* Valid epoch list */
-}srrip_gdata;
+  ub4 bm_ctr;                                 /* Current value of a counter */
+  ub4 bm_thr;                                 /* Bimodal threshold */
+  ub8 access_count;                           /* Total accesses */
+  ub8 access_seq[TST + 1][2];                 /* Accesses between reuse */
+  ub8 per_stream_fill[TST + 1];               /* Fills for each stream */
+  ub8 per_stream_hit[TST + 1];                /* Hits for each stream */
+  ub8 *per_stream_frrpv[TST + 1];             /* #Per-stream fill for each RRPV */
+  ub8 reuse_distance[TST + 1];                /* Reuse distance for each stream */
+  ub8 ct_predicted;                           /* # predicted CT */
+  ub8 bt_predicted;                           /* # predicted BT */
+  ub8 zt_predicted;                           /* # predicted ZT */
+  ub8 ct_evict;                               /* # evicted CT without use */
+  ub8 bt_evict;                               /* # evicted BT without use */
+  ub8 zt_evict;                               /* # evicted ZT without use */
+  ub8 ct_correct;                             /* # CT used by texture */
+  ub8 bt_correct;                             /* # BT used by texture */
+  ub8 zt_correct;                             /* # ZT used by texture */
+  ub8 ct_used;                                /* # used CT */
+  ub8 bt_used;                                /* # used BT */
+  ub8 zt_used;                                /* # used ZT */
+  ub8 ct_use_possible;                        /* # used CT */
+  ub8 bt_use_possible;                        /* # used CT */
+  ub8 zt_use_possible;                        /* # used CT */
+  ub8 ct_block_count;                         /* #CT blocks */ 
+  ub8 bt_block_count;                         /* #BT blocks */ 
+  ub8 zt_block_count;                         /* #ZT blocks */ 
+  struct cs_qnode *ct_blocks;                 /* Hash table of all CT blocks */ 
+  struct cs_qnode *bt_blocks;                 /* Hash table of all BT blocks */ 
+  struct cs_qnode *zt_blocks;                 /* Hash table of all ZT blocks */ 
+  sctr   streampin_hint[TST + 1];             /* Per-stream steedup count */
+  ub1 speedup_stream;                         /* Stream picked for speedup */
+}streampin_gdata;
 
 /*
  *
@@ -98,7 +138,6 @@ typedef struct cache_policy_srrip_gdata_t
  *  
  *  params      (IN)  - Policy specific parameters
  *  policy_data (IN)  - Cache set to be initialized 
- *  global_data (IN)  - Cache-wide data 
  *
  * RETURNS
  *  
@@ -107,8 +146,8 @@ typedef struct cache_policy_srrip_gdata_t
  * NOTES
  */
 
-void cache_init_srrip(ub4 set_indx, struct cache_params *params, 
-    srrip_data *policy_data, srrip_gdata *global_data);
+void cache_init_streampin(int set, struct cache_params *params, streampin_data *policy_data,
+    streampin_gdata *global_data);
 
 /*
  *
@@ -129,7 +168,7 @@ void cache_init_srrip(ub4 set_indx, struct cache_params *params,
  *  Nothing
  */
 
-void cache_free_srrip(srrip_data *policy_data);
+void cache_free_streampin(streampin_data *policy_data);
 
 /*
  *
@@ -144,6 +183,7 @@ void cache_free_srrip(srrip_data *policy_data);
  * PARAMETERS
  *  
  *  policy_data (IN)  - Cache set in which block is to be looked
+ *  global_data (IN)  - Cache-wide policy data 
  *  tag         (IN)  - Block tag
  *
  * RETURNS
@@ -151,7 +191,8 @@ void cache_free_srrip(srrip_data *policy_data);
  *  Pointer to the block 
  */
 
-struct cache_block_t * cache_find_block_srrip(srrip_data *policy_data, long long tag);
+struct cache_block_t* cache_find_block_streampin(streampin_data *policy_data, 
+    streampin_gdata *global_data, long long tag, memory_trace *info);
 
 /*
  *
@@ -166,7 +207,7 @@ struct cache_block_t * cache_find_block_srrip(srrip_data *policy_data, long long
  * PARAMETERS
  *  
  *  policy_data (IN)  - Set of the block
- *  global_data (IN)  - Cache-wide data
+ *  global_data (IN)  - Cache-wide policy data
  *  way         (IN)  - Way of the block
  *  tag         (IN)  - Tag to be set
  *  state       (IN)  - State to be updated
@@ -178,9 +219,9 @@ struct cache_block_t * cache_find_block_srrip(srrip_data *policy_data, long long
  *  Nothing
  */
 
-void cache_fill_block_srrip(srrip_data *policy_data, srrip_gdata *global_data,
-    int way, long long tag, enum cache_block_state_t state, int strm, 
-    memory_trace *info);
+void cache_fill_block_streampin(streampin_data *policy_data, 
+    streampin_gdata *global_data, int way, long long tag, 
+    enum cache_block_state_t state, int strm, memory_trace *info);
 
 /*
  *
@@ -195,7 +236,6 @@ void cache_fill_block_srrip(srrip_data *policy_data, srrip_gdata *global_data,
  * PARAMETERS
  *
  *  policy_data (IN)  - Set of the block 
- *  global_data (IN)  - Cache-wide data
  *
  * RETURNS
  *  
@@ -203,8 +243,7 @@ void cache_fill_block_srrip(srrip_data *policy_data, srrip_gdata *global_data,
  *
  */
 
-int  cache_replace_block_srrip(srrip_data *policy_data, 
-    srrip_gdata *global_data);
+int  cache_replace_block_streampin(streampin_data *policy_data, streampin_gdata *global_data);
 
 /*
  *
@@ -219,7 +258,6 @@ int  cache_replace_block_srrip(srrip_data *policy_data,
  * PARAMETERS
  *  
  *  policy_data (IN)  - Set of the block
- *  global_data (IN)  - Cache-wide data
  *  way         (IN)  - Physical way of the block
  *  strm        (IN)  - Access stream
  *  info        (IN)  - Access info
@@ -230,8 +268,8 @@ int  cache_replace_block_srrip(srrip_data *policy_data,
  *
  */
 
-void cache_access_block_srrip(srrip_data *policy_data, 
-    srrip_gdata *global_data, int way, int strm, memory_trace *info);
+void cache_access_block_streampin(streampin_data *policy_data, streampin_gdata *global_data, 
+    int way, int strm, memory_trace *info);
 
 /*
  *
@@ -255,7 +293,7 @@ void cache_access_block_srrip(srrip_data *policy_data,
  *  Complete block info
  */
 
-struct cache_block_t cache_get_block_srrip(srrip_data *policy_data, int way, 
+struct cache_block_t cache_get_block_streampin(streampin_data *policy_data, int way, 
   long long *tag_ptr, enum cache_block_state_t *state_ptr, int *stream_ptr);
 
 /*
@@ -282,7 +320,7 @@ struct cache_block_t cache_get_block_srrip(srrip_data *policy_data, int way,
  *  Nothing
  */
 
-void cache_set_block_srrip(srrip_data *policy_data, int way, long long tag,
+void cache_set_block_streampin(streampin_data *policy_data, int way, long long tag,
   enum cache_block_state_t state, ub1 stream, memory_trace *info);
 
 /*
@@ -298,8 +336,6 @@ void cache_set_block_srrip(srrip_data *policy_data, int way, long long tag,
  * PARAMETERS
  *  
  *  policy_data (IN)  - Cache set 
- *  global_data (IN)  - Cache-wide data 
- *  info        (IN)  - Access info
  *
  * RETURNS
  *  
@@ -307,8 +343,8 @@ void cache_set_block_srrip(srrip_data *policy_data, int way, long long tag,
  *
  */
 
-int cache_get_fill_rrpv_srrip(srrip_data *policy_data, 
-    srrip_gdata *global_data, memory_trace *info, ub4 epoch);
+int cache_get_fill_rrpv_streampin(streampin_data *policy_data, 
+    streampin_gdata *global_data, memory_trace *info, ub1 *is_x_block);
 
 /*
  *
@@ -329,7 +365,7 @@ int cache_get_fill_rrpv_srrip(srrip_data *policy_data,
  *  Replacement RRPV
  */
 
-int cache_get_replacement_rrpv_srrip(srrip_data *policy_data);
+int cache_get_replacement_rrpv_streampin(streampin_data *policy_data);
 
 /*
  *
@@ -343,20 +379,15 @@ int cache_get_replacement_rrpv_srrip(srrip_data *policy_data);
  *
  * PARAMETERS
  *  
- *  policy_data (IN) - Per-set data
- *  global_data (IN) - Cache-wide data
- *  info        (IN) - Access info
- *  old_rrpv    (IN) - Current RRPV of the block
- *  epoch       (IN) - Current block epoch
+ *  old_rrpv (IN) - Current RRPV of the block
  *
  * RETURNS
  *  
  *  New RRPV
- *
  */
 
-int cache_get_new_rrpv_srrip(srrip_data *policy_data, srrip_gdata *global_data, 
-    memory_trace *info, sb1 old_rrpv, ub4 epoch);
+int cache_get_new_rrpv_streampin(streampin_data *policy_data, streampin_gdata *global_data,
+    int old_rrpv, memory_trace *info);
 
 /*
  *
@@ -378,7 +409,7 @@ int cache_get_new_rrpv_srrip(srrip_data *policy_data, srrip_gdata *global_data,
  *  Block count
  */
 
-int cache_count_block_srrip(srrip_data *policy_data, ub1 strm);
+int cache_count_block_streampin(streampin_data *policy_data, ub1 strm);
 
 /*
  *
@@ -400,7 +431,7 @@ int cache_count_block_srrip(srrip_data *policy_data, ub1 strm);
  *  Nothing
  */
 
-void cache_set_current_fill_policy_srrip(srrip_data *policy_data, cache_policy_t policy);
+void cache_set_current_fill_policy_streampin(streampin_data *policy_data, cache_policy_t policy);
 
 /*
  *
@@ -422,7 +453,7 @@ void cache_set_current_fill_policy_srrip(srrip_data *policy_data, cache_policy_t
  *  Nothing
  */
 
-void cache_set_current_access_policy_srrip(srrip_data *policy_data, cache_policy_t policy);
+void cache_set_current_access_policy_streampin(streampin_data *policy_data, cache_policy_t policy);
 
 /*
  *
@@ -444,6 +475,6 @@ void cache_set_current_access_policy_srrip(srrip_data *policy_data, cache_policy
  *  Nothing
  */
 
-void cache_set_current_replacement_policy_srrip(srrip_data *policy_data, cache_policy_t policy);
+void cache_set_current_replacement_policy_streampin(streampin_data *policy_data, cache_policy_t policy);
 
 #endif	/* MEM_SYSTEM_CACHE_H */

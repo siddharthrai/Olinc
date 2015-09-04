@@ -58,6 +58,7 @@ extern struct str_map_t cache_block_state_map;
 #define CACHE_SRRIPSAGE_GDATA(cache)    (&(cache->policy_data.srripsage))
 #define CACHE_XSP_GDATA(cache)          (&(cache->policy_data.xsp))
 #define CACHE_XSPPIN_GDATA(cache)       (&(cache->policy_data.xsppin))
+#define CACHE_STREAMPIN_GDATA(cache)    (&(cache->policy_data.streampin))
 #define CACHE_XSPDBP_GDATA(cache)       (&(cache->policy_data.xspdbp))
 #define CACHE_SAPSIMPLE_GDATA(cache)    (&(cache->policy_data.sapsimple))
 #define CACHE_SAPDBP_GDATA(cache)       (&(cache->policy_data.sapdbp))
@@ -65,6 +66,8 @@ extern struct str_map_t cache_block_state_map;
 #define CACHE_SAPPRIDEPRI_GDATA(cache)  (&(cache->policy_data.sappridepri))
 #define CACHE_CUSTOMSRRIP_GDATA(cache)  (&(cache->policy_data.customsrrip))
 #define CACHE_SHIP_GDATA(cache)         (&(cache->policy_data.ship))
+#define CACHE_SARP_GDATA(cache)         (&(cache->policy_data.sarp))
+#define CACHE_SRRIPBYPASS_GDATA(cache)  (&(cache->policy_data.srripbypass))
 
 struct cache_t
 {
@@ -98,6 +101,7 @@ struct cache_t
     pasrrip_gdata     pasrrip;
     xsp_gdata         xsp;
     xsppin_gdata      xsppin;
+    streampin_gdata   streampin;
     xspdbp_gdata      xspdbp;
     sapsimple_gdata   sapsimple;
     sapdbp_gdata      sapdbp;
@@ -105,6 +109,8 @@ struct cache_t
     sappriority_gdata sappriority;
     sappridepri_gdata sappridepri;
     ship_gdata        ship;
+    sarp_gdata        sarp;
+    srripbypass_gdata srripbypass;
   }policy_data;
 
   struct cache_set_t *sets; /* Cache sets */

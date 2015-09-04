@@ -8,7 +8,7 @@ DEPDIR = .deps
 BINDIR = .
 ALLCXXSOURCES  = $(wildcard *.cpp ../support/*.cpp ../common/*.cpp)
 CXXSOURCES  = $(filter-out access-phase.cpp bitvec-demo.cpp address-map.cpp address-reuse.cpp, $(ALLCXXSOURCES))
-CXX_INC_DIR   = . ../support
+CXX_INC_DIR   = . ../support ../cache .. ../policy
 
 PROGRAM_TARGET = access-phase address-reuse
 

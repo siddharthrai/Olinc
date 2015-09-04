@@ -54,23 +54,28 @@ typedef double          uf8;
 
 /* Constants for access streams (streams identify GPU units and CPU 
  * independent of cache hierarchy) */
-
 #define NN      (0)         /* Invalid stream */
-#define IS      (1)
-#define CS      (2)
-#define ZS      (3)
-#define TS      (4)
-#define NS      (5)
-#define HS      (6)
-#define BS      (7)
-#define DS      (8)
-#define XS      (9)
+#define IS      (1)         /* Input vertex stream */
+#define CS      (2)         /* Color stream */
+#define ZS      (3)         /* Depth stream */
+#define TS      (4)         /* Texture stream */
+#define NS      (5)         /* Instruction stream */
+#define HS      (6)         /* HZ stream */
+#define BS      (7)         /* Blitter stream */
+#define DS      (8)         /* DAC stream */
+#define XS      (9)         /* Index stream */
 #define PS      (10)        /* CPU stream */
-#define TST     (10)        /* Total streams */
+#define PS1     (11)        /* CPU core1 stream */
+#define PS2     (12)        /* CPU core2 stream */
+#define PS3     (13)        /* CPU core3 stream */
+#define PS4     (14)        /* CPU core4 stream */
+#define DCS     (15)        /* Dynamic color */
+#define DZS     (16)        /* Dynamic depth */
+#define DBS     (17)        /* Dynamic blitter  */
+#define DPS     (18)        /* Dynamic processor*/
+#define OS      (19)        /* Mixed stream (DS, DS, XS, NS, HS etc.) */
+#define TST     (19)        /* Total streams */
 
-#define OS      (TST + 1)   /* Mixed stream (DS, DS, XS, NS, HS) */
-
-/* Constants for private and shared cache */
 #define UNKNOWN (0)
 #define IC      (1)
 #define CC      (2)
@@ -664,7 +669,9 @@ typedef struct cache_access_status
   ub4 last_rrpv;    /* Last RRPV seen by the block */
   ub4 fill_rrpv;    /* RRPV the block was filled at */
   ub1 is_bt_block;  /* TRUE if block is spilled by blitter */
+  ub1 is_bt_pred;   /* TRUE if block is predicted to be BT */
   ub1 is_ct_block;  /* TRUE if block is spilled by color writer */
+  ub1 is_ct_pred;   /* TRUE if block is spilled by color writer */
   ub1 op;           /* Last operation on block */
 }cache_access_status;
 

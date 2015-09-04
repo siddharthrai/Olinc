@@ -254,6 +254,9 @@ typedef enum cache_policy_t
         /* X stream SRRIP */
         cache_policy_xsppin,
         
+        /* SRRIP + block pinning */
+        cache_policy_streampin,
+        
         /* X stream with DBP */
         cache_policy_xspdbp,
 
@@ -273,7 +276,13 @@ typedef enum cache_policy_t
         cache_policy_sappridepri,
 
         /* Ship policy */
-        cache_policy_ship
+        cache_policy_ship,
+
+        /* Ship policy */
+        cache_policy_sarp,
+
+        /* SRRIPBYPASS policy */
+        cache_policy_srripbypass
 }cache_policy_t;
 
 typedef struct list_head_t

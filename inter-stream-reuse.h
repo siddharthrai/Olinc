@@ -9,6 +9,16 @@
 
 using namespace std;
 
+typedef struct interstream_table
+{
+  ub1 c_bit;    /* True, if touched by color stream */
+  ub1 b_bit;    /* True, if touched by blitter stream */
+  ub1 t_bit;    /* True, if touched by texture stream */
+  ub1 ct_bit;   /* True, if touched by CT stream */
+  ub1 bt_bit;   /* True, if touched by BT stream */
+  ub1 counted;  /* True if region is already counted */
+}ist;
+
 /* Cache access callback map */
 class CacheAccessCbkMap
 {
@@ -65,13 +75,20 @@ class CacheAccessCbkMap
 /* Inter stream reuse statistics class */
 class InterStreamReuse
 {
-  CacheAccessCbkMap callback_map;         /* Map of callbacks which are enable */
-  map <ub8, ub8>    block_map;            /* Map of blocks */
+  CacheAccessCbkMap  callback_map;        /* Map of callbacks which are enable */
+  map <ub8, ub8>     block_map;           /* Map of blocks */
   AddressMap        *address_map;         /* Inter stream reuse map */
   RegionTable       *region_table;        /* Region table */
-  ub1               use_va;               /* True, if virtual address is used */
-  ub1               src_stream;           /* Source stream */
-  ub1               tgt_stream;           /* Target stream */
+  ub1                use_va;              /* True, if virtual address is used */
+  ub1                src_stream;          /* Source stream */
+  ub1                tgt_stream;          /* Target stream */
+  ub8                c_count;             /* # color use */
+  ub8                b_count;             /* # blitter use */
+  ub8                t_count;             /* # texture use */
+  ub8                ct_count;            /* # CT reuse */
+  ub8                bt_count;            /* # BT reuse */
+  ist               *ctreuse_table;       /* CT reuse table */
+  ist               *btreuse_table;       /* BT reuse table */
 
   public:
 
@@ -102,6 +119,23 @@ class InterStreamReuse
     use_va        = use_va_in;
     src_stream    = src;
     tgt_stream    = dst;
+
+#define REGION_SIZE         (14)
+#define REUSE_TABLE_SIZE    (1 << REGION_SIZE)
+
+    /* Allocate CT reuse tabe */
+    this->ctreuse_table = (ist *)calloc(REUSE_TABLE_SIZE, sizeof(ist));
+    assert(this->ctreuse_table);
+
+    memset(this->ctreuse_table, 0, sizeof(ist) * REUSE_TABLE_SIZE);
+
+    this->btreuse_table = (ist *)calloc(REUSE_TABLE_SIZE, sizeof(ist));
+    assert(this->btreuse_table);
+
+    memset(this->btreuse_table, 0, sizeof(ist) * REUSE_TABLE_SIZE);
+
+#undef REGION_SIZE
+#undef REUSE_TABLE_SIZE
   }
   
   /*
@@ -325,6 +359,94 @@ class InterStreamReuse
    */
 
   void ExitCbk();
+  
+
+  /*
+   * NAME
+   *
+   *  Update color to texture reuse 
+   *
+   * DESCRIPTION
+   *  
+   *  Collect color to texture inter-stream reuse 
+   *
+   * PARAMETERS
+   *
+   *  info (IN) - Access info
+   *  
+   * RETURNS
+   *
+   *  Nothing
+   *
+   */
+
+  void update_ct_reuse(memory_trace *info);
+
+
+  /*
+   * NAME
+   *  
+   *  Is a color to texture block
+   *
+   * DESCRIPTION
+   *  
+   *  Looks-up reuse table to find if block is color to texture block
+   *
+   * PARAMETERS
+   *
+   *  info (IN) - Access info
+   *  
+   * RETURNS
+   *
+   *  TRUE / FALSE
+   *
+   */
+
+  ub1 is_ct_block(memory_trace *info);
+
+
+  /*
+   * NAME
+   *
+   *  Update blitter to texture reuse 
+   *
+   * DESCRIPTION
+   *  
+   *  Collect blitter to texture inter-stream reuse 
+   *
+   * PARAMETERS
+   *
+   *  info (IN) - Access info
+   *  
+   * RETURNS
+   *
+   *  Nothing
+   *
+   */
+
+  void update_bt_reuse(memory_trace *info);
+
+
+  /*
+   * NAME
+   *  
+   *  Is a blitter to texture block 
+   *
+   * DESCRIPTION
+   *  
+   *  Looks-up reuse table to find if block is blitter to texture block
+   *
+   * PARAMETERS
+   *
+   *  info (IN) - Access info
+   *  
+   * RETURNS
+   *
+   *  TRUE / FALSE
+   *
+   */
+
+  ub1 is_bt_block(memory_trace *info);
 };
 
 #endif

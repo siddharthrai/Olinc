@@ -22,12 +22,15 @@
 #include "libstruct/misc.h"
 #include "libstruct/string.h"
 #include "libmhandle/mhandle.h"
-#include "srrip.h"
+#include "srripbypass.h"
 #include "sap.h"
 
 #define CACHE_SET(cache, set)   (&((cache)->sets[set]))
 #define CACHE_BLOCK(set, way)   (&((set)->blocks[way]))
 #define BYPASS_RRPV             (-1)
+#define SPEEDUP(n)              (n == srripbypass_stream_x)
+#define VALID_BYPASS(g, i)      (SAT_CTR_VAL((g)->srripbypass_hint[(i)->stream]) == 0)
+#define INTERVAL_SIZE           (256 * 1024)
 
 #define PSEL_WIDTH              (20)
 #define PSEL_MIN_VAL            (0x00)  
@@ -42,7 +45,7 @@ do                                                            \
   (block)->state    = (state_in);                             \
 }while(0)
 
-#define CACHE_SRRIP_INCREMENT_RRPV(head_ptr, tail_ptr, rrpv)  \
+#define CACHE_SRRIPBYPASS_INCREMENT_RRPV(head_ptr, tail_ptr, rrpv)  \
 do                                                            \
 {                                                             \
     int dif = 0;                                              \
@@ -88,16 +91,6 @@ do                                                            \
 #define CACHE_UPDATE_BLOCK_STREAM(block, strm)                \
 do                                                            \
 {                                                             \
-  if ((block)->stream == CS && strm != CS)                    \
-  {                                                           \
-    cs_blocks--;                                              \
-  }                                                           \
-                                                              \
-  if (strm == CS && (block)->stream != CS)                    \
-  {                                                           \
-    cs_blocks++;                                              \
-  }                                                           \
-                                                              \
   (block)->stream = strm;                                     \
 }while(0)
 
@@ -112,12 +105,12 @@ do                                                            \
 do                                                                                          \
 {                                                                                           \
         /* Check: free list must be non empty as it contains the current block. */          \
-        assert(SRRIP_DATA_FREE_HEAD(set) && SRRIP_DATA_FREE_HEAD(set));                     \
+        assert(SRRIPBYPASS_DATA_FREE_HEAD(set) && SRRIPBYPASS_DATA_FREE_HEAD(set));         \
                                                                                             \
         /* Check: current block must be in invalid state */                                 \
         assert((blk)->state == cache_block_invalid);                                        \
                                                                                             \
-        CACHE_REMOVE_FROM_SQUEUE(blk, SRRIP_DATA_FREE_HEAD(set), SRRIP_DATA_FREE_TAIL(set));\
+        CACHE_REMOVE_FROM_SQUEUE(blk, SRRIPBYPASS_DATA_FREE_HEAD(set), SRRIPBYPASS_DATA_FREE_TAIL(set));\
                                                                                             \
         (blk)->next = NULL;                                                                 \
         (blk)->prev = NULL;                                                                 \
@@ -129,10 +122,50 @@ do                                                                              
 }while(0);
 
 
-int cs_blocks = 0;
+/* Returns TRUE if random number falls in range [lo, hi] */
+static ub1 get_prob_in_range(uf8 lo, uf8 hi)
+{
+  uf8 val;
+  ub1 ret;
 
-void cache_init_srrip(ub4 set_indx, struct cache_params *params, srrip_data *policy_data, 
-    srrip_gdata *global_data)
+  val = (uf8)random() / RAND_MAX;
+  
+  if (lo == 1.0F && hi == 1.0F)
+  {
+    ret = TRUE;
+  }
+  else
+  {
+    if (lo == 0.0F && hi == 0.0F)
+    {
+      ret = FALSE;
+    }
+    else
+    {
+      if (val >= lo && val < hi)
+      {
+        ret = TRUE;
+      }
+      else
+      {
+        ret = FALSE;
+      }
+    }
+  }
+
+  return ret;
+}
+
+/* Returns SAPPRIORITY stream corresponding to access stream based on stream 
+ * classification algoritm. */
+srripbypass_stream get_srripbypass_stream(memory_trace *info)
+{
+  return (srripbypass_stream)(info->sap_stream);
+}
+
+/* Public interface to initialize SAP statistics */
+void cache_init_srripbypass(ub4 set_indx, struct cache_params *params, srripbypass_data *policy_data, 
+    srripbypass_gdata *global_data)
 {
   /* Ensure valid arguments */
   assert(params);
@@ -149,10 +182,14 @@ void cache_init_srrip(ub4 set_indx, struct cache_params *params, srrip_data *pol
         global_data->epoch_hctr   = NULL;
         global_data->epoch_valid  = NULL;
       }
+
+      SAT_CTR_INI(global_data->srripbypass_hint[s], PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
     }
 
-    global_data->epoch_count  = EPOCH_COUNT;
-    global_data->max_epoch    = MAX_EPOCH;
+    global_data->epoch_count    = EPOCH_COUNT;
+    global_data->max_epoch      = MAX_EPOCH;
+    global_data->access_count   = 0;
+    global_data->speedup_stream = NN;
   }
 
   /* For RRIP blocks are organized in per RRPV list */
@@ -160,90 +197,120 @@ void cache_init_srrip(ub4 set_indx, struct cache_params *params, srrip_data *pol
 #define MEM_ALLOC(size) ((rrip_list *)xcalloc(size, sizeof(rrip_list)))
 
   /* Create per rrpv buckets */
-  SRRIP_DATA_VALID_HEAD(policy_data) = MEM_ALLOC(MAX_RRPV + 1);
-  SRRIP_DATA_VALID_TAIL(policy_data) = MEM_ALLOC(MAX_RRPV + 1);
+  SRRIPBYPASS_DATA_VALID_HEAD(policy_data) = MEM_ALLOC(MAX_RRPV + 1);
+  SRRIPBYPASS_DATA_VALID_TAIL(policy_data) = MEM_ALLOC(MAX_RRPV + 1);
 
 #undef MEM_ALLOC  
 
-  assert(SRRIP_DATA_VALID_HEAD(policy_data));
-  assert(SRRIP_DATA_VALID_TAIL(policy_data));
+  assert(SRRIPBYPASS_DATA_VALID_HEAD(policy_data));
+  assert(SRRIPBYPASS_DATA_VALID_TAIL(policy_data));
 
   /* Set max RRPV for the set */
-  SRRIP_DATA_MAX_RRPV(policy_data)    = MAX_RRPV;
-  SRRIP_DATA_SPILL_RRPV(policy_data)  = params->spill_rrpv;
-  SRRIP_DATA_USE_EPOCH(policy_data)   = FALSE;
+  SRRIPBYPASS_DATA_MAX_RRPV(policy_data)    = MAX_RRPV;
+  SRRIPBYPASS_DATA_SPILL_RRPV(policy_data)  = params->spill_rrpv;
+  SRRIPBYPASS_DATA_USE_EPOCH(policy_data)   = FALSE;
 
   assert(params->spill_rrpv <= MAX_RRPV);
 
   /* Initialize head nodes */
   for (int i = 0; i <= MAX_RRPV; i++)
   {
-    SRRIP_DATA_VALID_HEAD(policy_data)[i].rrpv = i;
-    SRRIP_DATA_VALID_HEAD(policy_data)[i].head = NULL;
-    SRRIP_DATA_VALID_TAIL(policy_data)[i].head = NULL;
+    SRRIPBYPASS_DATA_VALID_HEAD(policy_data)[i].rrpv = i;
+    SRRIPBYPASS_DATA_VALID_HEAD(policy_data)[i].head = NULL;
+    SRRIPBYPASS_DATA_VALID_TAIL(policy_data)[i].head = NULL;
   }
 
   /* Create array of blocks */
-  SRRIP_DATA_BLOCKS(policy_data) = 
+  SRRIPBYPASS_DATA_BLOCKS(policy_data) = 
     (struct cache_block_t *)xcalloc(params->ways, sizeof (struct cache_block_t));
 
 #define MEM_ALLOC(size) ((list_head_t *)xcalloc(size, sizeof(list_head_t)))
 
-  SRRIP_DATA_FREE_HLST(policy_data) = MEM_ALLOC(1);
-  assert(SRRIP_DATA_FREE_HLST(policy_data));
+  SRRIPBYPASS_DATA_FREE_HLST(policy_data) = MEM_ALLOC(1);
+  assert(SRRIPBYPASS_DATA_FREE_HLST(policy_data));
 
-  SRRIP_DATA_FREE_TLST(policy_data) = MEM_ALLOC(1);
-  assert(SRRIP_DATA_FREE_TLST(policy_data));
+  SRRIPBYPASS_DATA_FREE_TLST(policy_data) = MEM_ALLOC(1);
+  assert(SRRIPBYPASS_DATA_FREE_TLST(policy_data));
 
 #undef MEM_ALLOC
 
   /* Initialize array of blocks */
-  SRRIP_DATA_FREE_HEAD(policy_data) = &(SRRIP_DATA_BLOCKS(policy_data)[0]);
-  SRRIP_DATA_FREE_TAIL(policy_data) = &(SRRIP_DATA_BLOCKS(policy_data)[params->ways - 1]);
+  SRRIPBYPASS_DATA_FREE_HEAD(policy_data) = &(SRRIPBYPASS_DATA_BLOCKS(policy_data)[0]);
+  SRRIPBYPASS_DATA_FREE_TAIL(policy_data) = &(SRRIPBYPASS_DATA_BLOCKS(policy_data)[params->ways - 1]);
 
   for (int way = 0; way < params->ways; way++)
   {
-    (&SRRIP_DATA_BLOCKS(policy_data)[way])->way   = way;
-    (&SRRIP_DATA_BLOCKS(policy_data)[way])->state = cache_block_invalid;
-    (&SRRIP_DATA_BLOCKS(policy_data)[way])->next  = way ?
-      (&SRRIP_DATA_BLOCKS(policy_data)[way - 1]) : NULL;
-    (&SRRIP_DATA_BLOCKS(policy_data)[way])->prev  = way < params->ways - 1 ? 
-      (&SRRIP_DATA_BLOCKS(policy_data)[way + 1]) : NULL;
+    (&SRRIPBYPASS_DATA_BLOCKS(policy_data)[way])->way   = way;
+    (&SRRIPBYPASS_DATA_BLOCKS(policy_data)[way])->state = cache_block_invalid;
+    (&SRRIPBYPASS_DATA_BLOCKS(policy_data)[way])->next  = way ?
+      (&SRRIPBYPASS_DATA_BLOCKS(policy_data)[way - 1]) : NULL;
+    (&SRRIPBYPASS_DATA_BLOCKS(policy_data)[way])->prev  = way < params->ways - 1 ? 
+      (&SRRIPBYPASS_DATA_BLOCKS(policy_data)[way + 1]) : NULL;
   }
   
-  /* Set current and default fill policy to SRRIP */
-  SRRIP_DATA_CFPOLICY(policy_data) = cache_policy_srrip;
-  SRRIP_DATA_DFPOLICY(policy_data) = cache_policy_srrip;
-  SRRIP_DATA_CAPOLICY(policy_data) = cache_policy_srrip;
-  SRRIP_DATA_DAPOLICY(policy_data) = cache_policy_srrip;
-  SRRIP_DATA_CRPOLICY(policy_data) = cache_policy_srrip;
-  SRRIP_DATA_DRPOLICY(policy_data) = cache_policy_srrip;
+  /* Set current and default fill policy to SRRIPBYPASS */
+  SRRIPBYPASS_DATA_CFPOLICY(policy_data) = cache_policy_srripbypass;
+  SRRIPBYPASS_DATA_DFPOLICY(policy_data) = cache_policy_srripbypass;
+  SRRIPBYPASS_DATA_CAPOLICY(policy_data) = cache_policy_srripbypass;
+  SRRIPBYPASS_DATA_DAPOLICY(policy_data) = cache_policy_srripbypass;
+  SRRIPBYPASS_DATA_CRPOLICY(policy_data) = cache_policy_srripbypass;
+  SRRIPBYPASS_DATA_DRPOLICY(policy_data) = cache_policy_srripbypass;
   
-  assert(SRRIP_DATA_MAX_RRPV(policy_data) != 0);
+  assert(SRRIPBYPASS_DATA_MAX_RRPV(policy_data) != 0);
 
 #undef MAX_RRPV
 }
 
 /* Free all blocks, sets, head and tail buckets */
-void cache_free_srrip(srrip_data *policy_data)
+void cache_free_srripbypass(srripbypass_data *policy_data)
 {
   /* Free all data blocks */
-  free(SRRIP_DATA_BLOCKS(policy_data));
+  free(SRRIPBYPASS_DATA_BLOCKS(policy_data));
 
   /* Free valid head buckets */
-  if (SRRIP_DATA_VALID_HEAD(policy_data))
+  if (SRRIPBYPASS_DATA_VALID_HEAD(policy_data))
   {
-    free(SRRIP_DATA_VALID_HEAD(policy_data));
+    free(SRRIPBYPASS_DATA_VALID_HEAD(policy_data));
   }
 
   /* Free valid tail buckets */
-  if (SRRIP_DATA_VALID_TAIL(policy_data))
+  if (SRRIPBYPASS_DATA_VALID_TAIL(policy_data))
   {
-    free(SRRIP_DATA_VALID_TAIL(policy_data));
+    free(SRRIPBYPASS_DATA_VALID_TAIL(policy_data));
   }
 }
 
-struct cache_block_t* cache_find_block_srrip(srrip_data *policy_data, long long tag)
+static void cache_update_interval_end(srripbypass_gdata *global_data)
+{
+  ub8 max_speedup;
+  
+  max_speedup = 0;
+  global_data->speedup_stream = NN;
+
+  for (ub1 s = NN; s <= TST; s++)
+  {
+    if (SAT_CTR_VAL(global_data->srripbypass_hint[s]) > max_speedup)
+    {
+       global_data->speedup_stream = s;
+       max_speedup = SAT_CTR_VAL(global_data->srripbypass_hint[s]);
+
+       SAT_CTR_RST(global_data->srripbypass_hint[s]);
+    }
+  }
+}
+
+static void cache_update_hint_count(srripbypass_gdata *global_data, memory_trace *info)
+{
+  assert(info->stream <= TST);
+  
+  if (SPEEDUP(get_srripbypass_stream(info)))
+  {
+    SAT_CTR_INC(global_data->srripbypass_hint[info->stream]);
+  }
+}
+
+struct cache_block_t* cache_find_block_srripbypass(srripbypass_data *policy_data, 
+    srripbypass_gdata *global_data, memory_trace *info, long long tag)
 {
   int     max_rrpv;
   struct  cache_block_t *head;
@@ -254,7 +321,7 @@ struct cache_block_t* cache_find_block_srrip(srrip_data *policy_data, long long 
 
   for (int rrpv = 0; rrpv <= max_rrpv; rrpv++)
   {
-    head = SRRIP_DATA_VALID_HEAD(policy_data)[rrpv].head;
+    head = SRRIPBYPASS_DATA_VALID_HEAD(policy_data)[rrpv].head;
 
     for (node = head; node; node = node->prev)
     {
@@ -266,10 +333,18 @@ struct cache_block_t* cache_find_block_srrip(srrip_data *policy_data, long long 
   }
 
 end:
+  /* Update speedup hint */
+  cache_update_hint_count(global_data, info);
+
+  if (++(global_data->access_count) >= INTERVAL_SIZE)
+  {
+    cache_update_interval_end(global_data);
+  }
+
   return node;
 }
 
-void cache_fill_block_srrip(srrip_data *policy_data, srrip_gdata *global_data,
+void cache_fill_block_srripbypass(srripbypass_data *policy_data, srripbypass_gdata *global_data,
     int way, long long tag, enum cache_block_state_t state, int strm, 
     memory_trace *info)
 {
@@ -280,8 +355,8 @@ void cache_fill_block_srrip(srrip_data *policy_data, srrip_gdata *global_data,
   assert(tag >= 0);
   assert(state != cache_block_invalid);
 
-  /* Obtain SRRIP specific data */
-  block = &(SRRIP_DATA_BLOCKS(policy_data)[way]);
+  /* Obtain SRRIPBYPASS specific data */
+  block = &(SRRIPBYPASS_DATA_BLOCKS(policy_data)[way]);
   block->epoch  = 0;
   block->access = 0;
   
@@ -289,14 +364,7 @@ void cache_fill_block_srrip(srrip_data *policy_data, srrip_gdata *global_data,
 
   /* Get RRPV to be assigned to the new block */
 
-  rrpv = cache_get_fill_rrpv_srrip(policy_data, global_data, info, block->epoch);
-
-#if 0
-  if (info && info->spill == TRUE)
-  {
-    rrpv = SRRIP_DATA_SPILL_RRPV(policy_data);
-  }
-#endif
+  rrpv = cache_get_fill_rrpv_srripbypass(policy_data, global_data, info, block->epoch);
 
   /* If block is not bypassed */
   if (rrpv != BYPASS_RRPV)
@@ -315,14 +383,14 @@ void cache_fill_block_srrip(srrip_data *policy_data, srrip_gdata *global_data,
 
     /* Insert block in to the corresponding RRPV queue */
     CACHE_APPEND_TO_QUEUE(block, 
-        SRRIP_DATA_VALID_HEAD(policy_data)[rrpv], 
-        SRRIP_DATA_VALID_TAIL(policy_data)[rrpv]);
+        SRRIPBYPASS_DATA_VALID_HEAD(policy_data)[rrpv], 
+        SRRIPBYPASS_DATA_VALID_TAIL(policy_data)[rrpv]);
   }
 
-  SRRIP_DATA_CFPOLICY(policy_data) = SRRIP_DATA_DFPOLICY(policy_data);
+  SRRIPBYPASS_DATA_CFPOLICY(policy_data) = SRRIPBYPASS_DATA_DFPOLICY(policy_data);
 }
 
-int cache_replace_block_srrip(srrip_data *policy_data, srrip_gdata *global_data)
+int cache_replace_block_srripbypass(srripbypass_data *policy_data, srripbypass_gdata *global_data)
 {
   struct cache_block_t *block;
   int    rrpv;
@@ -331,31 +399,31 @@ int cache_replace_block_srrip(srrip_data *policy_data, srrip_gdata *global_data)
   unsigned int min_wayid = ~(0);
 
   /* Try to find an invalid block always from head of the free list. */
-  for (block = SRRIP_DATA_FREE_HEAD(policy_data); block; block = block->prev)
+  for (block = SRRIPBYPASS_DATA_FREE_HEAD(policy_data); block; block = block->prev)
   {
     return block->way;
   }
   
   /* Obtain RRPV from where to replace the block */
-  rrpv = cache_get_replacement_rrpv_srrip(policy_data);
+  rrpv = cache_get_replacement_rrpv_srripbypass(policy_data);
 
   /* Ensure rrpv is with in max_rrpv bound */
-  assert(rrpv >= 0 && rrpv <= SRRIP_DATA_MAX_RRPV(policy_data));
+  assert(rrpv >= 0 && rrpv <= SRRIPBYPASS_DATA_MAX_RRPV(policy_data));
 
   if (min_wayid == ~(0))
   {
     /* If there is no block with required RRPV, increment RRPV of all the blocks
      * until we get one with the required RRPV */
-    if (SRRIP_DATA_VALID_HEAD(policy_data)[rrpv].head == NULL)
+    if (SRRIPBYPASS_DATA_VALID_HEAD(policy_data)[rrpv].head == NULL)
     {
-      CACHE_SRRIP_INCREMENT_RRPV(SRRIP_DATA_VALID_HEAD(policy_data), 
-          SRRIP_DATA_VALID_TAIL(policy_data), rrpv);
+      CACHE_SRRIPBYPASS_INCREMENT_RRPV(SRRIPBYPASS_DATA_VALID_HEAD(policy_data), 
+          SRRIPBYPASS_DATA_VALID_TAIL(policy_data), rrpv);
     }
 
-    switch (SRRIP_DATA_CRPOLICY(policy_data))
+    switch (SRRIPBYPASS_DATA_CRPOLICY(policy_data))
     {
-      case cache_policy_srrip:
-        for (block = SRRIP_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
+      case cache_policy_srripbypass:
+        for (block = SRRIPBYPASS_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
         {
           if (!block->busy && block->way < min_wayid)
             min_wayid = block->way;
@@ -364,7 +432,7 @@ int cache_replace_block_srrip(srrip_data *policy_data, srrip_gdata *global_data)
 
       case cache_policy_cpulast:
         /* First try to find a GPU block */
-        for (block = SRRIP_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
+        for (block = SRRIPBYPASS_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
         {
           if (!block->busy && (block->way < min_wayid && block->stream < TST))
             min_wayid = block->way;
@@ -373,7 +441,7 @@ int cache_replace_block_srrip(srrip_data *policy_data, srrip_gdata *global_data)
         /* If there so no GPU replacement candidate, replace CPU block */
         if (min_wayid == ~(0))
         {
-          for (block = SRRIP_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
+          for (block = SRRIPBYPASS_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
           {
             if (!block->busy && (block->way < min_wayid))
               min_wayid = block->way;
@@ -390,7 +458,7 @@ int cache_replace_block_srrip(srrip_data *policy_data, srrip_gdata *global_data)
   return (min_wayid != ~(0)) ? min_wayid : -1;
 }
 
-void cache_access_block_srrip(srrip_data *policy_data, srrip_gdata *global_data,
+void cache_access_block_srripbypass(srripbypass_data *policy_data, srripbypass_gdata *global_data,
     int way, int strm, memory_trace *info)
 {
   struct cache_block_t *blk   = NULL;
@@ -400,7 +468,7 @@ void cache_access_block_srrip(srrip_data *policy_data, srrip_gdata *global_data,
   int old_rrpv;
   int new_rrpv;
   
-  blk  = &(SRRIP_DATA_BLOCKS(policy_data)[way]);
+  blk  = &(SRRIPBYPASS_DATA_BLOCKS(policy_data)[way]);
   prev = blk->prev;
   next = blk->next;
 
@@ -408,9 +476,9 @@ void cache_access_block_srrip(srrip_data *policy_data, srrip_gdata *global_data,
   assert(blk->tag >= 0);
   assert(blk->state != cache_block_invalid);
   
-  switch (SRRIP_DATA_CAPOLICY(policy_data))
+  switch (SRRIPBYPASS_DATA_CAPOLICY(policy_data))
   {
-    case cache_policy_srrip:
+    case cache_policy_srripbypass:
       /* Get old RRPV from the block */
       old_rrpv = (((rrip_list *)(blk->data))->rrpv);
       new_rrpv = old_rrpv;
@@ -429,7 +497,7 @@ void cache_access_block_srrip(srrip_data *policy_data, srrip_gdata *global_data,
       }
 
       /* Get new RRPV using policy specific function */
-      new_rrpv = cache_get_new_rrpv_srrip(policy_data, global_data, info, 
+      new_rrpv = cache_get_new_rrpv_srripbypass(policy_data, global_data, info, 
           old_rrpv, blk->epoch);
     
       /* Update block queue if block got new RRPV */
@@ -437,15 +505,15 @@ void cache_access_block_srrip(srrip_data *policy_data, srrip_gdata *global_data,
       {
         blk->last_rrpv = new_rrpv;
 
-        CACHE_REMOVE_FROM_QUEUE(blk, SRRIP_DATA_VALID_HEAD(policy_data)[old_rrpv],
-            SRRIP_DATA_VALID_TAIL(policy_data)[old_rrpv]);
-        CACHE_APPEND_TO_QUEUE(blk, SRRIP_DATA_VALID_HEAD(policy_data)[new_rrpv], 
-            SRRIP_DATA_VALID_TAIL(policy_data)[new_rrpv]);
+        CACHE_REMOVE_FROM_QUEUE(blk, SRRIPBYPASS_DATA_VALID_HEAD(policy_data)[old_rrpv],
+            SRRIPBYPASS_DATA_VALID_TAIL(policy_data)[old_rrpv]);
+        CACHE_APPEND_TO_QUEUE(blk, SRRIPBYPASS_DATA_VALID_HEAD(policy_data)[new_rrpv], 
+            SRRIPBYPASS_DATA_VALID_TAIL(policy_data)[new_rrpv]);
       }
 
       CACHE_UPDATE_BLOCK_STREAM(blk, strm);
 
-      blk->dirty   = (info && info->spill) ? 1 : 0;
+      blk->dirty   = (info && info->dirty) ? 1 : 0;
       blk->access += 1;
       break;
 
@@ -457,52 +525,41 @@ void cache_access_block_srrip(srrip_data *policy_data, srrip_gdata *global_data,
   }
 }
 
-int cache_get_fill_rrpv_srrip(srrip_data *policy_data, 
-    srrip_gdata *global_data, memory_trace *info, ub4 epoch)
+int cache_get_fill_rrpv_srripbypass(srripbypass_data *policy_data, 
+    srripbypass_gdata *global_data, memory_trace *info, ub4 epoch)
 {
   sb4 ret_rrpv;
 
-  switch (SRRIP_DATA_CFPOLICY(policy_data))
+  switch (SRRIPBYPASS_DATA_CFPOLICY(policy_data))
   {
     case cache_policy_lru:
       return 0;
 
     case cache_policy_lip:
-      return SRRIP_DATA_MAX_RRPV(policy_data);
+      return SRRIPBYPASS_DATA_MAX_RRPV(policy_data);
 
-    case cache_policy_srrip:
+    case cache_policy_srripbypass:
+      /* Based on speedup decide bypass */
 #if 0
-#define VALID_EPOCH(g, i)  ((g)->epoch_valid && (g)->epoch_valid[(i)->stream])
-
-      /* If epoch counter are valid use them to decide fill RRPV */
-      if (policy_data->use_epoch && VALID_EPOCH(global_data, info))
+      if (info->stream != PS && info->stream != BS && info->stream != global_data->speedup_stream)
+      if (info->stream != CS && VALID_BYPASS(global_data, info))
+      if (info->stream == PS)
+#endif
+      if (info->stream != PS)
       {
-        assert(global_data->epoch_fctr[info->stream]);
-        assert(global_data->epoch_hctr[info->stream]);
-
-#define FILL_VAL(g, i, e)  (SAT_CTR_VAL((g)->epoch_fctr[(i)->stream][e]))
-#define HIT_VAL(g, i, e)   (SAT_CTR_VAL((g)->epoch_hctr[(i)->stream][e]))
-
-        if (FILL_VAL(global_data, info, epoch) > 32 * HIT_VAL(global_data, info, epoch))
+        if (get_prob_in_range(0.0, 0.90))
         {
-          ret_rrpv = SRRIP_DATA_MAX_RRPV(policy_data);
+          return BYPASS_RRPV; 
         }
         else
         {
-          ret_rrpv = SRRIP_DATA_MAX_RRPV(policy_data) - 1;
+          return SRRIPBYPASS_DATA_MAX_RRPV(policy_data) - 1;
         }
-
-#undef FILL_VAL
-#undef HIT_VAL
       }
       else
       {
-        ret_rrpv =  SRRIP_DATA_MAX_RRPV(policy_data) - 1;
+        return SRRIPBYPASS_DATA_MAX_RRPV(policy_data) - 1;
       }
-#endif
-      return SRRIP_DATA_MAX_RRPV(policy_data) - 1;
-
-#undef VALID_EPOCH
 
     case cache_policy_bypass:
       /* Not to insert */
@@ -514,17 +571,17 @@ int cache_get_fill_rrpv_srrip(srrip_data *policy_data,
   }
 }
 
-int cache_get_replacement_rrpv_srrip(srrip_data *policy_data)
+int cache_get_replacement_rrpv_srripbypass(srripbypass_data *policy_data)
 {
-  return SRRIP_DATA_MAX_RRPV(policy_data);
+  return SRRIPBYPASS_DATA_MAX_RRPV(policy_data);
 }
 
-int cache_get_new_rrpv_srrip(srrip_data *policy_data, srrip_gdata *global_data, 
+int cache_get_new_rrpv_srripbypass(srripbypass_data *policy_data, srripbypass_gdata *global_data, 
     memory_trace *info, sb1 old_rrpv, ub4 epoch)
 {
   sb4 ret_rrpv;
-  
-  ret_rrpv = (info && !(info->fill)) ? old_rrpv : 0;
+
+  ret_rrpv = 0;
 
 #define VALID_EPOCH(g, i) ((g)->epoch_valid && (g)->epoch_valid[(i)->stream])
 
@@ -539,7 +596,7 @@ int cache_get_new_rrpv_srrip(srrip_data *policy_data, srrip_gdata *global_data,
 
     if (FILL_VAL(global_data, info, epoch) > 32 * HIT_VAL(global_data, info, epoch))
     {
-      ret_rrpv = SRRIP_DATA_MAX_RRPV(policy_data);
+      ret_rrpv = SRRIPBYPASS_DATA_MAX_RRPV(policy_data);
     }
 
 #undef FILL_VAL
@@ -549,8 +606,7 @@ int cache_get_new_rrpv_srrip(srrip_data *policy_data, srrip_gdata *global_data,
   /* For spill move only block at RRPV 3 to 2 */
   if (info && info->spill)
   {
-#if 0
-    if (old_rrpv == SRRIP_DATA_MAX_RRPV(policy_data))
+    if (old_rrpv == SRRIPBYPASS_DATA_MAX_RRPV(policy_data))
     {
       ret_rrpv = old_rrpv - 1;
     }
@@ -558,20 +614,20 @@ int cache_get_new_rrpv_srrip(srrip_data *policy_data, srrip_gdata *global_data,
     {
       ret_rrpv = old_rrpv;
     }
-#endif
   }
+
 #undef VALID_EPOCH
 
   return ret_rrpv;
 }
 
 /* Update state of block. */
-void cache_set_block_srrip(srrip_data *policy_data, int way, long long tag,
+void cache_set_block_srripbypass(srripbypass_data *policy_data, int way, long long tag,
   enum cache_block_state_t state, ub1 stream, memory_trace *info)
 {
   struct cache_block_t *block;
 
-  block = &(SRRIP_DATA_BLOCKS(policy_data))[way];
+  block = &(SRRIPBYPASS_DATA_BLOCKS(policy_data))[way];
 
   /* Check: tag matches with the block's tag. */
   assert(block->tag == tag);
@@ -597,16 +653,16 @@ void cache_set_block_srrip(srrip_data *policy_data, int way, long long tag,
   int old_rrpv = (((rrip_list *)(block->data))->rrpv);
 
   /* Remove block from valid list and insert into free list */
-  CACHE_REMOVE_FROM_QUEUE(block, SRRIP_DATA_VALID_HEAD(policy_data)[old_rrpv],
-      SRRIP_DATA_VALID_TAIL(policy_data)[old_rrpv]);
-  CACHE_APPEND_TO_SQUEUE(block, SRRIP_DATA_FREE_HEAD(policy_data), 
-      SRRIP_DATA_FREE_TAIL(policy_data));
+  CACHE_REMOVE_FROM_QUEUE(block, SRRIPBYPASS_DATA_VALID_HEAD(policy_data)[old_rrpv],
+      SRRIPBYPASS_DATA_VALID_TAIL(policy_data)[old_rrpv]);
+  CACHE_APPEND_TO_SQUEUE(block, SRRIPBYPASS_DATA_FREE_HEAD(policy_data), 
+      SRRIPBYPASS_DATA_FREE_TAIL(policy_data));
 
 }
 
 
 /* Get tag and state of a block. */
-struct cache_block_t cache_get_block_srrip(srrip_data *policy_data, int way,
+struct cache_block_t cache_get_block_srripbypass(srripbypass_data *policy_data, int way,
   long long *tag_ptr, enum cache_block_state_t *state_ptr, int *stream_ptr)
 {
   assert(policy_data);
@@ -614,15 +670,15 @@ struct cache_block_t cache_get_block_srrip(srrip_data *policy_data, int way,
   assert(state_ptr);
   assert(stream_ptr);
 
-  PTR_ASSIGN(tag_ptr, (SRRIP_DATA_BLOCKS(policy_data)[way]).tag);
-  PTR_ASSIGN(state_ptr, (SRRIP_DATA_BLOCKS(policy_data)[way]).state);
-  PTR_ASSIGN(stream_ptr, (SRRIP_DATA_BLOCKS(policy_data)[way]).stream);
+  PTR_ASSIGN(tag_ptr, (SRRIPBYPASS_DATA_BLOCKS(policy_data)[way]).tag);
+  PTR_ASSIGN(state_ptr, (SRRIPBYPASS_DATA_BLOCKS(policy_data)[way]).state);
+  PTR_ASSIGN(stream_ptr, (SRRIPBYPASS_DATA_BLOCKS(policy_data)[way]).stream);
 
-  return SRRIP_DATA_BLOCKS(policy_data)[way];
+  return SRRIPBYPASS_DATA_BLOCKS(policy_data)[way];
 }
 
 /* Get tag and state of a block. */
-int cache_count_block_srrip(srrip_data *policy_data, ub1 strm)
+int cache_count_block_srripbypass(srripbypass_data *policy_data, ub1 strm)
 {
   int     max_rrpv;
   int     count;
@@ -637,7 +693,7 @@ int cache_count_block_srrip(srrip_data *policy_data, ub1 strm)
 
   for (int rrpv = 0; rrpv <= max_rrpv; rrpv++)
   {
-    head = SRRIP_DATA_VALID_HEAD(policy_data)[rrpv].head;
+    head = SRRIPBYPASS_DATA_VALID_HEAD(policy_data)[rrpv].head;
 
     for (node = head; node; node = node->prev)
     {
@@ -651,32 +707,33 @@ int cache_count_block_srrip(srrip_data *policy_data, ub1 strm)
 }
 
 /* Set policy for next fill */
-void cache_set_current_fill_policy_srrip(srrip_data *policy_data, cache_policy_t policy)
+void cache_set_current_fill_policy_srripbypass(srripbypass_data *policy_data, cache_policy_t policy)
 {
   assert(policy == cache_policy_lru || policy == cache_policy_lip || 
          policy == cache_policy_bypass);
 
-  SRRIP_DATA_CFPOLICY(policy_data) = policy;
+  SRRIPBYPASS_DATA_CFPOLICY(policy_data) = policy;
 }
 
 /* Set policy for next access */
-void cache_set_current_access_policy_srrip(srrip_data *policy_data, cache_policy_t policy)
+void cache_set_current_access_policy_srripbypass(srripbypass_data *policy_data, cache_policy_t policy)
 {
   assert(policy == cache_policy_lru || policy == cache_policy_lip || 
          policy == cache_policy_bypass);
 
-  SRRIP_DATA_CAPOLICY(policy_data) = policy;
+  SRRIPBYPASS_DATA_CAPOLICY(policy_data) = policy;
 }
 
 /* Set policy for next replacment */
-void cache_set_current_replacement_policy_srrip(srrip_data *policy_data, cache_policy_t policy)
+void cache_set_current_replacement_policy_srripbypass(srripbypass_data *policy_data, cache_policy_t policy)
 {
   assert(policy == cache_policy_cpulast);
 
-  SRRIP_DATA_CRPOLICY(policy_data) = policy;
+  SRRIPBYPASS_DATA_CRPOLICY(policy_data) = policy;
 }
 
 #undef PSEL_WIDTH
 #undef PSEL_MIN_VAL
 #undef PSEL_MAX_VAL
 #undef PSEL_MID_VAL
+#undef VALID_BYPASS

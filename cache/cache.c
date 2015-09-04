@@ -48,7 +48,7 @@ do                                                            \
  */
 
 struct str_map_t cache_policy_map = {
-        32,
+        34,
         {
                 { "BYPASS", cache_policy_bypass},
                 { "LRU", cache_policy_lru},
@@ -65,6 +65,7 @@ struct str_map_t cache_policy_map = {
                 { "PASRRIP", cache_policy_pasrrip},
                 { "XSP", cache_policy_xsp},
                 { "XSPPIN", cache_policy_xsppin},
+                { "STREAMPIN", cache_policy_streampin},
                 { "BRRIP", cache_policy_brrip},
                 { "DRRIP", cache_policy_drrip},
                 { "GSDRRIP", cache_policy_gsdrrip},
@@ -81,7 +82,9 @@ struct str_map_t cache_policy_map = {
                 { "SAPPRIORITY", cache_policy_sappriority},
                 { "SAPPRIDEPRI", cache_policy_sappridepri},
                 { "CUSOMSRRIP", cache_policy_customsrrip},
-                { "SHIP", cache_policy_ship}
+                { "SHIP", cache_policy_ship},
+                { "SARP", cache_policy_sarp},
+                { "SRRIPBYPASS", cache_policy_srripbypass}
         }
 };
 
@@ -223,6 +226,11 @@ struct cache_t* cache_init(struct cache_params *params)
             CACHE_SRRIP_GDATA(cache));
         break;
 
+      case cache_policy_srripbypass:
+        cache_init_srripbypass(set, params, CACHE_SET_DATA_SRRIPBYPASS(cache_set), 
+            CACHE_SRRIPBYPASS_GDATA(cache));
+        break;
+
       case cache_policy_customsrrip:
         cache_init_customsrrip(set, params, CACHE_SET_DATA_CUSTOMSRRIP(cache_set), 
             CACHE_CUSTOMSRRIP_GDATA(cache));
@@ -246,6 +254,11 @@ struct cache_t* cache_init(struct cache_params *params)
       case cache_policy_xsppin:
         cache_init_xsppin(set, params, CACHE_SET_DATA_XSPPIN(cache_set),
             CACHE_XSPPIN_GDATA(cache));
+        break;
+
+      case cache_policy_streampin:
+        cache_init_streampin(set, params, CACHE_SET_DATA_STREAMPIN(cache_set),
+            CACHE_STREAMPIN_GDATA(cache));
         break;
 
       case cache_policy_xspdbp:
@@ -294,6 +307,11 @@ struct cache_t* cache_init(struct cache_params *params)
       case cache_policy_sappriority:
         cache_init_sappriority(set, params, CACHE_SET_DATA_SAPPRIORITY(cache_set),
             &((cache->policy_data).sappriority));
+        break;
+
+      case cache_policy_sarp:
+        cache_init_sarp(set, params, CACHE_SET_DATA_SARP(cache_set),
+            &((cache->policy_data).sarp));
         break;
 
       case cache_policy_sappridepri:
@@ -501,6 +519,10 @@ void cache_free(struct cache_t *cache)
         cache_free_srrip(CACHE_SET_DATA_SRRIP(cache_set));
         break;
 
+      case cache_policy_srripbypass:
+        cache_free_srripbypass(CACHE_SET_DATA_SRRIPBYPASS(cache_set));
+        break;
+
       case cache_policy_customsrrip:
         cache_free_customsrrip(CACHE_SET_DATA_CUSTOMSRRIP(cache_set));
         break;
@@ -519,6 +541,10 @@ void cache_free(struct cache_t *cache)
 
       case cache_policy_xsppin:
         cache_free_xsppin(CACHE_SET_DATA_XSPPIN(cache_set));
+        break;
+
+      case cache_policy_streampin:
+        cache_free_streampin(CACHE_SET_DATA_STREAMPIN(cache_set));
         break;
 
       case cache_policy_xspdbp:
@@ -565,6 +591,11 @@ void cache_free(struct cache_t *cache)
       case cache_policy_sappriority:
         cache_free_sappriority(set, CACHE_SET_DATA_SAPPRIORITY(cache_set), 
           CACHE_SAPPRIORITY_GDATA(cache));
+        break;
+
+      case cache_policy_sarp:
+        cache_free_sarp(set, CACHE_SET_DATA_SARP(cache_set), 
+          CACHE_SARP_GDATA(cache));
         break;
 
       case cache_policy_sappridepri:
@@ -695,6 +726,11 @@ struct cache_block_t * cache_find_block(struct cache_t *cache, int set,
       return cache_find_block_srrip(CACHE_SET_DATA_SRRIP(CACHE_SET(cache, set)), tag);
       break;
 
+    case cache_policy_srripbypass:
+      return cache_find_block_srripbypass(CACHE_SET_DATA_SRRIPBYPASS(CACHE_SET(cache, set)),
+          CACHE_SRRIPBYPASS_GDATA(cache), info, tag);
+      break;
+
     case cache_policy_customsrrip:
       return cache_find_block_customsrrip(CACHE_SET_DATA_CUSTOMSRRIP(CACHE_SET(cache, set)), tag);
       break;
@@ -735,6 +771,11 @@ struct cache_block_t * cache_find_block(struct cache_t *cache, int set,
           CACHE_XSPPIN_GDATA(cache), tag, info);
       break;
 
+    case cache_policy_streampin:
+      return cache_find_block_streampin(CACHE_SET_DATA_STREAMPIN(CACHE_SET(cache, set)), 
+          CACHE_STREAMPIN_GDATA(cache), tag, info);
+      break;
+
     case cache_policy_xspdbp:
       return cache_find_block_xspdbp(CACHE_SET_DATA_XSPDBP(CACHE_SET(cache, set)), tag);
       break;
@@ -759,6 +800,11 @@ struct cache_block_t * cache_find_block(struct cache_t *cache, int set,
     case cache_policy_sappriority:
       return cache_find_block_sappriority(CACHE_SET_DATA_SAPPRIORITY(CACHE_SET(cache, set)),
           CACHE_SAPPRIORITY_GDATA(cache), info, tag);
+      break;
+
+    case cache_policy_sarp:
+      return cache_find_block_sarp(CACHE_SET_DATA_SARP(CACHE_SET(cache, set)),
+          CACHE_SARP_GDATA(cache), tag, info);
       break;
 
     case cache_policy_sappridepri:
@@ -882,6 +928,11 @@ void cache_fill_block( struct cache_t *cache, int set, int way,
       UpdateOnFill(&(cache->srrip_policy), set, way);
       break;
 
+    case cache_policy_srripbypass:
+      cache_fill_block_srripbypass(CACHE_SET_DATA_SRRIPBYPASS(CACHE_SET(cache, set)), 
+          CACHE_SRRIPBYPASS_GDATA(cache), way, tag, state, stream, info);
+      break;
+
     case cache_policy_customsrrip:
       cache_fill_block_customsrrip(CACHE_SET_DATA_CUSTOMSRRIP(CACHE_SET(cache, set)), 
           CACHE_CUSTOMSRRIP_GDATA(cache), way, tag, state, stream, info);
@@ -905,6 +956,11 @@ void cache_fill_block( struct cache_t *cache, int set, int way,
     case cache_policy_xsppin:
       cache_fill_block_xsppin(CACHE_SET_DATA_XSPPIN(CACHE_SET(cache, set)), 
           CACHE_XSPPIN_GDATA(cache), way, tag, state, stream, info);
+      break;
+
+    case cache_policy_streampin:
+      cache_fill_block_streampin(CACHE_SET_DATA_STREAMPIN(CACHE_SET(cache, set)), 
+          CACHE_STREAMPIN_GDATA(cache), way, tag, state, stream, info);
       break;
 
     case cache_policy_xspdbp:
@@ -963,6 +1019,11 @@ void cache_fill_block( struct cache_t *cache, int set, int way,
     case cache_policy_sappriority:
       cache_fill_block_sappriority(CACHE_SET_DATA_SAPPRIORITY(CACHE_SET(cache, set)), 
           CACHE_SAPPRIORITY_GDATA(cache), way, tag, state, stream, info);
+      break;
+
+    case cache_policy_sarp:
+      cache_fill_block_sarp(CACHE_SET_DATA_SARP(CACHE_SET(cache, set)), 
+          CACHE_SARP_GDATA(cache), way, tag, state, stream, info);
       break;
 
     case cache_policy_sappridepri:
@@ -1094,6 +1155,11 @@ void cache_access_block(struct cache_t *cache, int set, int way, int stream,
       UpdateOnHit(&(cache->srrip_policy), set, way);
       break;
 
+    case cache_policy_srripbypass:
+      cache_access_block_srripbypass(CACHE_SET_DATA_SRRIPBYPASS(CACHE_SET(cache, set)), 
+          CACHE_SRRIPBYPASS_GDATA(cache), way, stream, info);
+      break;
+
     case cache_policy_customsrrip:
       cache_access_block_customsrrip(CACHE_SET_DATA_CUSTOMSRRIP(CACHE_SET(cache, set)), 
           CACHE_CUSTOMSRRIP_GDATA(cache), way, stream, info);
@@ -1117,6 +1183,11 @@ void cache_access_block(struct cache_t *cache, int set, int way, int stream,
     case cache_policy_xsppin:
       cache_access_block_xsppin(CACHE_SET_DATA_XSPPIN(CACHE_SET(cache, set)), 
           CACHE_XSPPIN_GDATA(cache), way, stream, info);
+      break;
+
+    case cache_policy_streampin:
+      cache_access_block_streampin(CACHE_SET_DATA_STREAMPIN(CACHE_SET(cache, set)), 
+          CACHE_STREAMPIN_GDATA(cache), way, stream, info);
       break;
 
     case cache_policy_xspdbp:
@@ -1170,6 +1241,11 @@ void cache_access_block(struct cache_t *cache, int set, int way, int stream,
     case cache_policy_sappriority:
       cache_access_block_sappriority(CACHE_SET_DATA_SAPPRIORITY(CACHE_SET(cache, set)), 
         CACHE_SAPPRIORITY_GDATA(cache), way, stream, info);
+      break;
+
+    case cache_policy_sarp:
+      cache_access_block_sarp(CACHE_SET_DATA_SARP(CACHE_SET(cache, set)), 
+        CACHE_SARP_GDATA(cache), way, stream, info);
       break;
 
     case cache_policy_sappridepri:
@@ -1291,6 +1367,10 @@ int cache_replace_block(struct cache_t *cache, int set, memory_trace *info)
 #endif
       return new_way;
 
+    case cache_policy_srripbypass:
+      return cache_replace_block_srripbypass(CACHE_SET_DATA_SRRIPBYPASS(CACHE_SET(cache, set)), 
+          CACHE_SRRIPBYPASS_GDATA(cache));
+
     case cache_policy_customsrrip:
       new_way = cache_replace_block_customsrrip(CACHE_SET_DATA_CUSTOMSRRIP(CACHE_SET(cache, set)), 
           CACHE_CUSTOMSRRIP_GDATA(cache), NN);
@@ -1313,6 +1393,11 @@ int cache_replace_block(struct cache_t *cache, int set, memory_trace *info)
     case cache_policy_xsppin:
       new_way = cache_replace_block_xsppin(CACHE_SET_DATA_XSPPIN(CACHE_SET(cache, set)),
           CACHE_XSPPIN_GDATA(cache));
+      return new_way;
+
+    case cache_policy_streampin:
+      new_way = cache_replace_block_streampin(CACHE_SET_DATA_STREAMPIN(CACHE_SET(cache, set)),
+          CACHE_STREAMPIN_GDATA(cache));
       return new_way;
 
     case cache_policy_xspdbp:
@@ -1358,6 +1443,11 @@ int cache_replace_block(struct cache_t *cache, int set, memory_trace *info)
     case cache_policy_sappriority:
       return cache_replace_block_sappriority(CACHE_SET_DATA_SAPPRIORITY(CACHE_SET(cache, set)),
         CACHE_SAPPRIORITY_GDATA(cache), info);
+      break;
+
+    case cache_policy_sarp:
+      return cache_replace_block_sarp(CACHE_SET_DATA_SARP(CACHE_SET(cache, set)),
+        CACHE_SARP_GDATA(cache), info);
       break;
 
     case cache_policy_sappridepri:
@@ -1467,6 +1557,10 @@ void cache_set_block(struct cache_t *cache, int set, int way, long long tag,
       return cache_set_block_srrip(CACHE_SET_DATA_SRRIP(CACHE_SET(cache, set)),
               way, tag, state, stream, info);
 
+    case cache_policy_srripbypass:
+      return cache_set_block_srripbypass(CACHE_SET_DATA_SRRIPBYPASS(CACHE_SET(cache, set)),
+              way, tag, state, stream, info);
+
     case cache_policy_customsrrip:
       return cache_set_block_customsrrip(CACHE_SET_DATA_CUSTOMSRRIP(CACHE_SET(cache, set)),
               way, tag, state, stream, info);
@@ -1485,6 +1579,10 @@ void cache_set_block(struct cache_t *cache, int set, int way, long long tag,
 
     case cache_policy_xsppin:
       return cache_set_block_xsppin(CACHE_SET_DATA_XSPPIN(CACHE_SET(cache, set)),
+              way, tag, state, stream, info);
+
+    case cache_policy_streampin:
+      return cache_set_block_streampin(CACHE_SET_DATA_STREAMPIN(CACHE_SET(cache, set)),
               way, tag, state, stream, info);
 
     case cache_policy_xspdbp:
@@ -1526,6 +1624,10 @@ void cache_set_block(struct cache_t *cache, int set, int way, long long tag,
     case cache_policy_sappriority:
       return cache_set_block_sappriority(CACHE_SET_DATA_SAPPRIORITY(CACHE_SET(cache, set)),
               CACHE_SAPPRIORITY_GDATA(cache), way, tag, state, stream, info);
+
+    case cache_policy_sarp:
+      return cache_set_block_sarp(CACHE_SET_DATA_SARP(CACHE_SET(cache, set)),
+              CACHE_SARP_GDATA(cache), way, tag, state, stream, info);
 
     case cache_policy_sappridepri:
       return cache_set_block_sappridepri(CACHE_SET_DATA_SAPPRIDEPRI(CACHE_SET(cache, set)),
@@ -1633,6 +1735,10 @@ struct cache_block_t cache_get_block(struct cache_t *cache, int set, int way,
       return cache_get_block_srrip(CACHE_SET_DATA_SRRIP(CACHE_SET(cache, set)),
         way, tag_ptr, state_ptr, stream_ptr);
 
+    case cache_policy_srripbypass:
+      return cache_get_block_srripbypass(CACHE_SET_DATA_SRRIPBYPASS(CACHE_SET(cache, set)),
+        way, tag_ptr, state_ptr, stream_ptr);
+
     case cache_policy_customsrrip:
       return cache_get_block_customsrrip(CACHE_SET_DATA_CUSTOMSRRIP(CACHE_SET(cache, set)),
         way, tag_ptr, state_ptr, stream_ptr);
@@ -1651,6 +1757,10 @@ struct cache_block_t cache_get_block(struct cache_t *cache, int set, int way,
 
     case cache_policy_xsppin:
       return cache_get_block_xsppin(CACHE_SET_DATA_XSPPIN(CACHE_SET(cache, set)),
+        way, tag_ptr, state_ptr, stream_ptr);
+
+    case cache_policy_streampin:
+      return cache_get_block_streampin(CACHE_SET_DATA_STREAMPIN(CACHE_SET(cache, set)),
         way, tag_ptr, state_ptr, stream_ptr);
 
     case cache_policy_xspdbp:
@@ -1692,6 +1802,10 @@ struct cache_block_t cache_get_block(struct cache_t *cache, int set, int way,
     case cache_policy_sappriority:
       return cache_get_block_sappriority(CACHE_SET_DATA_SAPPRIORITY(CACHE_SET(cache, set)),
         CACHE_SAPPRIORITY_GDATA(cache), way, tag_ptr, state_ptr, stream_ptr);
+
+    case cache_policy_sarp:
+      return cache_get_block_sarp(CACHE_SET_DATA_SARP(CACHE_SET(cache, set)),
+        CACHE_SARP_GDATA(cache), way, tag_ptr, state_ptr, stream_ptr);
 
     case cache_policy_sappridepri:
       return cache_get_block_sappridepri(CACHE_SET_DATA_SAPPRIDEPRI(CACHE_SET(cache, set)),

@@ -70,6 +70,9 @@ struct cache_block_t
   /* Flag set if block is produced by depth unit */
   unsigned char is_zt_block;
   
+  /* TRUE, if block is pinned */
+  unsigned char is_block_pinned;
+
   /* Access made to this block, used for measuring maximum reuse */
   unsigned int access;
   

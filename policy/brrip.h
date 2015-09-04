@@ -346,6 +346,7 @@ int cache_get_replacement_rrpv_brrip(brrip_data *policy_data);
  *  policy_data (IN) - Cache set data
  *  global_data (IN) - Cache-wide data
  *  info        (IN) - Access info
+ *  old_rrpv    (IN) - Current block RRPV
  *  epoch       (IN) - Current block epoch
  *
  * RETURNS
@@ -354,7 +355,7 @@ int cache_get_replacement_rrpv_brrip(brrip_data *policy_data);
  */
 
 int cache_get_new_rrpv_brrip(brrip_data *policy_data, brrip_gdata *global_data, 
-    memory_trace *info, ub4 epoch);
+    memory_trace *info, sb4 old_rrpv, ub4 epoch);
 
 /*
  *

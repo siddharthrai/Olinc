@@ -380,25 +380,6 @@ void cache_access_block_brrip(brrip_data *policy_data, brrip_gdata *global_data,
   switch (BRRIP_DATA_CAPOLICY(policy_data))
   {
     case cache_policy_brrip:
-
-      /* Get old RRPV from the block */
-      old_rrpv = (((rrip_list *)(blk->data))->rrpv);
-
-      /* Get new RRPV using policy specific function */
-      new_rrpv = cache_get_new_rrpv_brrip(policy_data, global_data, info, 
-          blk->epoch);
-        
-      /* Update block queue if block got new RRPV */
-      if (new_rrpv != old_rrpv)
-      {
-        blk->last_rrpv = new_rrpv;
-
-        CACHE_REMOVE_FROM_QUEUE(blk, BRRIP_DATA_VALID_HEAD(policy_data)[old_rrpv],
-            BRRIP_DATA_VALID_TAIL(policy_data)[old_rrpv]);
-        CACHE_APPEND_TO_QUEUE(blk, BRRIP_DATA_VALID_HEAD(policy_data)[new_rrpv], 
-            BRRIP_DATA_VALID_TAIL(policy_data)[new_rrpv]);
-      }
-
       if (info && (blk->stream == info->stream))
       {
 #define MX_EP(g)  ((g)->max_epoch)
@@ -412,8 +393,26 @@ void cache_access_block_brrip(brrip_data *policy_data, brrip_gdata *global_data,
         blk->epoch = 0;
       }
 
+      /* Get old RRPV from the block */
+      old_rrpv = (((rrip_list *)(blk->data))->rrpv);
+
+      /* Get new RRPV using policy specific function */
+      new_rrpv = cache_get_new_rrpv_brrip(policy_data, global_data, info, 
+          old_rrpv, blk->epoch);
+        
+      /* Update block queue if block got new RRPV */
+      if (new_rrpv != old_rrpv)
+      {
+        blk->last_rrpv = new_rrpv;
+
+        CACHE_REMOVE_FROM_QUEUE(blk, BRRIP_DATA_VALID_HEAD(policy_data)[old_rrpv],
+            BRRIP_DATA_VALID_TAIL(policy_data)[old_rrpv]);
+        CACHE_APPEND_TO_QUEUE(blk, BRRIP_DATA_VALID_HEAD(policy_data)[new_rrpv], 
+            BRRIP_DATA_VALID_TAIL(policy_data)[new_rrpv]);
+      }
+
       CACHE_UPDATE_BLOCK_STREAM(blk, strm);
-      blk->dirty   = (info && info->dirty) ? 1 : 0;
+      blk->dirty   = (info && info->spill) ? 1 : 0;
       blk->access += 1;
       break;
 
@@ -523,11 +522,11 @@ int cache_get_replacement_rrpv_brrip(brrip_data *policy_data)
 }
 
 int cache_get_new_rrpv_brrip(brrip_data *policy_data, brrip_gdata *global_data, 
-    memory_trace *info, ub4 epoch)
+    memory_trace *info, sb4 old_rrpv, ub4 epoch)
 {
   sb4 ret_rrpv;
 
-  ret_rrpv = 0;
+  ret_rrpv = (info && !(info->fill)) ? old_rrpv : 0;
 
 #define VALID_EPOCH(g, i) ((g)->epoch_valid && (g)->epoch_valid[(i)->stream])
 
@@ -550,9 +549,22 @@ int cache_get_new_rrpv_brrip(brrip_data *policy_data, brrip_gdata *global_data,
   }
 
 #undef VALID_EPOCH
+  
+  if (info && info->spill)
+  {
+#if 0
+    if (old_rrpv == BRRIP_DATA_MAX_RRPV(policy_data))
+    {
+      ret_rrpv = old_rrpv - 1;
+    }
+    else
+    {
+      ret_rrpv = old_rrpv; 
+    }
+#endif
+  }
 
   return ret_rrpv;
-
 }
 
 /* Update state of block. */

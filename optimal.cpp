@@ -37,6 +37,17 @@ map<ub8, ub8>::iterator set_itr;            /* Iterator for set */
 map<ub8, ub8>   pc_table;                   /* map of PCs */
 map<ub8, ub8>::iterator pc_table_itr;       /* Iterator for pc_table */
 
+map<ub8, ub8>   b_block_table;              /* All blitter block table */
+map<ub8, ub8>::iterator b_block_table_itr;  /* Iterator for b_block_table */
+
+map<ub8, ub8>   c_block_table;              /* All color block table */
+map<ub8, ub8>::iterator c_block_table_itr;  /* Iterator for c_block_table */
+
+map<ub8, ub8>   bt_block_table;              /* All blitter block table */
+map<ub8, ub8>::iterator bt_block_table_itr;  /* Iterator for b_block_table */
+
+map<ub8, ub8>   ct_block_table;             /* All color block table */
+map<ub8, ub8>::iterator ct_block_table_itr; /* Iterator for c_block_table */
 ub8 *sn_set;                                /* Sequence number per set */
 ub8  last_rdis;                             /* Used to track last reuse of a block */
 ub8  sn_glbl;                               /* Global sequence number for all accesses */
@@ -44,6 +55,16 @@ ub8  sn_glbl;                               /* Global sequence number for all ac
 ub8 rdis_hist[TST + 1][MAX_RDIS + 1][2];    /* Reuse distance and reuse count histogram */
 ub8 reuse_hist[TST + 1][MAX_REUSE + 1];     /* Reuse distance histogram */
 ub8 rrpv_trans_hist[TST + 1][MAX_TRANS + 1];/* RRPV transition histogram */
+
+ub8  bt_correct_pred;                       /* Correct BT prediction */
+ub8  ct_correct_pred;                       /* Correct CT prediction */
+ub8  bt_should_pred;                        /* Correct BT prediction */
+ub8  ct_should_pred;                        /* Correct CT prediction */
+ub8  bt_not_seen;                           /* BT not seen by OPT */
+ub8  ct_not_seen;                           /* CT not seen by OPT */
+
+ub8 ct_reuse_count[MAX_REUSE + 1];          /* Reuse distance histogram */
+ub8 bt_reuse_count[MAX_REUSE + 1];          /* Reuse distance histogram */
 
 /* Per block info. A max heap is build on top of this vector for finding max 
  * reuse distance block */
@@ -433,7 +454,7 @@ void percolate_down(vector<cachesim_cacheline *>&vec, ub8 node_id)
     if (parent_line->rdis < child_line->rdis)
     {
       /* As way index is kept inside cache line, we need to first swap their
-       * ids so that way ids remain inteact, after that swap data elements */
+       * ids so that way ids remain intact, after that swap data elements */
       tmp = parent_line->way;
       parent_line->way = child_line->way;
       child_line->way  = tmp;
@@ -443,7 +464,6 @@ void percolate_down(vector<cachesim_cacheline *>&vec, ub8 node_id)
       vec[parent] = vec[child];
       vec[child]  = (cachesim_cacheline *)tmp;
     }
-    
 
     /* Obtain new parent and child */
     parent  = child;
@@ -838,7 +858,9 @@ cache_access_status cachesim_match(cachesim_cache *cache, ub8 addr)
     ret.pc          = line->pc;
     ret.fillpc      = line->fillpc;
     ret.is_bt_block = line->is_bt_block;
+    ret.is_bt_pred  = line->is_bt_pred;
     ret.is_ct_block = line->is_ct_block;
+    ret.is_ct_pred  = line->is_ct_pred;
     ret.op          = line->op;
 
     assert(ret.rdis >= ret.prdis);
@@ -873,13 +895,14 @@ cache_access_status cachesim_opt_replace_or_add(
   /* Get set index */
   indx = ADDR_NDX(cache, addr);
 
-  ret.way     = -1;
+  /* Get root of the max heap */ 
+  line    = phy_way[indx][0];
+
+  ret.way     = line->way;
   ret.fate    = CACHE_ACCESS_UNK;
   ret.stream  = NN;
   ret.epoch   = 0;
 
-  /* Get root of the max heap */ 
-  line    = phy_way[indx][0];
   set_itr = cache_set[indx].find(line->tag);
   
   /* If replacement candidate is found */
@@ -905,7 +928,9 @@ cache_access_status cachesim_opt_replace_or_add(
       ret.epoch       = rpl_line->epoch;
       ret.access      = rpl_line->access;
       ret.is_bt_block = rpl_line->is_bt_block;
+      ret.is_bt_pred  = rpl_line->is_bt_pred;
       ret.is_ct_block = rpl_line->is_ct_block;
+      ret.is_ct_pred  = rpl_line->is_ct_pred;
       ret.op          = rpl_line->op;
 
       /* Replace the block  */ 
@@ -989,10 +1014,12 @@ cache_access_status cachesim_opt_replace_or_add(
     line->access      = 0;
     line->rrpv        = CACHE_MAX_RRPV(cache) - 1;
     line->is_bt_block = FALSE;
+    line->is_bt_pred  = FALSE;
     line->is_ct_block = FALSE;
+    line->is_ct_pred  = FALSE;
     line->op          = block_op_fill;
   }
-
+  
   /* Update expected block count based on bit vector */
   if (info.pc)
   {
@@ -1027,24 +1054,6 @@ cache_access_status cachesim_opt_replace_or_add(
     }
   }
 
-  /* Update CT/BT flags */
-  if (info.spill == TRUE || info.fill == TRUE)
-  {
-    if (info.stream == BS)
-    {
-      line->is_bt_block = TRUE;
-    }
-    else
-    {    
-      if (info.stream == CS && info.dbuf == FALSE)
-      {
-        line->is_ct_block = TRUE;
-      }
-    }
-  }
-
-  heapify(phy_way[indx], line->way);
-  
   return ret;
 }
 
@@ -1070,8 +1079,8 @@ cache_access_status cachesim_incl_cache(
 
   assert(cache);
 
-  indx = ADDR_NDX(cache, addr);
   addr = BLCKALIGN(addr); 
+  indx = ADDR_NDX(cache, addr);
 
   ret.way     = -1;
   ret.fate    = CACHE_ACCESS_UNK;
@@ -1081,7 +1090,7 @@ cache_access_status cachesim_incl_cache(
   CACHE_AFRQ(cache)[indx]++;
 
   gettimeofday(&st, NULL);
-  
+
   /* Issue callback for reuse */
   if (USE_INTER_STREAM_CALLBACK)
   {
@@ -1095,6 +1104,28 @@ cache_access_status cachesim_incl_cache(
     reuse_tt_cbk->CacheAccessBeginCbk(info, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
     reuse_pp_cbk->CacheAccessBeginCbk(info, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
   }
+
+#if 0
+  if (info.stream == BS && reuse_bt_cbk->is_bt_block(&info))
+  {
+    bt_block_table_itr = bt_block_table.find(BLCKALIGN(info.address));
+    if (bt_block_table_itr != bt_block_table.end())
+    {
+      bt_correct_pred +=1; 
+    }
+  }
+#endif
+
+#if 0
+  if (info.stream == CS && reuse_ct_cbk->is_ct_block(&info))
+  {
+    ct_block_table_itr = ct_block_table.find(BLCKALIGN(info.address));
+    if (ct_block_table_itr != ct_block_table.end())
+    {
+      ct_correct_pred += 1; 
+    }
+  }
+#endif
 
   /* Do the tag matching */
   ret = cachesim_match(cache, addr);
@@ -1128,7 +1159,7 @@ cache_access_status cachesim_incl_cache(
       stall_data->pc_sharing_bitmap       = 0;
       stall_data->overflow_count          = 0;
       stall_data->bmp_fifo                = new bitmap_fifo(BMP_ENTRIES);
-      
+
       assert(stall_data->bmp_fifo);
 
       /* Insert stall into pc table */
@@ -1237,14 +1268,11 @@ cache_access_status cachesim_incl_cache(
     /* Fill block into cache */
     ret = cachesim_opt_replace_or_add(cache, addr, info, rdis);
 
-    block = (cachesim_cacheline *)(phy_way[indx][ret.way]);
-    assert(block);
-
     /* If fill caused a replacement */
     if (ret.fate == CACHE_ACCESS_RPLC)
     {
       block_data *current_block_data;
-      
+
       CACHE_EVCT(cache)[indx]++;
 
       /* Issue callback for reuse */
@@ -1260,7 +1288,7 @@ cache_access_status cachesim_incl_cache(
         reuse_tt_cbk->CacheAccessReplaceCbk(info, ret, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
         reuse_pp_cbk->CacheAccessReplaceCbk(info, ret, indx, CACHE_AFRQ(cache)[indx], CACHE_EVCT(cache)[indx]);
       }
-    
+
       if (ret.fillpc)
       {
         /* Get stall data from pc_table */
@@ -1304,7 +1332,7 @@ cache_access_status cachesim_incl_cache(
             /* Count of blocks with this bitmap */
             cache_data->access_count += 1;
           }
-          
+
           /* Add bitmap to bitmap FIFO */
           (stall_data->bmp_fifo)->add_bitmap_to_fifo(current_block_data->pc_sharing_bitmap, sn_glbl);
 
@@ -1318,6 +1346,39 @@ cache_access_status cachesim_incl_cache(
 
           stall_data->pc_sharing_bitmap   = 0;
           stall_data->overflow_count      = 0;
+        }
+      }
+    }
+    
+    if (info.fill == TRUE || (info.spill == TRUE && IS_SPILL_ALLOCATED(info.stream)))
+    {
+      block = (cachesim_cacheline *)(phy_way[indx][ret.way]);
+      assert(block);
+
+      assert(block->tag == addr);
+
+      /* If BT block is spilled update access and bt flag */
+      if (info.stream == BS)
+      {
+#if 0
+        bt_block_table_itr = bt_block_table.find(BLCKALIGN(info.address));
+        if (bt_block_table_itr != bt_block_table.end())
+#endif
+        if (reuse_bt_cbk->is_bt_block(&info))
+        {
+          block->is_bt_pred = TRUE;
+        }
+      }
+
+      if (info.stream == CS)
+      {
+#if 0
+        ct_block_table_itr = ct_block_table.find(BLCKALIGN(info.address));
+        if (ct_block_table_itr != ct_block_table.end())
+#endif
+        if (reuse_ct_cbk->is_ct_block(&info))
+        {
+          block->is_ct_pred = TRUE;
         }
       }
     }
@@ -1365,9 +1426,21 @@ cache_access_status cachesim_incl_cache(
 
     assert(rdis >= last_rdis);
 
+    if (info.stream == TS && block->stream == CS)
+    {
+      block->is_ct_block = TRUE;
+    }
+
+    if (info.stream == TS && block->stream == BS)
+    {
+      block->is_bt_block = TRUE;
+    }
+
     /* Update accessed block BT status */
     ret.is_bt_block = block->is_bt_block;
+    ret.is_bt_pred  = block->is_bt_pred;
     ret.is_ct_block = block->is_ct_block;
+    ret.is_ct_pred  = block->is_ct_pred;
 
     ((cachesim_cacheline *)phy_way[indx][ret.way])->rdis    = rdis;
     ((cachesim_cacheline *)phy_way[indx][ret.way])->prdis   = last_rdis;
@@ -1378,28 +1451,10 @@ cache_access_status cachesim_incl_cache(
     ((cachesim_cacheline *)phy_way[indx][ret.way])->op      = block_op_hit;
     ((cachesim_cacheline *)phy_way[indx][ret.way])->access += 1;
 
-    /* If BT block is spilled update access and bt flag */
-    if (info.spill == TRUE)
-    {
-      if (info.stream == BS)
-      {
-        block->is_bt_block = TRUE;
-      }
-      else
-      {
-        if (info.stream == CS && info.dbuf == FALSE)
-        {
-          block->is_ct_block = TRUE;
-        }
-      }
-    }
-
-    heapify(phy_way[indx], ret.way);
-
     /* Set per pc bit map */
     ub8         pc_seq_id;
     block_data *current_block_data;
-    
+
     if (ret.fillpc)
     {
       /* Get stall data from pc_table */
@@ -1417,7 +1472,7 @@ cache_access_status cachesim_incl_cache(
 
       current_block_data = (block_data *)(block_itr->second);
       assert(current_block_data);
-      
+
       if (ret.fillpc != info.pc)
       {
         /* Insert new pc into pc sequence map */
@@ -1440,7 +1495,120 @@ cache_access_status cachesim_incl_cache(
         current_block_data->block_data.hit_count += 1;
       }
     }
+
+    /* If BT block is spilled update access and bt flag */
+    if (info.stream == BS)
+    {
+#if 0
+      bt_block_table_itr = bt_block_table.find(BLCKALIGN(info.address));
+      if (bt_block_table_itr != bt_block_table.end())
+#endif
+      if (reuse_bt_cbk->is_bt_block(&info))
+      {
+        block->is_bt_pred = TRUE;
+      }
+    }
+
+    if (info.stream == CS)
+    {
+#if 0
+      ct_block_table_itr = ct_block_table.find(BLCKALIGN(info.address));
+      if (ct_block_table_itr != ct_block_table.end())
+#endif
+      if (reuse_ct_cbk->is_ct_block(&info))
+      {
+        block->is_ct_pred = TRUE;
+      }
+    }
   }
+
+  if (info.stream == CS)
+  {
+    c_block_table_itr = c_block_table.find(BLCKALIGN(addr));
+    if (c_block_table_itr != c_block_table.end())
+    {
+      c_block_table_itr->second = 0;
+    }
+    else
+    {
+      c_block_table.insert(pair<ub8, ub8>(BLCKALIGN(addr), 0));
+    }
+  }
+
+  if (info.stream == BS)
+  {
+    b_block_table_itr = b_block_table.find(BLCKALIGN(addr));
+    if (b_block_table_itr != b_block_table.end())
+    {
+      b_block_table_itr->second = 0;
+    }
+    else
+    {
+      b_block_table.insert(pair<ub8, ub8>(BLCKALIGN(addr), 0));
+    }
+  }
+
+  if (info.stream == TS && ret.fate == CACHE_ACCESS_HIT)
+  {
+    c_block_table_itr = c_block_table.find(BLCKALIGN(info.address));
+    if (c_block_table_itr != c_block_table.end())
+    {
+      if (c_block_table_itr->second == 0)
+      {
+        c_block_table_itr->second = 1; 
+
+        ct_block_table_itr = ct_block_table.find(BLCKALIGN(info.address));
+        if (ct_block_table_itr != ct_block_table.end())
+        {
+          ct_block_table_itr->second += 1;
+        }
+        else
+        {
+          ct_block_table.insert(pair<ub8, ub8>(BLCKALIGN(info.address), 0));
+        }
+
+        if (block && block->is_ct_pred)
+        {
+          ct_correct_pred +=1; 
+        }
+      }
+    }
+
+    b_block_table_itr = b_block_table.find(BLCKALIGN(info.address));
+    if (b_block_table_itr != b_block_table.end())
+    {
+      if (b_block_table_itr->second == 0)
+      {
+        b_block_table_itr->second = 1; 
+
+        bt_block_table_itr = bt_block_table.find(BLCKALIGN(info.address));
+        if (bt_block_table_itr != bt_block_table.end())
+        {
+          bt_block_table_itr->second += 1;
+
+          if (block->is_bt_block == FALSE)
+          {
+            bt_not_seen += 1;
+          }
+          else
+          {
+            assert(block->is_bt_pred == TRUE);
+          }
+        }
+        else
+        {
+          bt_block_table.insert(pair<ub8, ub8>(BLCKALIGN(info.address), 0));
+        }
+
+        if (block && block->is_bt_pred)
+        {
+          bt_correct_pred +=1; 
+        }
+      }
+    }
+  }
+
+  heapify(phy_way[indx], ret.way);
 
   gettimeofday(&et, NULL);
 
@@ -2998,11 +3166,13 @@ int main(int argc, char **argv)
   CLRSTRUCT(l2cache); 
   CLRSTRUCT(l3cache); 
 
-  inscnt        = 0;
-  bt_blocks     = 0;
-  bt_access     = 0;
-  inscnt        = 0;
-  total_access  = 0;
+  inscnt          = 0;
+  bt_blocks       = 0;
+  bt_access       = 0;
+  inscnt          = 0;
+  total_access    = 0;
+  ct_correct_pred = 0;
+  bt_correct_pred = 0;
 
   assert(sim_params.lcP.minCacheSize == sim_params.lcP.maxCacheSize);
   assert(sim_params.lcP.minCacheWays == sim_params.lcP.maxCacheWays);
@@ -4523,6 +4693,8 @@ int main(int argc, char **argv)
 #undef CH
           if (++total_access >= PHASE_SIZE)
           {
+            printf("CTPRED:%ld BTPRED:%ld\n", ct_correct_pred, bt_correct_pred);
+            printf("CTNOSEEN:%ld BTNOTSEEN:%ld\n", ct_not_seen, bt_not_seen);
 #if 0
             printf("CF:%ld ZF:%ld TF:%ld IF:%ld BF:%ld\n", fills[CS], 
                 fills[ZS], fills[TS], fills[IS], fills[BS]);
@@ -4669,6 +4841,33 @@ int main(int argc, char **argv)
   {
     pc_data *stall_data = (pc_data *)(pc_table_itr->second);
     delete stall_data;
+  }
+  
+  ub1 reuse_index;
+
+  /* Count CT / BT resue */
+  for (ct_block_table_itr = ct_block_table.begin(); ct_block_table_itr != ct_block_table.end(); 
+      ct_block_table_itr++)
+  {
+    assert(ct_block_table_itr->second >= 0);
+
+    reuse_index = (ct_block_table_itr->second < MAX_REUSE) ? ct_block_table_itr->second : MAX_REUSE;
+    ct_reuse_count[reuse_index] += 1;
+  }
+
+  /* Count CT / BT resue */
+  for (bt_block_table_itr = bt_block_table.begin(); bt_block_table_itr != bt_block_table.end(); 
+      bt_block_table_itr++)
+  {
+    assert(bt_block_table_itr->second >= 0);
+
+    reuse_index = (bt_block_table_itr->second < MAX_REUSE) ? bt_block_table_itr->second : MAX_REUSE;
+    bt_reuse_count[reuse_index] += 1;
+  }
+  
+  for (ub1 i = 0; i <= MAX_REUSE; i++)
+  {
+    cout << "CT: " << ct_reuse_count[i] << " BT: " << bt_reuse_count[i] << endl;
   }
 
   return 0;

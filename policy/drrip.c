@@ -512,11 +512,11 @@ void cache_fill_block_drrip(drrip_data *policy_data, drrip_gdata *global_data,
 #define CTR_VAL(d)    (SAT_CTR_VAL((d)->brrip.access_ctr))
 #define THRESHOLD(d)  ((d)->brrip.threshold)
 
-#if 0
   current_policy = GET_CURRENT_POLICY(policy_data, global_data);
-#endif
 
+#if 0
   current_policy = NEW_POLICY(info);
+#endif
 
   /* Fill block in all component policies */
   switch (current_policy)
