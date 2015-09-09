@@ -28,7 +28,7 @@
 #include "cache-block.h"
 
 #define MIN_EPOCH     (0)
-#define MAX_EPOCH     (10)
+#define MAX_EPOCH     (3)
 #define EPOCH_COUNT   (MAX_EPOCH - MIN_EPOCH + 1)
 
 /* Head node of a list, which corresponds to a particular RRPV */

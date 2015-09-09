@@ -10,13 +10,21 @@
 #define CST(i)                    ((i)->stream == CS)
 #define ZST(i)                    ((i)->stream == ZS)
 #define BST(i)                    ((i)->stream == BS)
+
 #if 0
 #define IS_SPILL_ALLOCATED(i)     (ST(i) == CS || ST(i) == BS || ST(i) == PS || ST(i) == ZS)
-#endif
+#define IS_SPILL_ALLOCATED(i)     (CST(i) || BST(i))
 #define IS_SPILL_ALLOCATED(i)     (CST(i) || ZST(i) || BST(i))
+#define IS_SPILL_ALLOCATED(i)     (CST(i) || BST(i))
+#define IS_SPILL_ALLOCATED(i)     (CST(i) || ZST(i) || BST(i))
+#endif
+
+#define IS_SPILL_ALLOCATED(i)     (TRUE)
+
 #if 0
 #define ACCESS_BYPASS(i)          (!CST(i) && !ZST(i) && !BST(i) && SSTU(i))
 #endif
+
 #define ACCESS_BYPASS(i)          (FALSE)
 #define MAX_REUSE                 (64)
 #define INTERVAL                  (256 * 1024)

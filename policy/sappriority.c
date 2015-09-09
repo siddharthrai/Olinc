@@ -1038,6 +1038,7 @@ static void cache_update_interval_end(sappriority_gdata *global_data)
     }
   }
 
+#if 0
   for (i = 0; i < MAX_RANK; i++)
   {
     if (stream_rank[i] == old_stream)
@@ -1048,6 +1049,8 @@ static void cache_update_interval_end(sappriority_gdata *global_data)
 
   /* If stream is not in MAX_RANK, assign new stream to be speadup */
   if (i == MAX_RANK)
+#endif
+
   {
     /* Set new fill RRPV to default */
     if (old_stream != NN)

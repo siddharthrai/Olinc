@@ -31,7 +31,7 @@
 
 #define PSEL_WIDTH                (30)
 #define PSEL_MIN_VAL              (0x00)  
-#define PSEL_MAX_VAL              (1 << 30)  
+#define PSEL_MAX_VAL              (1 << PSEL_WIDTH)  
 #define PSEL_MID_VAL              (PSEL_MAX_VAL / 2)
 #define BYTH_NUMR                 (1)
 #define BYTH_DENM                 (8)
@@ -39,7 +39,7 @@
 #define SMTH_DENM                 (8)
 #define SHTH_NUMR                 (1)
 #define SHTH_DENM                 (16)
-#define BYPASS_ACCESS_TH          (256 * 1024)
+#define BYPASS_ACCESS_TH          (128 * 1024)
 #define EPOCH_SIZE                (1 << 19)
 #define CPS(i)                    (i == PS)
 #define CPS1(i)                   (i == PS1)
@@ -176,6 +176,9 @@ do                                                                              
 #define PCBRRIP(p, g, i)              ((BRRIP_VAL(g) <= PSEL_MID_VAL) ? PCSRRIPGBRRIP(i) : PCBRRIPGBRRIP(i))
 #define PCSRRIP(p, g, i)              ((SRRIP_VAL(g) <= PSEL_MID_VAL) ? PCSRRIPGSRRIP(i) : PCBRRIPGSRRIP(i))
 #define DPSARP(p, g, i)               ((SARP_VAL(g) <= PSEL_MID_VAL) ? PCSRRIP(p, g, i) : PCBRRIP(p, g, i))
+#if 0
+#define DPSARP(p, g, i)               (PSRRIP)
+#endif
 #define SPSARP(p, g, i, f)            (FSARP(f) ? DPSARP(p, g, i) : f)
 #define FANDH(i, h)                   ((i)->fill == TRUE && (h) == TRUE)
 #define FANDM(i, h)                   ((i)->fill == TRUE && (h) == FALSE)
@@ -646,36 +649,44 @@ void sampler_cache_reset(sampler_cache *sampler)
   
   sampler_occupancy = 0;
   
-  printf("[C] F:%5d FR: %5d S: %5d SR: %5d\n", sampler->perfctr.fill_count[CS], 
+  printf("[C] F:%5ld FR: %5ld S: %5ld SR: %5ld\n", sampler->perfctr.fill_count[CS], 
       sampler->perfctr.fill_reuse_count[CS], sampler->perfctr.spill_count[CS],
       sampler->perfctr.spill_reuse_count[CS]);
 
-  printf("[Z] F:%5d R: %5d S: %5d SR: %5d\n", sampler->perfctr.fill_count[ZS], 
+  printf("[Z] F:%5ld R: %5ld S: %5ld SR: %5ld\n", sampler->perfctr.fill_count[ZS], 
       sampler->perfctr.fill_reuse_count[ZS], sampler->perfctr.spill_count[ZS],
       sampler->perfctr.spill_reuse_count[ZS]);
 
-  printf("[B] F:%5d R: %5d S: %5d SR: %5d\n", sampler->perfctr.fill_count[BS], 
+  printf("[B] F:%5ld R: %5ld S: %5ld SR: %5ld\n", sampler->perfctr.fill_count[BS], 
       sampler->perfctr.fill_reuse_count[BS], sampler->perfctr.spill_count[BS],
       sampler->perfctr.spill_reuse_count[BS]);
 
-  printf("[T] F:%5d R: %5d\n", sampler->perfctr.fill_count[TS], 
+  printf("[T] F:%5ld R: %5ld\n", sampler->perfctr.fill_count[TS], 
       sampler->perfctr.fill_reuse_count[TS]);
 
-  printf("[C] FDLOW:%5d FDHIGH: %5d SDLOW:%5d SDHIGH: %5d\n", sampler->perfctr.fill_reuse_distance_low[CS], 
+  printf("[C] FDLOW:%5ld FDHIGH: %5ld SDLOW:%5ld SDHIGH: %5ld\n", sampler->perfctr.fill_reuse_distance_low[CS], 
       sampler->perfctr.fill_reuse_distance_high[CS], sampler->perfctr.spill_reuse_distance_low[CS],
       sampler->perfctr.spill_reuse_distance_high[CS]);
 
-  printf("[Z] FDLOW:%5d FDHIGH: %5d SDLOW:%5d SDHIGH: %5d\n", sampler->perfctr.fill_reuse_distance_low[ZS], 
+  printf("[Z] FDLOW:%5ld FDHIGH: %5ld SDLOW:%5ld SDHIGH: %5ld\n", sampler->perfctr.fill_reuse_distance_low[ZS], 
       sampler->perfctr.fill_reuse_distance_high[ZS], sampler->perfctr.spill_reuse_distance_low[ZS],
       sampler->perfctr.spill_reuse_distance_high[ZS]);
 
-  printf("[B] FDLOW:%5d FDHIGH: %5d SDLOW:%5d SDHIGH: %5d\n", sampler->perfctr.fill_reuse_distance_low[BS], 
+  printf("[B] FDLOW:%5ld FDHIGH: %5ld SDLOW:%5ld SDHIGH: %5ld\n", sampler->perfctr.fill_reuse_distance_low[BS], 
       sampler->perfctr.fill_reuse_distance_high[BS], sampler->perfctr.spill_reuse_distance_low[BS],
       sampler->perfctr.spill_reuse_distance_high[BS]);
 
-  printf("[T] SDLOW:%5d SDHIGH: %5d\n", sampler->perfctr.fill_reuse_distance_low[TS], 
+  printf("[T] SDLOW:%5ld SDHIGH: %5ld\n", sampler->perfctr.fill_reuse_distance_low[TS], 
       sampler->perfctr.fill_reuse_distance_high[TS]);
 
+  printf("[CT] FDLOW:%5ld FDHIGH: %5ld SDLOW:%5ld SDHIGH: %5ld\n", sampler->perfctr.fill_reuse_distance_low[DCS], 
+      sampler->perfctr.fill_reuse_distance_high[DCS], sampler->perfctr.spill_reuse_distance_low[DCS],
+      sampler->perfctr.spill_reuse_distance_high[DCS]);
+
+  printf("[BT] FDLOW:%5ld FDHIGH: %5ld SDLOW:%5ld SDHIGH: %5ld\n", sampler->perfctr.fill_reuse_distance_low[DBS], 
+      sampler->perfctr.fill_reuse_distance_high[DBS], sampler->perfctr.spill_reuse_distance_low[DBS],
+      sampler->perfctr.spill_reuse_distance_high[DBS]);
+  
   /* Reset sampler */
   for (ub4 i = 0; i < sampler->sets; i++)
   {
@@ -690,9 +701,7 @@ void sampler_cache_reset(sampler_cache *sampler)
 
       for (ub4 off = 0; off < BLK_PER_ENTRY; off++)
       {
-#if 0
         (sampler->blocks)[i][j].timestamp[off]      = 0;
-#endif
         (sampler->blocks)[i][j].spill_or_fill[off]  = FALSE;
         (sampler->blocks)[i][j].stream[off]         = NN;
         (sampler->blocks)[i][j].valid[off]          = 0;
@@ -878,7 +887,7 @@ int cache_get_fill_rrpv_sarp(sarp_data *policy_data, sarp_gdata *global_data,
       ret_rrpv = 3;
     }
   }
-  
+
   return ret_rrpv;
 }
 
@@ -950,13 +959,13 @@ int cache_get_new_rrpv_sarp(sarp_data *policy_data, sarp_gdata *global_data,
   
     if (block->is_ct_block)
     {
-      if (FRUSE(perfctr, info->stream, epoch) * CT_TH1 <= FCOUNT(perfctr, info->stream, epoch))
+      if (FRUSE(perfctr, DCS, epoch) * CT_TH1 <= FCOUNT(perfctr, DCS, epoch))
       {
         ret_rrpv = 3;
       }
       else
       {
-        if (FRUSE(perfctr, info->stream, epoch) * TH2 <= FCOUNT(perfctr, info->stream, epoch))
+        if (FRUSE(perfctr, DCS, epoch) * TH2 <= FCOUNT(perfctr, DCS, epoch))
         {
           ret_rrpv = 2;
         }
@@ -966,13 +975,13 @@ int cache_get_new_rrpv_sarp(sarp_data *policy_data, sarp_gdata *global_data,
     {
       if (block->is_bt_block)
       {
-        if (FRUSE(perfctr, info->stream, epoch) * BT_TH1 <= FCOUNT(perfctr, info->stream, epoch))
+        if (FRUSE(perfctr, DBS, epoch) * BT_TH1 <= FCOUNT(perfctr, DBS, epoch))
         {
           ret_rrpv = 3;
         }
         else
         {
-          if (FRUSE(perfctr, info->stream, epoch) * TH2 <= FCOUNT(perfctr, info->stream, epoch))
+          if (FRUSE(perfctr, DBS, epoch) * TH2 <= FCOUNT(perfctr, DBS, epoch))
           {
             ret_rrpv = 2;
           }
@@ -1043,8 +1052,12 @@ void cache_init_sarp(long long int set_indx, struct cache_params *params,
     cache_init_sarp_stats(&(global_data->stats), NULL);
     
     /* Initialize cache-wide data for SARP. */
-    global_data->threshold            = params->threshold;
-    global_data->sarp_streams         = params->sdp_streams;
+    global_data->threshold    = params->threshold;
+    global_data->sarp_streams = params->sdp_streams;
+    global_data->ways         = params->ways;
+    
+    memset(global_data->fmiss_count, 0, sizeof(ub8) * (TST + 1));
+    memset(global_data->smiss_count, 0, sizeof(ub8) * (TST + 1));
 
     /* Initialize bimodal access counter */
     SAT_CTR_INI(global_data->access_ctr, 8, 0, 255);
@@ -1244,6 +1257,8 @@ enum cache_policy_t cache_get_fill_policy_sarp(enum cache_policy_t current,
   }
 }
 
+void sampler_cache_lookup(sampler_cache *sampler, sarp_data *policy_data, memory_trace *info);
+
 struct cache_block_t * cache_find_block_sarp(sarp_data *policy_data, 
     sarp_gdata *global_data, long long tag, memory_trace *info)
 {
@@ -1288,7 +1303,12 @@ end:
   
   if (!node)
   {
-    policy_data->miss_count += 1;
+#if 0
+    if (info->fill || (info->spill && (info->stream == CS || info->stream == ZS || info->stream == BS)))
+#endif
+    {
+      policy_data->miss_count += 1;
+    }
   }
 
   sampler_cache_lookup(global_data->sampler, policy_data, info);
@@ -1313,6 +1333,16 @@ void cache_fill_block_sarp(sarp_data *policy_data,
   assert(tag >= 0);
   assert(state != cache_block_invalid);
   
+  /* Increment miss count for incoming stream */
+  if (info->spill)
+  {
+    global_data->smiss_count[info->stream] += 1;
+  }
+  else
+  {
+    global_data->fmiss_count[info->stream] += 1;
+  }
+
   /* Obtain SAP stream */
   sstream = get_sarp_stream(global_data, info->stream, info->pid, info); 
   
@@ -1537,6 +1567,7 @@ void cache_fill_block_sarp(sarp_data *policy_data,
     {
       case cache_policy_srrip:
         assert(way != BYPASS_WAY);
+        assert(info->fill);
 
         cache_fill_block_srrip(&(policy_data->srrip), 
             &(global_data->srrip), way, tag, state, stream, info);
@@ -1586,11 +1617,12 @@ void cache_fill_block_sarp(sarp_data *policy_data,
           CACHE_UPDATE_BLOCK_STATE(block, tag, state);
           CACHE_UPDATE_BLOCK_STREAM(block, info->stream);
 
-          block->dirty      = (info && info->spill) ? TRUE : FALSE;
-          block->last_rrpv  = rrpv;
-
-          block->dirty  = (info && info->spill) ? TRUE : FALSE;
-          block->epoch  = 0;
+          block->dirty        = (info && info->spill) ? TRUE : FALSE;
+          block->last_rrpv    = rrpv;
+          block->epoch        = 0;
+          block->is_ct_block  = 0;
+          block->is_zt_block  = 0;
+          block->is_bt_block  = 0;
 
           if (info->spill == TRUE)
           {
@@ -1628,6 +1660,7 @@ int cache_replace_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
   int     ret_wayid;
   int     min_rrpv;
   int     rrpv;
+  int     old_rrpv;
   struct  cache_block_t *block;
 
   /* Ensure vaid arguments */
@@ -1637,9 +1670,15 @@ int cache_replace_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
   ret_wayid = BYPASS_WAY;
   min_rrpv  = !SARP_DATA_MAX_RRPV(policy_data);
 
+  if ((info->stream != CS && info->stream != ZS && info->stream != BS) && 
+      info->spill == TRUE)
+  {
+    goto end;
+  }
+
   per_stream_policy = SARP_DATA_PSPOLICY(policy_data);
   assert(per_stream_policy);
-
+   
   /* Get per stream policy map */
   following_policy = FOLLOW_POLICY(per_stream_policy[info->stream], info);
 
@@ -1670,37 +1709,81 @@ int cache_replace_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
         /* If fill is not bypassed, get the replacement candidate */
         if (!is_fill_bypass(global_data->sampler, info))
         {
+          struct  cache_block_t *head_block;
+
           /* Obtain RRPV from where to replace the block */
           rrpv = cache_get_replacement_rrpv_sarp(policy_data);
 
           /* Ensure rrpv is with in max_rrpv bound */
           assert(rrpv >= 0 && rrpv <= SARP_DATA_MAX_RRPV(policy_data));
+          
+          head_block = SARP_DATA_VALID_HEAD(policy_data)[rrpv].head;
 
           /* If there is no block with required RRPV, increment RRPV of all the blocks
            * until we get one with the required RRPV */
-          while (SARP_DATA_VALID_HEAD(policy_data)[rrpv].head == NULL)
+#if 0
+          while (head_block == NULL || (head_block && head_block->is_block_pinned))
+#endif
+          while (1)
           {
+            struct  cache_block_t *old_block;
+
             /* All blocks which are already pinned are promoted to RRPV 0 
              * and are unpinned. So we iterate through the blocks at RRPV 3 
              * and move all the blocks which are pinned to RRPV 0 */
-            CACHE_SARP_INCREMENT_RRPV(SARP_DATA_VALID_HEAD(policy_data), 
-                SARP_DATA_VALID_TAIL(policy_data), rrpv);
-
-#if 0
-            for (block = SARP_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
+            if (head_block == NULL)
             {
-              if (block->is_block_pinned == TRUE)
+              CACHE_SARP_INCREMENT_RRPV(SARP_DATA_VALID_HEAD(policy_data), 
+                  SARP_DATA_VALID_TAIL(policy_data), rrpv);
+            }
+#if 0            
+            for (ub4 way_id = 0; way_id < global_data->ways; way_id++)
+            {
+              old_block = &SARP_DATA_BLOCKS(policy_data)[way_id];
+              old_rrpv  = ((rrip_list *)(old_block->data))->rrpv;
+
+              if (old_rrpv == rrpv && old_block->is_block_pinned == TRUE)
               {
-                block->is_block_pinned = FALSE;
+                old_block->is_block_pinned = FALSE;
 
                 /* Move block to min RRPV */
-                CACHE_REMOVE_FROM_QUEUE(block, SARP_DATA_VALID_HEAD(policy_data)[rrpv],
+                CACHE_REMOVE_FROM_QUEUE(old_block, SARP_DATA_VALID_HEAD(policy_data)[old_rrpv],
+                    SARP_DATA_VALID_TAIL(policy_data)[old_rrpv]);
+                CACHE_APPEND_TO_QUEUE(old_block, SARP_DATA_VALID_HEAD(policy_data)[min_rrpv], 
+                    SARP_DATA_VALID_TAIL(policy_data)[min_rrpv]);
+              }
+              else
+              {
+                if (old_rrpv == rrpv && old_block->is_block_pinned == FALSE)
+                {
+                  break;
+                }
+              }
+            }
+#endif
+#if 0
+            for (block = SARP_DATA_VALID_TAIL(policy_data)[rrpv].head; block; )
+            {
+              old_block = block;
+              block     = block->next;
+              if (old_block->is_block_pinned == TRUE)
+              {
+                old_block->is_block_pinned = FALSE;
+
+                /* Move block to min RRPV */
+                CACHE_REMOVE_FROM_QUEUE(old_block, SARP_DATA_VALID_HEAD(policy_data)[rrpv],
                     SARP_DATA_VALID_TAIL(policy_data)[rrpv]);
-                CACHE_APPEND_TO_QUEUE(block, SARP_DATA_VALID_HEAD(policy_data)[min_rrpv], 
+                CACHE_APPEND_TO_QUEUE(old_block, SARP_DATA_VALID_HEAD(policy_data)[min_rrpv], 
                     SARP_DATA_VALID_TAIL(policy_data)[min_rrpv]);
               }
             }
 #endif
+            head_block = SARP_DATA_VALID_HEAD(policy_data)[rrpv].head;
+
+            if (head_block)
+            {
+              break;
+            }
           }
 
           /* Remove a nonbusy block from the tail */
@@ -1708,6 +1791,9 @@ int cache_replace_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
 
           for (block = SARP_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
           {
+#if 0
+            if (!block->busy && !block->is_block_pinned && block->way < min_wayid)
+#endif
             if (!block->busy && block->way < min_wayid)
               min_wayid = block->way;
           }
@@ -1731,6 +1817,7 @@ int cache_replace_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
     global_data->bypass_count++;
   }
 
+end:
   return ret_wayid;
 }
 
@@ -1802,22 +1889,24 @@ void cache_access_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
   switch (current_policy)
   {
     case cache_policy_srrip:
+#if 0
       cache_access_block_srrip(&(policy_data->srrip), &(global_data->srrip), 
           way, stream, info);
       break;
+#endif
 
     case cache_policy_brrip:
+#if 0
       cache_access_block_brrip(&(policy_data->brrip), &(global_data->brrip), 
           way, stream, info);
       break;
+#endif
 
     case cache_policy_sarp:
-      /* Update inter stream flags */
-      update_block_xstream(blk, info);
-      
       /* Update block epoch */
-      if (info && blk->stream == info->stream)
+      if (info->fill && blk->dirty == FALSE)
       {
+      /* Update block epoch */
 #define MX_EP  (REPOCH_CNT)
 
         blk->epoch  = (blk->epoch < MX_EP) ? blk->epoch + 1 : blk->epoch;
@@ -1829,6 +1918,13 @@ void cache_access_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
         blk->epoch = 0;
       }
 
+
+      if (blk->dirty)
+      {
+        /* Update inter stream flags */
+        update_block_xstream(blk, info);
+      }
+      
       /* Get old RRPV from the block */
       old_rrpv = (((rrip_list *)(blk->data))->rrpv);
 
@@ -1844,7 +1940,7 @@ void cache_access_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
             SRRIP_DATA_VALID_TAIL(policy_data)[new_rrpv]);
       }
 
-      blk->dirty = (info->spill) ? TRUE : FALSE;
+      blk->dirty = (info && info->spill) ? TRUE : FALSE;
       
       if (info->spill == TRUE)
       {

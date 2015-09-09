@@ -209,37 +209,40 @@ typedef struct cache_policy_sarp_data_t
 /* Policy global data */
 typedef struct cache_policy_sarp_gdata_t
 {
-  ub4 sarp_cpu_cores;      /* CPU cores known to SARP */
-  ub4 sarp_gpu_cores;      /* GPU cores known to SARP */
-  ub4 sarp_streams;        /* Number of streams known to SARP */
-  ub4 policy_set;          /* # sets for which policy is set */
-  ub1 sarp_cpu_tpset;      /* CPU P set threshold */
-  ub1 sarp_cpu_tqset;      /* CPU Q set threshold */
-  ub8 sarp_y_access;       /* SARP Y stream access */
-  ub8 sarp_y_miss;         /* SARP Y stream miss */
-  ub8 activate_access;     /* LLC access to activate stream classification */ 
-  ub1 activation_locked;   /* LLC access to activate stream classification */ 
-  sarp_stats stats;        /* SARP statistics */
-  ub8 threshold;           /* Bimodal threshold */
-  ub1 sdpsimple_psetinstp; /* If set, promote pset blocks to RRPV 0 on hit */
-  ub1 sdpsimple_greplace;  /* If set, choose min wayid block as victim */
-  ub1 sdpsimple_psetbmi;   /* If set, use bimodal insertion for P set */
-  ub1 sdpsimple_psetchar;  /* If set, use hierarchy aware insertion for P set */
-  ub1 sdpsimple_psetrecat; /* If set, block is recategorized on hit */
-  ub1 sdpsimple_sampleset; /* #Baseline sample sets */
-  ub1 sdpsimple_psetbse;   /* If set, only baseline samples are used for P set */
-  ub1 sdpsimple_psetmrt;   /* If set, use miss rate threshold for P set */
-  ub1 sdpsimple_psethrt;   /* If set, use hit rate threshold for P set */
-  sctr access_ctr;         /* Access counter */
-  srrip_gdata srrip;       /* SRRIP specific global data */
-  brrip_gdata brrip;       /* BRRIP specific global data */
-  sctr srrip_psel;         /* Selection counter for SRRIP_SRRIP and SRRIP_BRRIP sample */
-  sctr brrip_psel;         /* Selection counter for BRRIP_SRRIP and BRRIP_BRRIP sample */
-  sctr sarp_psel;          /* Global selection counter */
-  sctr sarp_ssel[TST + 1]; /* Per-stream DRRIP policy counter */
-  sctr baccess[SAMPLES];/* Separate BRRIP counter to decide epsilon for each BRRIP sampled set */
-  ub8  bypass_count;       /* # bypass */
-  sampler_cache *sampler;  /* Sampler cache used for tracking reuses */
+  ub4 ways;                   /* # ways */
+  ub4 sarp_cpu_cores;         /* CPU cores known to SARP */
+  ub4 sarp_gpu_cores;         /* GPU cores known to SARP */
+  ub4 sarp_streams;           /* Number of streams known to SARP */
+  ub4 policy_set;             /* # sets for which policy is set */
+  ub1 sarp_cpu_tpset;         /* CPU P set threshold */
+  ub1 sarp_cpu_tqset;         /* CPU Q set threshold */
+  ub8 sarp_y_access;          /* SARP Y stream access */
+  ub8 sarp_y_miss;            /* SARP Y stream miss */
+  ub8 activate_access;        /* LLC access to activate stream classification */ 
+  ub1 activation_locked;      /* LLC access to activate stream classification */ 
+  sarp_stats stats;           /* SARP statistics */
+  ub8 threshold;              /* Bimodal threshold */
+  ub1 sdpsimple_psetinstp;    /* If set, promote pset blocks to RRPV 0 on hit */
+  ub1 sdpsimple_greplace;     /* If set, choose min wayid block as victim */
+  ub1 sdpsimple_psetbmi;      /* If set, use bimodal insertion for P set */
+  ub1 sdpsimple_psetchar;     /* If set, use hierarchy aware insertion for P set */
+  ub1 sdpsimple_psetrecat;    /* If set, block is recategorized on hit */
+  ub1 sdpsimple_sampleset;    /* #Baseline sample sets */
+  ub1 sdpsimple_psetbse;      /* If set, only baseline samples are used for P set */
+  ub1 sdpsimple_psetmrt;      /* If set, use miss rate threshold for P set */
+  ub1 sdpsimple_psethrt;      /* If set, use hit rate threshold for P set */
+  sctr access_ctr;            /* Access counter */
+  srrip_gdata srrip;          /* SRRIP specific global data */
+  brrip_gdata brrip;          /* BRRIP specific global data */
+  sctr srrip_psel;            /* Selection counter for SRRIP_SRRIP and SRRIP_BRRIP sample */
+  sctr brrip_psel;            /* Selection counter for BRRIP_SRRIP and BRRIP_BRRIP sample */
+  sctr sarp_psel;             /* Global selection counter */
+  sctr sarp_ssel[TST + 1];    /* Per-stream DRRIP policy counter */
+  ub8  fmiss_count[TST + 1];  /* Per-stream miss count */
+  ub8  smiss_count[TST + 1];  /* Per-stream miss count */
+  sctr baccess[SAMPLES];      /* Separate BRRIP counter to decide epsilon for each BRRIP sampled set */
+  ub8  bypass_count;          /* # bypass */
+  sampler_cache *sampler;     /* Sampler cache used for tracking reuses */
 }sarp_gdata;
 
 #undef SAMPLES

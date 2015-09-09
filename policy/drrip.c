@@ -27,10 +27,10 @@
 #include "drrip.h"
 #include "zlib.h"
 
-#define PSEL_WIDTH    (10)
+#define PSEL_WIDTH    (30)
 #define PSEL_MIN_VAL  (0x00)  
-#define PSEL_MAX_VAL  (0x3ff)  
-#define PSEL_MID_VAL  (512)
+#define PSEL_MAX_VAL  (1 << 30)  
+#define PSEL_MID_VAL  (PSEL_MAX_VAL / 2)
 
 #define SRRIP_SAMPLED_SET       (0)
 #define BRRIP_SAMPLED_SET       (1)
@@ -83,17 +83,16 @@ static int get_set_type_drrip(long long int indx)
   int msb_bits;
   int mid_bits;
 
-  lsb_bits = indx & 0x07;
-  msb_bits = (indx >> 7) & 0x07;
-  mid_bits = (indx >> 3) & 0x0f;
+  lsb_bits = indx & 0x1f;
+  msb_bits = (indx >> 5) & 0x1f;
 
-  if (lsb_bits == msb_bits && mid_bits == 0)
+  if (lsb_bits == msb_bits)
   {
     return SRRIP_SAMPLED_SET;
   }
   else
   {
-    if (lsb_bits == (~msb_bits & 0x07) && mid_bits == 0)
+    if (lsb_bits == (~msb_bits & 0x1f))
     {
       return BRRIP_SAMPLED_SET;
     }
@@ -511,9 +510,16 @@ void cache_fill_block_drrip(drrip_data *policy_data, drrip_gdata *global_data,
 
 #define CTR_VAL(d)    (SAT_CTR_VAL((d)->brrip.access_ctr))
 #define THRESHOLD(d)  ((d)->brrip.threshold)
-
-  current_policy = GET_CURRENT_POLICY(policy_data, global_data);
-
+  
+  if (info->spill == TRUE)
+  {
+    current_policy = cache_policy_srrip;
+  }
+  else
+  {
+    current_policy = GET_CURRENT_POLICY(policy_data, global_data);
+  }
+  
 #if 0
   current_policy = NEW_POLICY(info);
 #endif
@@ -524,7 +530,7 @@ void cache_fill_block_drrip(drrip_data *policy_data, drrip_gdata *global_data,
     case cache_policy_srrip:
       cache_fill_block_srrip(&(policy_data->srrip), &(global_data->srrip), way, tag, state, strm, 
           info);
-
+#if 0
       /* For DRRIP, BRRIP access counter is incremented on access to all sets
        * irrespective of the followed policy. So, if followed policy is SRRIP
        * we increment counter here. */
@@ -536,7 +542,7 @@ void cache_fill_block_drrip(drrip_data *policy_data, drrip_gdata *global_data,
       {
         SAT_CTR_RST(global_data->brrip.access_ctr);
       }
-
+#endif
       /* Increment fill stats for SRRIP */
       global_data->stats.drrip_srrip_fill += 1;
       global_data->stats.drrip_fill_2     += 1; 

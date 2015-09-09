@@ -310,8 +310,11 @@ void cache_fill_block_srrip(srrip_data *policy_data, srrip_gdata *global_data,
     /* Update new block state and stream */
     CACHE_UPDATE_BLOCK_STATE(block, tag, info->vtl_addr, state);
     CACHE_UPDATE_BLOCK_STREAM(block, strm);
-    block->dirty      = (info && info->spill) ? 1 : 0;
-    block->last_rrpv  = rrpv;
+    block->dirty        = (info && info->spill) ? 1 : 0;
+    block->last_rrpv    = rrpv;
+    block->is_ct_block  = FALSE;
+    block->is_bt_block  = FALSE;
+    block->is_zt_block  = FALSE;
 
     /* Insert block in to the corresponding RRPV queue */
     CACHE_APPEND_TO_QUEUE(block, 
@@ -414,8 +417,8 @@ void cache_access_block_srrip(srrip_data *policy_data, srrip_gdata *global_data,
       /* Get old RRPV from the block */
       old_rrpv = (((rrip_list *)(blk->data))->rrpv);
       new_rrpv = old_rrpv;
-
-      if (info && blk->stream == info->stream)
+      
+      if (info->fill)
       {
 #define MX_EP(g)  ((g)->max_epoch)
 

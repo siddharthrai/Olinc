@@ -260,9 +260,12 @@ void cache_fill_block_brrip(brrip_data *policy_data, brrip_gdata *global_data,
   CACHE_UPDATE_BLOCK_STATE(block, tag, info->vtl_addr, state);
   CACHE_UPDATE_BLOCK_STREAM(block, strm);
 
-  block->dirty  = (info && info->spill) ? 1 : 0;
-  block->epoch  = 0;
-  block->access = 0;
+  block->dirty        = (info && info->spill) ? 1 : 0;
+  block->epoch        = 0;
+  block->access       = 0;
+  block->is_ct_block  = FALSE;
+  block->is_bt_block  = FALSE;
+  block->is_zt_block  = FALSE;
 
   /* Get RRPV to be assigned to the new block */
   rrpv = cache_get_fill_rrpv_brrip(policy_data, global_data, info, block->epoch);
@@ -380,7 +383,7 @@ void cache_access_block_brrip(brrip_data *policy_data, brrip_gdata *global_data,
   switch (BRRIP_DATA_CAPOLICY(policy_data))
   {
     case cache_policy_brrip:
-      if (info && (blk->stream == info->stream))
+      if (info->fill)
       {
 #define MX_EP(g)  ((g)->max_epoch)
 
