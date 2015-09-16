@@ -477,17 +477,18 @@ cache_access_status cachesim_incl_cache( cachesim_cache *cache, ub8 addr,
 void set_cache_params(struct cache_params *params, LChParameters *lcP, 
   ub8 cache_size, ub8 cache_way, ub8 cache_set)
 {
-  params->policy        = lcP->policy;
-  params->max_rrpv      = lcP->max_rrpv;
-  params->spill_rrpv    = lcP->spill_rrpv;
-  params->threshold     = lcP->threshold;
-  params->ways          = cache_way;
-  params->stream        = lcP->stream;
-  params->streams       = lcP->streams;
-  params->bs_epoch      = lcP->useBs;
-  params->use_step      = lcP->useStep;
-  params->sampler_sets  = lcP->samplerSets;
-  params->sampler_ways  = lcP->samplerWays;
+  params->policy          = lcP->policy;
+  params->max_rrpv        = lcP->max_rrpv;
+  params->spill_rrpv      = lcP->spill_rrpv;
+  params->threshold       = lcP->threshold;
+  params->ways            = cache_way;
+  params->stream          = lcP->stream;
+  params->streams         = lcP->streams;
+  params->bs_epoch        = lcP->useBs;
+  params->use_step        = lcP->useStep;
+  params->sampler_sets    = lcP->samplerSets;
+  params->sampler_ways    = lcP->samplerWays;
+  params->sarp_pin_blocks = lcP->pinBlocks;
 
 #define CS_BYTE(cache_size) (cache_size * 1024)
 #define SS_BYTE(lcP)        (lcP->cacheBlockSize * cache_way)

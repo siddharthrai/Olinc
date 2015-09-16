@@ -349,6 +349,9 @@ bool ConfigLoader::parseLCSectionParameter(LChParameters *lcP)
     if (!parseBooleanParameter("UseStep", id, lcP->useStep))
         return FALSE;
 
+    if (!parseBooleanParameter("PinBlocks", id, lcP->pinBlocks))
+        return FALSE;
+
     if ( !paramsTracker.wasAnyParamSectionDefined() ) {
         stringstream ss;
         ss << "Parameter '" << id << "' in section [LLC] is not supported";

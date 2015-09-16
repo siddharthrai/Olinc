@@ -92,6 +92,8 @@ typedef struct cache_policy_drrip_gdata_t
   drrip_stats stats;                /* DRRIP statistics */
   brrip_gdata brrip;                /* BRRIP cache wide data */
   srrip_gdata srrip;                /* BRRIP cache wide data */
+  sctr        bsample;              /* BRRIP Sample access */
+  sctr        bfollower;            /* BRRIP follower access */
   sdp_gdata   sdp;                  /* SDP cache wide data for SAP like stats */
 }drrip_gdata;
 
@@ -221,14 +223,17 @@ void cache_dump_drrip_stats(drrip_stats *stats, ub8 cycle);
  * PARAMETERS
  *  
  *  policy_data (IN)  - Cache set in which block is to be looked
+ *  global_data (IN)  - Cache-wide data
  *  tag         (IN)  - Block tag
+ *  info        (IN)  - Access info
  *
  * RETURNS
  *  
  *  Pointer to the block 
  */
 
-struct cache_block_t * cache_find_block_drrip(drrip_data *policy_data, long long tag);
+struct cache_block_t * cache_find_block_drrip(drrip_data *policy_data, 
+    drrip_gdata *global_data, long long tag, memory_trace *info);
 
 /*
  *

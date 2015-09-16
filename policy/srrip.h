@@ -356,7 +356,7 @@ int cache_get_replacement_rrpv_srrip(srrip_data *policy_data);
  */
 
 int cache_get_new_rrpv_srrip(srrip_data *policy_data, srrip_gdata *global_data, 
-    memory_trace *info, sb1 old_rrpv, ub4 epoch);
+    memory_trace *info, sb4 old_rrpv, ub4 epoch);
 
 /*
  *

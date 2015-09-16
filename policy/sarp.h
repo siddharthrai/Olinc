@@ -76,6 +76,12 @@
 
 typedef struct sampler_perfctr
 {
+  ub8 sampler_fill;
+  ub8 sampler_hit;
+  ub8 sampler_replace;
+  ub8 sampler_access;
+  ub8 sampler_block_found;
+  ub8 sampler_invalid_block_found;
   ub8 max_reuse;
   ub8 fill_count[TST + 1];
   ub8 fill_count_epoch[TST + 1];
@@ -210,6 +216,7 @@ typedef struct cache_policy_sarp_data_t
 typedef struct cache_policy_sarp_gdata_t
 {
   ub4 ways;                   /* # ways */
+  ub1 pin_blocks;             /* If true blocks are pinned as per algorithm  */
   ub4 sarp_cpu_cores;         /* CPU cores known to SARP */
   ub4 sarp_gpu_cores;         /* GPU cores known to SARP */
   ub4 sarp_streams;           /* Number of streams known to SARP */

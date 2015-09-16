@@ -54,6 +54,7 @@ struct cache_params
   ub4     ship_use_pc;            /* Ship-pc flag */
   ub4     sampler_sets;           /* SARP sampler sets */
   ub4     sampler_ways;           /* SARP sampler ways */
+  ub1     sarp_pin_blocks;        /* If true, blocks are pinned */
 };
 
 #endif	/* MEM_SYSTEM_CACHE_H */

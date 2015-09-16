@@ -785,7 +785,8 @@ struct cache_block_t * cache_find_block(struct cache_t *cache, int set,
       break;
 
     case cache_policy_drrip:
-      return cache_find_block_drrip(CACHE_SET_DATA_DRRIP(CACHE_SET(cache, set)), tag);
+      return cache_find_block_drrip(CACHE_SET_DATA_DRRIP(CACHE_SET(cache, set)), 
+          CACHE_DRRIP_GDATA(cache), tag, info);
       break;
 
     case cache_policy_sapsimple:

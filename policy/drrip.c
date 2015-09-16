@@ -72,10 +72,10 @@ do                                                                              
 #define DFOLLOW(p, g, f)              ((FSRRIP(f) || (FDYN(f) && SSRRIP(g))) ? PSRRIP : PBRRIP)  
 #define CURRENT_POLICY(p, g, f, s, n) (DFOLLOW(p, g, f))
 #define NEW_POLICY(i)                 (((i)->stream != TS) ? PBRRIP : PSRRIP)
-#define GET_CURRENT_POLICY(d, gd) (((d)->following == cache_policy_srrip ||             \
-                                    ((d)->following == cache_policy_drrip &&            \
-                                    SAT_CTR_VAL((gd)->psel) < PSEL_MID_VAL)) ?          \
-                                    cache_policy_srrip : cache_policy_brrip)
+#define DSRRIP(p, i)                  (((i) && (i)->spill) || FSRRIP((p)->following))
+#define GET_CURRENT_POLICY(d, gd, i)  ((DSRRIP(d, i) || (FDRRIP((d)->following) &&  \
+                                       SAT_CTR_VAL((gd)->psel) <= PSEL_MID_VAL)) ?\
+                                       cache_policy_srrip : cache_policy_brrip)
 
 static int get_set_type_drrip(long long int indx)
 {
@@ -287,6 +287,13 @@ void cache_init_drrip(long long int set_indx, struct cache_params *params, drrip
     /* Initialize BRRIP set wide data */
     SAT_CTR_INI(global_data->brrip.access_ctr, BRRIP_CTR_WIDTH, 
       BRRIP_PSEL_MIN_VAL, BRRIP_PSEL_MAX_VAL);
+
+    SAT_CTR_INI(global_data->bsample, BRRIP_CTR_WIDTH, BRRIP_PSEL_MIN_VAL, 
+        BRRIP_PSEL_MAX_VAL);
+
+    SAT_CTR_INI(global_data->bfollower, BRRIP_CTR_WIDTH, BRRIP_PSEL_MIN_VAL, 
+        BRRIP_PSEL_MAX_VAL);
+
     global_data->brrip.threshold = params->threshold;
 
 #undef BRRIP_CTR_WIDTH
@@ -445,7 +452,8 @@ void cache_free_drrip(unsigned int set_indx, drrip_data *policy_data,
   }
 }
 
-struct cache_block_t* cache_find_block_drrip(drrip_data *policy_data, long long tag)
+struct cache_block_t* cache_find_block_drrip(drrip_data *policy_data, 
+    drrip_gdata *global_data, long long tag, memory_trace *info)
 {
   int    max_rrpv;
   struct cache_block_t *head;
@@ -468,6 +476,69 @@ struct cache_block_t* cache_find_block_drrip(drrip_data *policy_data, long long 
   }
 
 end:
+  if (!node)
+  {
+    if (info->fill)
+    {
+      switch (policy_data->following)
+      {
+        case cache_policy_srrip:
+          /* Increment fill stats for SRRIP */
+          global_data->stats.sample_srrip_fill += 1;
+          SAT_CTR_INC(global_data->psel);
+          SAT_CTR_INC(global_data->drrip_psel[info->stream]);
+          break;
+
+        case cache_policy_brrip:
+          global_data->stats.sample_brrip_fill += 1;
+          SAT_CTR_DEC(global_data->psel);
+          SAT_CTR_DEC(global_data->drrip_psel[info->stream]);
+
+#define CTR_VAL(d)    (SAT_CTR_VAL((d)->bsample))
+#define THRESHOLD(d)  ((d)->brrip.threshold)
+
+          if (CTR_VAL(global_data) < THRESHOLD(global_data) - 1)
+          {
+            SAT_CTR_INC(global_data->bsample);
+          }
+          else
+          {
+            SAT_CTR_RST(global_data->bsample);
+          }
+
+          SAT_CTR_VAL(global_data->brrip.access_ctr) = CTR_VAL(global_data);
+
+#undef CTR_VAL
+#undef THRESHOLD
+          break;
+
+        case cache_policy_drrip:
+
+#define CTR_VAL(d)    (SAT_CTR_VAL((d)->bfollower))
+#define THRESHOLD(d)  ((d)->brrip.threshold)
+
+          /* Nothing to do */
+          if (CTR_VAL(global_data) < THRESHOLD(global_data) - 1)
+          {
+            SAT_CTR_INC(global_data->bfollower);
+          }
+          else
+          {
+            SAT_CTR_RST(global_data->bfollower);
+          }
+
+          SAT_CTR_VAL(global_data->brrip.access_ctr) = CTR_VAL(global_data);
+
+#undef CTR_VAL
+#undef THRESHOLD
+          break;
+
+        default:
+          panic("Invalid policy function %s line %d\n", __FUNCTION__, __LINE__);
+      }
+    }
+  }
+
   return node;
 }
 
@@ -484,29 +555,7 @@ void cache_fill_block_drrip(drrip_data *policy_data, drrip_gdata *global_data,
   assert(policy_data->following == cache_policy_srrip ||
       policy_data->following == cache_policy_brrip || 
       policy_data->following == cache_policy_drrip);
-
-  switch (policy_data->following)
-  {
-    case cache_policy_srrip:
-      /* Increment fill stats for SRRIP */
-      global_data->stats.sample_srrip_fill += 1;
-      SAT_CTR_INC(global_data->psel);
-      SAT_CTR_INC(global_data->drrip_psel[info->stream]);
-      break;
-
-    case cache_policy_brrip:
-      global_data->stats.sample_brrip_fill += 1;
-      SAT_CTR_DEC(global_data->psel);
-      SAT_CTR_DEC(global_data->drrip_psel[info->stream]);
-      break;
-
-    case cache_policy_drrip:
-      /* Nothing to do */
-      break;
-
-    default:
-      panic("Invalid policy function %s line %d\n", __FUNCTION__, __LINE__);
-  }
+  
 
 #define CTR_VAL(d)    (SAT_CTR_VAL((d)->brrip.access_ctr))
 #define THRESHOLD(d)  ((d)->brrip.threshold)
@@ -517,7 +566,7 @@ void cache_fill_block_drrip(drrip_data *policy_data, drrip_gdata *global_data,
   }
   else
   {
-    current_policy = GET_CURRENT_POLICY(policy_data, global_data);
+    current_policy = GET_CURRENT_POLICY(policy_data, global_data, info);
   }
   
 #if 0
@@ -530,10 +579,11 @@ void cache_fill_block_drrip(drrip_data *policy_data, drrip_gdata *global_data,
     case cache_policy_srrip:
       cache_fill_block_srrip(&(policy_data->srrip), &(global_data->srrip), way, tag, state, strm, 
           info);
-#if 0
+
       /* For DRRIP, BRRIP access counter is incremented on access to all sets
        * irrespective of the followed policy. So, if followed policy is SRRIP
        * we increment counter here. */
+#if 0
       if (CTR_VAL(global_data) < THRESHOLD(global_data) - 1)
       {
         SAT_CTR_INC(global_data->brrip.access_ctr);
@@ -583,7 +633,7 @@ int cache_replace_block_drrip(drrip_data *policy_data, drrip_gdata *global_data)
   assert(global_data);
   
   /* According to the policy choose a replacement candidate */
-  switch (GET_CURRENT_POLICY(policy_data, global_data))
+  switch (GET_CURRENT_POLICY(policy_data, global_data, (memory_trace *)NULL))
   {
     case cache_policy_srrip:
       ret_way = cache_replace_block_srrip(&(policy_data->srrip), &(global_data->srrip));
@@ -638,7 +688,7 @@ void cache_access_block_drrip(drrip_data *policy_data,
       panic("Invalid policy function %s line %d\n", __FUNCTION__, __LINE__);
   }
 
-  switch (GET_CURRENT_POLICY(policy_data, global_data)) 
+  switch (GET_CURRENT_POLICY(policy_data, global_data, info)) 
   {
     case cache_policy_srrip:
       cache_access_block_srrip(&(policy_data->srrip), &(global_data->srrip), way, strm, info);
@@ -664,7 +714,7 @@ void cache_set_block_drrip(drrip_data *policy_data, drrip_gdata *global_data,
   assert(global_data);
   
   /* Call component policies */
-  switch (GET_CURRENT_POLICY(policy_data, global_data))
+  switch (GET_CURRENT_POLICY(policy_data, global_data, info))
   {
     case cache_policy_srrip:
       cache_set_block_srrip(&(policy_data->srrip), way, tag, state, stream, info);
@@ -693,7 +743,7 @@ struct cache_block_t cache_get_block_drrip(drrip_data *policy_data, drrip_gdata 
   assert(tag_ptr);
   assert(state_ptr);
   
-  switch (GET_CURRENT_POLICY(policy_data, global_data))
+  switch (GET_CURRENT_POLICY(policy_data, global_data, (memory_trace *)NULL))
   {
     case cache_policy_srrip:
       return cache_get_block_srrip(&(policy_data->srrip), way, tag_ptr, 
@@ -720,6 +770,7 @@ struct cache_block_t cache_get_block_drrip(drrip_data *policy_data, drrip_gdata 
 #undef SSRRIP
 #undef DFOLLOW
 #undef CURRENT_POLICY
+#undef DSRRIP
 #undef NEW_POLICY
 #undef PSEL_WIDTH
 #undef PSEL_MIN_VAL

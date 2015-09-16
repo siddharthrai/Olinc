@@ -86,6 +86,7 @@ typedef struct cache_policy_brrip_gdata_t
   sctr **epoch_hctr;  /* Per-stream epoch hit counter */
   ub1  *epoch_valid;  /* Valid epoch list */
   sctr access_ctr;    /* Current BRRIP access */
+  sctr faccess_ctr;   /* Current BRRIP access */
 }brrip_gdata;
 
 /*

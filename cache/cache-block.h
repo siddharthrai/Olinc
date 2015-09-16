@@ -148,6 +148,9 @@ struct cache_block_t
   /* Flag for dirty block */
   unsigned int dirty : 1;
   
+  /* Flag for spilled lock */
+  unsigned int spill : 1;
+
   unsigned int epoch;
 
   /* Recency of the block */

@@ -310,11 +310,13 @@ void cache_fill_block_srrip(srrip_data *policy_data, srrip_gdata *global_data,
     /* Update new block state and stream */
     CACHE_UPDATE_BLOCK_STATE(block, tag, info->vtl_addr, state);
     CACHE_UPDATE_BLOCK_STREAM(block, strm);
-    block->dirty        = (info && info->spill) ? 1 : 0;
-    block->last_rrpv    = rrpv;
-    block->is_ct_block  = FALSE;
-    block->is_bt_block  = FALSE;
-    block->is_zt_block  = FALSE;
+    block->dirty            = (info && info->spill) ? TRUE : FALSE;
+    block->spill            = (info && info->spill) ? TRUE : FALSE;
+    block->last_rrpv        = rrpv;
+    block->is_ct_block      = FALSE;
+    block->is_bt_block      = FALSE;
+    block->is_zt_block      = FALSE;
+    block->is_block_pinned  = FALSE;
 
     /* Insert block in to the corresponding RRPV queue */
     CACHE_APPEND_TO_QUEUE(block, 
@@ -448,7 +450,8 @@ void cache_access_block_srrip(srrip_data *policy_data, srrip_gdata *global_data,
 
       CACHE_UPDATE_BLOCK_STREAM(blk, strm);
 
-      blk->dirty   = (info && info->spill) ? 1 : 0;
+      blk->dirty  |= (info && info->spill) ? TRUE : FALSE;
+      blk->spill   = (info && info->spill) ? TRUE : FALSE;
       blk->access += 1;
       break;
 
@@ -523,7 +526,7 @@ int cache_get_replacement_rrpv_srrip(srrip_data *policy_data)
 }
 
 int cache_get_new_rrpv_srrip(srrip_data *policy_data, srrip_gdata *global_data, 
-    memory_trace *info, sb1 old_rrpv, ub4 epoch)
+    memory_trace *info, sb4 old_rrpv, ub4 epoch)
 {
   sb4 ret_rrpv;
   

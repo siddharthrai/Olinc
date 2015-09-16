@@ -249,27 +249,29 @@ void cache_fill_block_brrip(brrip_data *policy_data, brrip_gdata *global_data,
   /* Check: tag, state and insertion_position are valid */
   assert(tag >= 0);
   assert(state != cache_block_invalid);
-  
+
   /* Get the current block */
   block = &(BRRIP_DATA_BLOCKS(policy_data)[way]);
 
   /* Remove block from free list */
   free_list_remove_block(policy_data, block);
-  
+
   /* Update new block state and stream */
   CACHE_UPDATE_BLOCK_STATE(block, tag, info->vtl_addr, state);
   CACHE_UPDATE_BLOCK_STREAM(block, strm);
 
-  block->dirty        = (info && info->spill) ? 1 : 0;
-  block->epoch        = 0;
-  block->access       = 0;
-  block->is_ct_block  = FALSE;
-  block->is_bt_block  = FALSE;
-  block->is_zt_block  = FALSE;
+  block->dirty            = (info && info->spill) ? TRUE : FALSE;
+  block->spill            = (info && info->spill) ? TRUE : FALSE;
+  block->epoch            = 0;
+  block->access           = 0;
+  block->is_ct_block      = FALSE;
+  block->is_bt_block      = FALSE;
+  block->is_zt_block      = FALSE;
+  block->is_block_pinned  = FALSE;
 
   /* Get RRPV to be assigned to the new block */
   rrpv = cache_get_fill_rrpv_brrip(policy_data, global_data, info, block->epoch);
-  
+
   block->last_rrpv = rrpv;
 
 #if 0
@@ -283,13 +285,10 @@ void cache_fill_block_brrip(brrip_data *policy_data, brrip_gdata *global_data,
   }
 #endif  
 
-  if (rrpv != BYPASS_RRPV)
-  {
-    /* Insert block in to the corresponding RRPV queue */
-    CACHE_APPEND_TO_QUEUE(block, 
+  /* Insert block in to the corresponding RRPV queue */
+  CACHE_APPEND_TO_QUEUE(block, 
       BRRIP_DATA_VALID_HEAD(policy_data)[rrpv], 
       BRRIP_DATA_VALID_TAIL(policy_data)[rrpv]);
-  }
 
   BRRIP_DATA_CFPOLICY(policy_data) = BRRIP_DATA_DFPOLICY(policy_data);
 }
@@ -298,16 +297,18 @@ void cache_fill_block_brrip(brrip_data *policy_data, brrip_gdata *global_data,
 int cache_replace_block_brrip(brrip_data *policy_data)
 {
   struct cache_block_t *block;
+  ub4 min_wayid;
+  ub4 ret_wayid;
+  
+  ret_wayid = BYPASS_WAY;
 
   /* Try to find an invalid block. */
   for (block = BRRIP_DATA_FREE_HEAD(policy_data); block; block = block->prev)
   {
-    return block->way;
+    ret_wayid = block->way;
+    goto end;
   }
-
-  /* Remove a nonbusy block from the tail */
-  unsigned int min_wayid = ~(0);
-
+  
   /* Obtain RRPV from where to replace the block */
   int rrpv = cache_get_replacement_rrpv_brrip(policy_data);
 
@@ -321,6 +322,9 @@ int cache_replace_block_brrip(brrip_data *policy_data)
     CACHE_BRRIP_INCREMENT_RRPV(BRRIP_DATA_VALID_HEAD(policy_data), 
         BRRIP_DATA_VALID_TAIL(policy_data), rrpv);
   }
+
+  /* Remove a nonbusy block from the tail */
+  min_wayid = ~(0);
 
   switch (BRRIP_DATA_CRPOLICY(policy_data))
   {
@@ -352,10 +356,12 @@ int cache_replace_block_brrip(brrip_data *policy_data)
       panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
   }
 
-  BRRIP_DATA_CFPOLICY(policy_data) = BRRIP_DATA_DFPOLICY(policy_data);
-
   /* If no non busy block can be found, return -1 */
-  return (min_wayid != ~(0)) ? min_wayid : -1;
+  ret_wayid = (min_wayid != ~(0)) ? min_wayid : -1;
+
+end:
+  BRRIP_DATA_CRPOLICY(policy_data) = BRRIP_DATA_DRPOLICY(policy_data);
+  return ret_wayid;
 }
 
 
@@ -368,7 +374,7 @@ void cache_access_block_brrip(brrip_data *policy_data, brrip_gdata *global_data,
 
   int old_rrpv;
   int new_rrpv;
-  
+
   old_rrpv = 0;
   new_rrpv = 0;
 
@@ -379,7 +385,7 @@ void cache_access_block_brrip(brrip_data *policy_data, brrip_gdata *global_data,
   /* Check: block's tag and state are valid */
   assert(blk->tag >= 0);
   assert(blk->state != cache_block_invalid);
-  
+
   switch (BRRIP_DATA_CAPOLICY(policy_data))
   {
     case cache_policy_brrip:
@@ -402,7 +408,7 @@ void cache_access_block_brrip(brrip_data *policy_data, brrip_gdata *global_data,
       /* Get new RRPV using policy specific function */
       new_rrpv = cache_get_new_rrpv_brrip(policy_data, global_data, info, 
           old_rrpv, blk->epoch);
-        
+
       /* Update block queue if block got new RRPV */
       if (new_rrpv != old_rrpv)
       {
@@ -415,7 +421,8 @@ void cache_access_block_brrip(brrip_data *policy_data, brrip_gdata *global_data,
       }
 
       CACHE_UPDATE_BLOCK_STREAM(blk, strm);
-      blk->dirty   = (info && info->spill) ? 1 : 0;
+      blk->dirty  |= (info && info->spill) ? TRUE : FALSE;
+      blk->spill   = (info && info->spill) ? TRUE : FALSE;
       blk->access += 1;
       break;
 
@@ -426,7 +433,7 @@ void cache_access_block_brrip(brrip_data *policy_data, brrip_gdata *global_data,
       panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
   }
 
-  BRRIP_DATA_CFPOLICY(policy_data) = BRRIP_DATA_DFPOLICY(policy_data);
+  BRRIP_DATA_CAPOLICY(policy_data) = BRRIP_DATA_DAPOLICY(policy_data);
 }
 
 /* Get fill RRPV */
@@ -442,7 +449,7 @@ int cache_get_fill_rrpv_brrip(brrip_data *policy_data,
     BRRIP_DATA_CFPOLICY(policy_data) == cache_policy_lip      ||
     BRRIP_DATA_CFPOLICY(policy_data) == cache_policy_bypass   ||
     BRRIP_DATA_CFPOLICY(policy_data) == cache_policy_brrip);
-
+  
   switch (BRRIP_DATA_CFPOLICY(policy_data))
   {
     case cache_policy_lru:
@@ -494,7 +501,7 @@ int cache_get_fill_rrpv_brrip(brrip_data *policy_data,
         new_rrpv = BRRIP_DATA_MAX_RRPV(policy_data);
       }
 
-      if (CTR_VAL(global_data) < THRESHOLD(global_data) - 1)
+      if (CTR_VAL(global_data) < THRESHOLD(global_data))
       {
         /* Increment set access count */
         SAT_CTR_INC(global_data->access_ctr);
@@ -553,20 +560,6 @@ int cache_get_new_rrpv_brrip(brrip_data *policy_data, brrip_gdata *global_data,
 
 #undef VALID_EPOCH
   
-  if (info && info->spill)
-  {
-#if 0
-    if (old_rrpv == BRRIP_DATA_MAX_RRPV(policy_data))
-    {
-      ret_rrpv = old_rrpv - 1;
-    }
-    else
-    {
-      ret_rrpv = old_rrpv; 
-    }
-#endif
-  }
-
   return ret_rrpv;
 }
 
@@ -575,38 +568,40 @@ void cache_set_block_brrip(brrip_data *policy_data, int way, long long tag,
   enum cache_block_state_t state, ub1 stream, memory_trace *info)
 {
   struct cache_block_t *block;
-
-  block = &(BRRIP_DATA_BLOCKS(policy_data))[way];
-
-  /* Check: tag matches with the block's tag. */
-  assert(block->tag == tag);
-
-  /* Check: block must be in valid state. It is not possible to set
-   * state for an invalid block.*/
-  assert(block->state != cache_block_invalid);
-
-  if (state != cache_block_invalid)
+  
   {
-    /* Assign access stream */
-    CACHE_UPDATE_BLOCK_STATE(block, tag, info->vtl_addr, state);
-    CACHE_UPDATE_BLOCK_STREAM(block, stream);
-    return;
+    block = &(BRRIP_DATA_BLOCKS(policy_data))[way];
+
+    /* Check: tag matches with the block's tag. */
+    assert(block->tag == tag);
+
+    /* Check: block must be in valid state. It is not possible to set
+     * state for an invalid block.*/
+    assert(block->state != cache_block_invalid);
+
+    if (state != cache_block_invalid)
+    {
+      /* Assign access stream */
+      CACHE_UPDATE_BLOCK_STATE(block, tag, info->vtl_addr, state);
+      CACHE_UPDATE_BLOCK_STREAM(block, stream);
+      return;
+    }
+
+    /* Invalidate block */
+    CACHE_UPDATE_BLOCK_STATE(block, tag, info->vtl_addr, cache_block_invalid);
+    CACHE_UPDATE_BLOCK_STREAM(block, NN);
+    block->epoch = 0;
+
+    /* Get old RRPV from the block */
+    int old_rrpv = (((rrip_list *)(block->data))->rrpv);
+
+
+    /* Remove block from valid list and insert into free list */
+    CACHE_REMOVE_FROM_QUEUE(block, BRRIP_DATA_VALID_HEAD(policy_data)[old_rrpv], 
+        BRRIP_DATA_VALID_TAIL(policy_data)[old_rrpv]);
+    CACHE_APPEND_TO_SQUEUE(block, BRRIP_DATA_FREE_HEAD(policy_data), 
+        BRRIP_DATA_FREE_TAIL(policy_data));
   }
-
-  /* Invalidate block */
-  CACHE_UPDATE_BLOCK_STATE(block, tag, info->vtl_addr, cache_block_invalid);
-  CACHE_UPDATE_BLOCK_STREAM(block, NN);
-  block->epoch = 0;
-
-  /* Get old RRPV from the block */
-  int old_rrpv = (((rrip_list *)(block->data))->rrpv);
-
-
-  /* Remove block from valid list and insert into free list */
-  CACHE_REMOVE_FROM_QUEUE(block, BRRIP_DATA_VALID_HEAD(policy_data)[old_rrpv], 
-      BRRIP_DATA_VALID_TAIL(policy_data)[old_rrpv]);
-  CACHE_APPEND_TO_SQUEUE(block, BRRIP_DATA_FREE_HEAD(policy_data), 
-      BRRIP_DATA_FREE_TAIL(policy_data));
 }
 
 

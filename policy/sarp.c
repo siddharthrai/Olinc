@@ -183,7 +183,7 @@ do                                                                              
 #define FANDH(i, h)                   ((i)->fill == TRUE && (h) == TRUE)
 #define FANDM(i, h)                   ((i)->fill == TRUE && (h) == FALSE)
 #define CURRENT_POLICY(p, g, f, i, h) ((FANDM(i, h)) ? SPSARP(p, g, i, f) : f)
-#define FOLLOW_POLICY(f, i)           ((!FSARP(f)) && ((i)->fill) ? f : PSARP)
+#define FOLLOW_POLICY(f, i)           ((!FSARP(f) && ((i)->fill)) ? f : PSARP)
 
 extern struct cpu_t *cpu;
 extern ffifo_info ffifo_global_info;
@@ -641,14 +641,18 @@ void sampler_cache_init(sampler_cache *sampler, ub4 sets, ub4 ways)
   memset(sampler->stream_occupancy, 0 , sizeof(ub4) * (TST + 1));
 }
 
-void sampler_cache_reset(sampler_cache *sampler)
+void sampler_cache_reset(sarp_gdata *global_data, sampler_cache *sampler)
 {
   int sampler_occupancy;
 
   assert(sampler);
   
+  printf("SMPLR RESET");
+
   sampler_occupancy = 0;
   
+  printf("Bypass [%5d] MAX_REUSE[%5d]\n", global_data->bypass_count, global_data->sampler->perfctr.max_reuse);
+
   printf("[C] F:%5ld FR: %5ld S: %5ld SR: %5ld\n", sampler->perfctr.fill_count[CS], 
       sampler->perfctr.fill_reuse_count[CS], sampler->perfctr.spill_count[CS],
       sampler->perfctr.spill_reuse_count[CS]);
@@ -730,7 +734,7 @@ void sampler_cache_reset(sampler_cache *sampler)
 
     sampler->perfctr.fill_count_epoch[strm]            = 0;
     
-    for (ub1 ep = 0; ep < REPOCH_CNT; ep++)
+    for (ub1 ep = 0; ep <= REPOCH_CNT; ep++)
     {
       sampler->perfctr.fill_count_per_reuse_epoch[strm][ep] /= 2;
       sampler->perfctr.fill_reuse_per_reuse_epoch[strm][ep] /= 2;
@@ -821,9 +825,13 @@ static ub1 is_fill_bypass(sampler_cache *sampler, memory_trace *info)
 
 static ub1 is_hit_block_pinned(sampler_cache *sampler, memory_trace *info)
 {
+  ub1 strm;
+
+  strm = NEW_STREAM(info);
+
   if (info->spill == TRUE) 
   {
-    if (PINHBLK(&(sampler->perfctr), info->stream)) 
+    if (PINHBLK(&(sampler->perfctr), strm)) 
       return TRUE;
   }
 
@@ -832,9 +840,13 @@ static ub1 is_hit_block_pinned(sampler_cache *sampler, memory_trace *info)
 
 static ub1 is_miss_block_pinned(sampler_cache *sampler, memory_trace *info)
 {
+  ub1 strm;
+
+  strm = NEW_STREAM(info);
+
   if (info->spill == TRUE) 
   {
-    if (PINMBLK(&(sampler->perfctr), info->stream)) 
+    if (PINMBLK(&(sampler->perfctr), strm)) 
       return TRUE;
   }
 
@@ -865,7 +877,8 @@ int cache_get_fill_rrpv_sarp(sarp_data *policy_data, sarp_gdata *global_data,
 {
   sampler_perfctr *perfctr;
   int ret_rrpv;
-  
+  ub1 strm;
+
   assert(policy_data);
   assert(global_data);
   assert(info);
@@ -873,16 +886,17 @@ int cache_get_fill_rrpv_sarp(sarp_data *policy_data, sarp_gdata *global_data,
   /* Ensure current policy is sarp */
   assert(info->spill == TRUE && info->fill == FALSE);
   
+  strm      = NEW_STREAM(info);
   perfctr   = &((global_data->sampler)->perfctr);
   ret_rrpv  = 2;
 
-  if (RRPV1(perfctr, info->stream) || RRPV2(perfctr, info->stream))
+  if (RRPV1(perfctr, strm) || RRPV2(perfctr, strm))
   {
     ret_rrpv = 0;
   }
   else
   {
-    if (SRD_LOW(perfctr, info->stream) || SREUSE_LOW(perfctr, info->stream))
+    if (SRD_LOW(perfctr, strm) || SREUSE_LOW(perfctr, strm))
     {
       ret_rrpv = 3;
     }
@@ -928,6 +942,7 @@ int cache_get_new_rrpv_sarp(sarp_data *policy_data, sarp_gdata *global_data,
 {
   int ret_rrpv;
   int epoch;
+  int strm;
 
   sampler_perfctr *perfctr;
   
@@ -935,15 +950,17 @@ int cache_get_new_rrpv_sarp(sarp_data *policy_data, sarp_gdata *global_data,
   perfctr   = &((global_data->sampler)->perfctr);
   epoch     = block->epoch;
 
+  strm = NEW_STREAM(info);
+
   if (info->spill == TRUE)
   {
-    if (RRPV1(perfctr, info->stream) || RRPV2(perfctr, info->stream))
+    if (RRPV1(perfctr, strm) || RRPV2(perfctr, strm))
     {
       ret_rrpv = 0; 
     }
     else
     {
-      if (SRD_LOW(perfctr, info->stream) || SREUSE_LOW(perfctr, info->stream))
+      if (SRD_LOW(perfctr, strm) || SREUSE_LOW(perfctr, strm))
       {
         ret_rrpv = 3;
       }
@@ -1054,6 +1071,7 @@ void cache_init_sarp(long long int set_indx, struct cache_params *params,
     /* Initialize cache-wide data for SARP. */
     global_data->threshold    = params->threshold;
     global_data->sarp_streams = params->sdp_streams;
+    global_data->pin_blocks   = params->sarp_pin_blocks;
     global_data->ways         = params->ways;
     
     memset(global_data->fmiss_count, 0, sizeof(ub8) * (TST + 1));
@@ -1228,7 +1246,7 @@ void cache_free_sarp(long long int set_indx, sarp_data *policy_data,
 
     printf("Bypass [%5d] MAX_REUSE[%5d]\n", global_data->bypass_count, global_data->sampler->perfctr.max_reuse);
 
-    sampler_cache_reset(global_data->sampler);
+    sampler_cache_reset(global_data, global_data->sampler);
   }
 }
 
@@ -1283,35 +1301,246 @@ struct cache_block_t * cache_find_block_sarp(sarp_data *policy_data,
   }
 
 end:
-   
+
   if (info)
   {
     info->sap_stream = get_sarp_stream(global_data, info->stream, info->pid, info);
     /* Update sampler epoch length */
-
-    if (info->fill)
-    {
-      if (++((global_data->sampler)->epoch_length) == EPOCH_SIZE)
-      {
-        sampler_cache_reset(global_data->sampler);
-        
-        /* Reset epoch length */
-        (global_data->sampler)->epoch_length = 0;
-      }
-    }
   }
-  
+
   if (!node)
   {
-#if 0
-    if (info->fill || (info->spill && (info->stream == CS || info->stream == ZS || info->stream == BS)))
-#endif
+    enum cache_policy_t *per_stream_policy;
+    enum cache_policy_t  following_policy;
+
+    /* Get per-stream policy */
+    per_stream_policy = SARP_DATA_PSPOLICY(policy_data);
+    assert(per_stream_policy);
+
+    following_policy  = FOLLOW_POLICY(per_stream_policy[info->stream], info);
+
+    /* Update sampler set counter only for reads */
+    if (info->fill == TRUE)
     {
-      policy_data->miss_count += 1;
+      switch (policy_data->set_type)
+      {
+        case SARP_CSRRIP_GSRRIP_SET:
+          assert(following_policy == cache_policy_srrip || 
+              following_policy == cache_policy_sarp);
+
+          SAT_CTR_INC(global_data->srrip_psel);
+
+          if (SAT_CTR_VAL(global_data->srrip_psel) <= PSEL_MID_VAL)
+          {
+            SAT_CTR_INC(global_data->sarp_psel);
+          }
+          break;
+
+        case SARP_CBRRIP_GSRRIP_SET:
+          if (CPU_STREAM(info->stream))
+          {
+            assert(following_policy == cache_policy_brrip || 
+                following_policy == cache_policy_sarp);
+
+            /* Update brrip epsilon counter only for graphics */
+#define CTR_VAL(g)    (SAT_CTR_VAL((g)->baccess[SARP_CBRRIP_GSRRIP_SET]))
+#define THRESHOLD(g)  ((g)->threshold)
+
+            /* Update access counter for bimodal insertion */
+            if (CTR_VAL(global_data) < THRESHOLD(global_data))
+            {
+              /* Increment set access count */
+              SAT_CTR_INC(global_data->baccess[SARP_CBRRIP_GSRRIP_SET]);
+            }
+
+            if (CTR_VAL(global_data) >= THRESHOLD(global_data))
+            {
+              assert(CTR_VAL(global_data) == THRESHOLD(global_data));
+
+              /* Reset access count */
+              SAT_CTR_RST(global_data->baccess[SARP_CBRRIP_GSRRIP_SET]);
+            }
+
+            /* Set new value to brrip policy global data */
+            SAT_CTR_VAL(global_data->brrip.access_ctr) = CTR_VAL(global_data);
+
+#undef CTR_VAL
+#undef THRESHOLD
+          }
+          else
+          {
+            assert(following_policy == cache_policy_srrip || 
+                following_policy == cache_policy_sarp);
+          }
+
+          SAT_CTR_DEC(global_data->srrip_psel);
+
+          if (SAT_CTR_VAL(global_data->srrip_psel) > PSEL_MID_VAL)
+          {
+            SAT_CTR_INC(global_data->sarp_psel);
+          }
+          break;
+
+        case SARP_CSRRIP_GBRRIP_SET:
+          if (CPU_STREAM(info->stream))
+          {
+            assert(following_policy == cache_policy_srrip || 
+                following_policy == cache_policy_sarp);
+          }
+          else
+          {
+            assert(following_policy == cache_policy_brrip || 
+                following_policy == cache_policy_sarp);
+
+            /* Update brrip epsilon counter only for graphics */
+#define CTR_VAL(g)    (SAT_CTR_VAL((g)->baccess[SARP_CSRRIP_GBRRIP_SET]))
+#define THRESHOLD(g)  ((g)->threshold)
+
+            /* Update access counter for bimodal insertion */
+            if (CTR_VAL(global_data) < THRESHOLD(global_data))
+            {
+              /* Increment set access count */
+              SAT_CTR_INC(global_data->baccess[SARP_CSRRIP_GBRRIP_SET]);
+            }
+
+
+            if (CTR_VAL(global_data) >= THRESHOLD(global_data))
+            {
+              assert(CTR_VAL(global_data) == THRESHOLD(global_data));
+
+              /* Reset access count */
+              SAT_CTR_RST(global_data->baccess[SARP_CSRRIP_GBRRIP_SET]);
+            }
+
+            /* Set new value to brrip policy global data */
+            SAT_CTR_VAL(global_data->brrip.access_ctr) = CTR_VAL(global_data);
+
+#undef CTR_VAL
+#undef THRESHOLD
+          }
+
+          SAT_CTR_INC(global_data->brrip_psel); 
+
+          if (SAT_CTR_VAL(global_data->brrip_psel) <= PSEL_MID_VAL)
+          {
+            SAT_CTR_DEC(global_data->sarp_psel);
+          }
+          break;
+
+        case SARP_CBRRIP_GBRRIP_SET:
+          assert(following_policy == cache_policy_brrip || 
+              following_policy == cache_policy_sarp);
+
+          SAT_CTR_DEC(global_data->brrip_psel); 
+
+          if (SAT_CTR_VAL(global_data->brrip_psel) > PSEL_MID_VAL)
+          {
+            SAT_CTR_DEC(global_data->sarp_psel);
+          }
+
+          /* Update brrip epsilon counter only for graphics */
+#define CTR_VAL(g)    (SAT_CTR_VAL((g)->baccess[SARP_CBRRIP_GBRRIP_SET]))
+#define THRESHOLD(g)  ((g)->threshold)
+
+          /* Update access counter for bimodal insertion */
+          if (CTR_VAL(global_data) < THRESHOLD(global_data))
+          {
+            /* Increment set access count */
+            SAT_CTR_INC(global_data->baccess[SARP_CBRRIP_GBRRIP_SET]);
+          }
+
+
+          if (CTR_VAL(global_data) >= THRESHOLD(global_data))
+          {
+            assert(CTR_VAL(global_data) == THRESHOLD(global_data));
+
+            /* Reset access count */
+            SAT_CTR_RST(global_data->baccess[SARP_CBRRIP_GBRRIP_SET]);
+          }
+
+          /* Set new value to brrip policy global data */
+          SAT_CTR_VAL(global_data->brrip.access_ctr) = CTR_VAL(global_data);
+
+#undef CTR_VAL
+#undef THRESHOLD
+          break;
+
+        case SARP_FOLLOWER_SET:
+          /* Update brrip epsilon counter only for graphics */
+          if (CPU_STREAM(info->stream))
+          {
+#define CTR_VAL(g)    (SAT_CTR_VAL((g)->baccess[SARP_FOLLOWER_CPU_SET]))
+#define THRESHOLD(g)  ((g)->threshold)
+
+            /* Update access counter for bimodal insertion */
+            if (CTR_VAL(global_data) < THRESHOLD(global_data))
+            {
+              /* Increment set access count */
+              SAT_CTR_INC(global_data->baccess[SARP_FOLLOWER_CPU_SET]);
+            }
+
+            if (CTR_VAL(global_data) >= THRESHOLD(global_data))
+            {   
+              assert(CTR_VAL(global_data) == THRESHOLD(global_data));
+
+              /* Reset access count */
+              SAT_CTR_RST(global_data->baccess[SARP_FOLLOWER_CPU_SET]);
+            }
+
+            /* Set new value to brrip policy global data */
+            SAT_CTR_VAL(global_data->brrip.access_ctr) = CTR_VAL(global_data);
+
+#undef CTR_VAL
+#undef THRESHOLD
+          }
+          else
+          {
+#define CTR_VAL(g)    (SAT_CTR_VAL((g)->baccess[SARP_FOLLOWER_GPU_SET]))
+#define THRESHOLD(g)  ((g)->threshold)
+
+            /* Update access counter for bimodal insertion */
+            if (CTR_VAL(global_data) < THRESHOLD(global_data))
+            {
+              /* Increment set access count */
+              SAT_CTR_INC(global_data->baccess[SARP_FOLLOWER_GPU_SET]);
+            }
+
+            if (CTR_VAL(global_data) >= THRESHOLD(global_data))
+            {
+              assert(CTR_VAL(global_data) == THRESHOLD(global_data));
+
+              /* Reset access count */
+              SAT_CTR_RST(global_data->baccess[SARP_FOLLOWER_GPU_SET]);
+            }
+
+            /* Set new value to brrip policy global data */
+            SAT_CTR_VAL(global_data->brrip.access_ctr) = CTR_VAL(global_data);
+
+#undef CTR_VAL
+#undef THRESHOLD
+          }
+
+          break;
+
+        default:
+          panic("%s: line no %d - invalid sample type", __FUNCTION__, __LINE__);
+      }
     }
+
   }
 
   sampler_cache_lookup(global_data->sampler, policy_data, info);
+
+  if (info && info->fill)
+  {
+    if (++((global_data->sampler)->epoch_length) == EPOCH_SIZE)
+    {
+      sampler_cache_reset(global_data, global_data->sampler);
+
+      /* Reset epoch length */
+      (global_data->sampler)->epoch_length = 0;
+    }
+  }
 
   return node;
 }
@@ -1323,7 +1552,7 @@ void cache_fill_block_sarp(sarp_data *policy_data,
     enum cache_block_state_t state, int stream, memory_trace *info)
 {
   sarp_stream  sstream;
-  
+
   struct cache_block_t  *block;
   enum   cache_policy_t *per_stream_policy;  
   enum   cache_policy_t  current_policy;  
@@ -1332,7 +1561,7 @@ void cache_fill_block_sarp(sarp_data *policy_data,
   /* Check: tag, state and insertion_position are valid */
   assert(tag >= 0);
   assert(state != cache_block_invalid);
-  
+
   /* Increment miss count for incoming stream */
   if (info->spill)
   {
@@ -1345,7 +1574,7 @@ void cache_fill_block_sarp(sarp_data *policy_data,
 
   /* Obtain SAP stream */
   sstream = get_sarp_stream(global_data, info->stream, info->pid, info); 
-  
+
   info->sap_stream = sstream;
 
   /* Get per-stream policy */
@@ -1353,19 +1582,9 @@ void cache_fill_block_sarp(sarp_data *policy_data,
   assert(per_stream_policy);
 
   following_policy  = FOLLOW_POLICY(per_stream_policy[info->stream], info);
-  
+
   assert(FSRRIP(following_policy) || FBRRIP(following_policy) || FSARP(following_policy));
-  
-  /* 
-   * Update SARP counter
-   *
-   *  The counter is used to decide whether to follow DRRIP or 
-   *  modified policy. The counter is incremented whenever there is
-   *  a miss in the sample to be followed by DRRIP and it is decremented 
-   *  everytime there is a miss in the policy sample.
-   *
-   **/
-  
+
   /* Update sampler set counter only for reads */
   if (info->fill == TRUE)
   {
@@ -1374,13 +1593,6 @@ void cache_fill_block_sarp(sarp_data *policy_data,
       case SARP_CSRRIP_GSRRIP_SET:
         assert(following_policy == cache_policy_srrip || 
             following_policy == cache_policy_sarp);
-
-        SAT_CTR_INC(global_data->srrip_psel);
-
-        if (SAT_CTR_VAL(global_data->srrip_psel) <= PSEL_MID_VAL)
-        {
-          SAT_CTR_INC(global_data->sarp_psel);
-        }
         break;
 
       case SARP_CBRRIP_GSRRIP_SET:
@@ -1389,21 +1601,8 @@ void cache_fill_block_sarp(sarp_data *policy_data,
           assert(following_policy == cache_policy_brrip || 
               following_policy == cache_policy_sarp);
 
-          /* Update brrip epsilon counter only for graphics */
 #define CTR_VAL(g)    (SAT_CTR_VAL((g)->baccess[SARP_CBRRIP_GSRRIP_SET]))
 #define THRESHOLD(g)  ((g)->threshold)
-
-          /* Update access counter for bimodal insertion */
-          if (CTR_VAL(global_data) < THRESHOLD(global_data) - 1)
-          {
-            /* Increment set access count */
-            SAT_CTR_INC(global_data->baccess[SARP_CBRRIP_GSRRIP_SET]);
-          }
-          else
-          {
-            /* Reset access count */
-            SAT_CTR_RST(global_data->baccess[SARP_CBRRIP_GSRRIP_SET]);
-          }
 
           /* Set new value to brrip policy global data */
           SAT_CTR_VAL(global_data->brrip.access_ctr) = CTR_VAL(global_data);
@@ -1415,13 +1614,6 @@ void cache_fill_block_sarp(sarp_data *policy_data,
         {
           assert(following_policy == cache_policy_srrip || 
               following_policy == cache_policy_sarp);
-        }
-
-        SAT_CTR_DEC(global_data->srrip_psel);
-
-        if (SAT_CTR_VAL(global_data->srrip_psel) > PSEL_MID_VAL)
-        {
-          SAT_CTR_INC(global_data->sarp_psel);
         }
         break;
 
@@ -1440,18 +1632,6 @@ void cache_fill_block_sarp(sarp_data *policy_data,
 #define CTR_VAL(g)    (SAT_CTR_VAL((g)->baccess[SARP_CSRRIP_GBRRIP_SET]))
 #define THRESHOLD(g)  ((g)->threshold)
 
-          /* Update access counter for bimodal insertion */
-          if (CTR_VAL(global_data) < THRESHOLD(global_data) - 1)
-          {
-            /* Increment set access count */
-            SAT_CTR_INC(global_data->baccess[SARP_CSRRIP_GBRRIP_SET]);
-          }
-          else
-          {
-            /* Reset access count */
-            SAT_CTR_RST(global_data->baccess[SARP_CSRRIP_GBRRIP_SET]);
-          }
-
           /* Set new value to brrip policy global data */
           SAT_CTR_VAL(global_data->brrip.access_ctr) = CTR_VAL(global_data);
 
@@ -1459,40 +1639,15 @@ void cache_fill_block_sarp(sarp_data *policy_data,
 #undef THRESHOLD
         }
 
-        SAT_CTR_INC(global_data->brrip_psel); 
-
-        if (SAT_CTR_VAL(global_data->brrip_psel) <= PSEL_MID_VAL)
-        {
-          SAT_CTR_DEC(global_data->sarp_psel);
-        }
         break;
 
       case SARP_CBRRIP_GBRRIP_SET:
         assert(following_policy == cache_policy_brrip || 
             following_policy == cache_policy_sarp);
 
-        SAT_CTR_DEC(global_data->brrip_psel); 
-
-        if (SAT_CTR_VAL(global_data->brrip_psel) > PSEL_MID_VAL)
-        {
-          SAT_CTR_DEC(global_data->sarp_psel);
-        }
-
         /* Update brrip epsilon counter only for graphics */
 #define CTR_VAL(g)    (SAT_CTR_VAL((g)->baccess[SARP_CBRRIP_GBRRIP_SET]))
 #define THRESHOLD(g)  ((g)->threshold)
-
-        /* Update access counter for bimodal insertion */
-        if (CTR_VAL(global_data) < THRESHOLD(global_data) - 1)
-        {
-          /* Increment set access count */
-          SAT_CTR_INC(global_data->baccess[SARP_CBRRIP_GBRRIP_SET]);
-        }
-        else
-        {
-          /* Reset access count */
-          SAT_CTR_RST(global_data->baccess[SARP_CBRRIP_GBRRIP_SET]);
-        }
 
         /* Set new value to brrip policy global data */
         SAT_CTR_VAL(global_data->brrip.access_ctr) = CTR_VAL(global_data);
@@ -1508,18 +1663,6 @@ void cache_fill_block_sarp(sarp_data *policy_data,
 #define CTR_VAL(g)    (SAT_CTR_VAL((g)->baccess[SARP_FOLLOWER_CPU_SET]))
 #define THRESHOLD(g)  ((g)->threshold)
 
-          /* Update access counter for bimodal insertion */
-          if (CTR_VAL(global_data) < THRESHOLD(global_data) - 1)
-          {
-            /* Increment set access count */
-            SAT_CTR_INC(global_data->baccess[SARP_FOLLOWER_CPU_SET]);
-          }
-          else
-          {
-            /* Reset access count */
-            SAT_CTR_RST(global_data->baccess[SARP_FOLLOWER_CPU_SET]);
-          }
-
           /* Set new value to brrip policy global data */
           SAT_CTR_VAL(global_data->brrip.access_ctr) = CTR_VAL(global_data);
 
@@ -1531,24 +1674,11 @@ void cache_fill_block_sarp(sarp_data *policy_data,
 #define CTR_VAL(g)    (SAT_CTR_VAL((g)->baccess[SARP_FOLLOWER_GPU_SET]))
 #define THRESHOLD(g)  ((g)->threshold)
 
-          /* Update access counter for bimodal insertion */
-          if (CTR_VAL(global_data) < THRESHOLD(global_data) - 1)
-          {
-            /* Increment set access count */
-            SAT_CTR_INC(global_data->baccess[SARP_FOLLOWER_GPU_SET]);
-          }
-          else
-          {
-            /* Reset access count */
-            SAT_CTR_RST(global_data->baccess[SARP_FOLLOWER_GPU_SET]);
-          }
-
           /* Set new value to brrip policy global data */
           SAT_CTR_VAL(global_data->brrip.access_ctr) = CTR_VAL(global_data);
 
 #undef CTR_VAL
 #undef THRESHOLD
-
         }
 
         break;
@@ -1558,11 +1688,23 @@ void cache_fill_block_sarp(sarp_data *policy_data,
     }
   }
 
+  /* 
+   * Update SARP counter
+   *
+   *  The counter is used to decide whether to follow DRRIP or 
+   *  modified policy. The counter is incremented whenever there is
+   *  a miss in the sample to be followed by DRRIP and it is decremented 
+   *  everytime there is a miss in the policy sample.
+   *
+   **/
+
   /* Get the policy based on policy selection counters */
   current_policy = CURRENT_POLICY(policy_data, global_data, following_policy, info, FALSE);
-  
+
   if (way != BYPASS_WAY)
   {
+    policy_data->miss_count += 1;
+
     switch (current_policy)
     {
       case cache_policy_srrip:
@@ -1582,6 +1724,7 @@ void cache_fill_block_sarp(sarp_data *policy_data,
 
       case cache_policy_brrip:
         assert(way != BYPASS_WAY);
+        assert(info->fill);
 
         cache_fill_block_brrip(&(policy_data->brrip), &(global_data->brrip), 
             way, tag, state, stream, info);
@@ -1617,16 +1760,19 @@ void cache_fill_block_sarp(sarp_data *policy_data,
           CACHE_UPDATE_BLOCK_STATE(block, tag, state);
           CACHE_UPDATE_BLOCK_STREAM(block, info->stream);
 
-          block->dirty        = (info && info->spill) ? TRUE : FALSE;
-          block->last_rrpv    = rrpv;
-          block->epoch        = 0;
-          block->is_ct_block  = 0;
-          block->is_zt_block  = 0;
-          block->is_bt_block  = 0;
+          block->dirty           = (info && info->spill) ? TRUE : FALSE;
+          block->spill           = (info && info->spill) ? TRUE : FALSE;
+          block->last_rrpv       = rrpv;
+          block->epoch           = 0;
+          block->is_ct_block     = 0;
+          block->is_zt_block     = 0;
+          block->is_bt_block     = 0;
+          block->is_block_pinned = 0;
 
           if (info->spill == TRUE)
           {
-            if (is_miss_block_pinned(global_data->sampler, info))
+            if (global_data->pin_blocks && 
+                is_miss_block_pinned(global_data->sampler, info))
             {
               block->is_block_pinned = TRUE;
             }
@@ -1670,8 +1816,7 @@ int cache_replace_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
   ret_wayid = BYPASS_WAY;
   min_rrpv  = !SARP_DATA_MAX_RRPV(policy_data);
 
-  if ((info->stream != CS && info->stream != ZS && info->stream != BS) && 
-      info->spill == TRUE)
+  if ((info->stream != CS && info->stream != ZS && info->stream != BS) && info->spill == TRUE)
   {
     goto end;
   }
@@ -1694,13 +1839,7 @@ int cache_replace_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
     switch (current_policy)
     {
       case cache_policy_srrip:
-#if 0
-        return cache_replace_block_srrip(&(policy_data->srrip), &(global_data->srrip));
-#endif
       case cache_policy_brrip:
-#if 0
-        return cache_replace_block_brrip(&(policy_data->brrip));
-#endif
       case cache_policy_sarp:
         /* Try to find an invalid block always from head of the free list. */
         for (block = SARP_DATA_FREE_HEAD(policy_data); block; block = block->prev)
@@ -1721,10 +1860,7 @@ int cache_replace_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
 
           /* If there is no block with required RRPV, increment RRPV of all the blocks
            * until we get one with the required RRPV */
-#if 0
-          while (head_block == NULL || (head_block && head_block->is_block_pinned))
-#endif
-          while (1)
+          do
           {
             struct  cache_block_t *old_block;
 
@@ -1736,7 +1872,8 @@ int cache_replace_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
               CACHE_SARP_INCREMENT_RRPV(SARP_DATA_VALID_HEAD(policy_data), 
                   SARP_DATA_VALID_TAIL(policy_data), rrpv);
             }
-#if 0            
+
+            /* Find pinned block at victim rrpv and move it to minimum RRPV */
             for (ub4 way_id = 0; way_id < global_data->ways; way_id++)
             {
               old_block = &SARP_DATA_BLOCKS(policy_data)[way_id];
@@ -1760,41 +1897,16 @@ int cache_replace_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
                 }
               }
             }
-#endif
-#if 0
-            for (block = SARP_DATA_VALID_TAIL(policy_data)[rrpv].head; block; )
-            {
-              old_block = block;
-              block     = block->next;
-              if (old_block->is_block_pinned == TRUE)
-              {
-                old_block->is_block_pinned = FALSE;
 
-                /* Move block to min RRPV */
-                CACHE_REMOVE_FROM_QUEUE(old_block, SARP_DATA_VALID_HEAD(policy_data)[rrpv],
-                    SARP_DATA_VALID_TAIL(policy_data)[rrpv]);
-                CACHE_APPEND_TO_QUEUE(old_block, SARP_DATA_VALID_HEAD(policy_data)[min_rrpv], 
-                    SARP_DATA_VALID_TAIL(policy_data)[min_rrpv]);
-              }
-            }
-#endif
             head_block = SARP_DATA_VALID_HEAD(policy_data)[rrpv].head;
-
-            if (head_block)
-            {
-              break;
-            }
-          }
+          }while(!head_block);
 
           /* Remove a nonbusy block from the tail */
           unsigned int min_wayid = ~(0);
 
           for (block = SARP_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
           {
-#if 0
             if (!block->busy && !block->is_block_pinned && block->way < min_wayid)
-#endif
-            if (!block->busy && block->way < min_wayid)
               min_wayid = block->way;
           }
 
@@ -1889,22 +2001,10 @@ void cache_access_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
   switch (current_policy)
   {
     case cache_policy_srrip:
-#if 0
-      cache_access_block_srrip(&(policy_data->srrip), &(global_data->srrip), 
-          way, stream, info);
-      break;
-#endif
-
     case cache_policy_brrip:
-#if 0
-      cache_access_block_brrip(&(policy_data->brrip), &(global_data->brrip), 
-          way, stream, info);
-      break;
-#endif
-
     case cache_policy_sarp:
       /* Update block epoch */
-      if (info->fill && blk->dirty == FALSE)
+      if (info->fill && blk->spill == FALSE)
       {
       /* Update block epoch */
 #define MX_EP  (REPOCH_CNT)
@@ -1918,13 +2018,12 @@ void cache_access_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
         blk->epoch = 0;
       }
 
-
-      if (blk->dirty)
+      if (blk->spill)
       {
         /* Update inter stream flags */
         update_block_xstream(blk, info);
       }
-      
+
       /* Get old RRPV from the block */
       old_rrpv = (((rrip_list *)(blk->data))->rrpv);
 
@@ -1940,14 +2039,24 @@ void cache_access_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
             SRRIP_DATA_VALID_TAIL(policy_data)[new_rrpv]);
       }
 
-      blk->dirty = (info && info->spill) ? TRUE : FALSE;
+      blk->dirty |= (info && info->spill) ? TRUE : FALSE;
+      blk->spill  = (info && info->spill) ? TRUE : FALSE;
       
       if (info->spill == TRUE)
       {
-        if (is_hit_block_pinned(global_data->sampler, info))
+        if (global_data->pin_blocks && 
+            is_hit_block_pinned(global_data->sampler, info))
         {
           blk->is_block_pinned = TRUE;
         }
+        else
+        {
+          blk->is_block_pinned = FALSE;
+        }
+      }
+      else
+      {
+        blk->is_block_pinned = FALSE;
       }
       
       CACHE_UPDATE_BLOCK_PC(blk, info->pc);
@@ -2134,13 +2243,19 @@ void update_sampler_spill_reuse_perfctr(sampler_cache *sampler, ub4 index, ub4 w
     sarp_data *policy_data, memory_trace *info)
 {
   ub1 strm;
+  ub1 ostrm;
   ub1 offset;
 
   /* Obtain sampler entry corresponding to address */
   offset = SAMPLER_OFFSET(info, sampler);
   assert(offset < sampler->entry_size);
 
-  strm = SARP_OSTREAM(sampler->blocks[index][way], offset, info);
+#define OSTREAM(s, i, w, o) ((s)->blocks[i][w].stream[o])
+
+  ostrm = OSTREAM(sampler, index, way, offset);
+  strm  = KNOWN_STREAM(ostrm) ? ostrm : OS;
+
+#undef OSTREAM
 
   /* Verify sampler data */
   assert(sampler->blocks[index][way].spill_or_fill[offset] == TRUE);
@@ -2179,7 +2294,10 @@ void update_sampler_spill_perfctr(sampler_cache *sampler, ub4 index, ub4 way,
   offset = SAMPLER_OFFSET(info, sampler);
   assert(offset < sampler->entry_size);
 
-  strm = SARP_STREAM(sampler->blocks[index][way], offset, info);
+  strm = NEW_STREAM(info);
+  
+  /* Spill cant be generated by dynamic stream */
+  assert(strm != DCS && strm != DZS && strm != DBS && strm != DPS);
 
   SMPLRPERF_SPILL(&(sampler->perfctr), strm) += 1;
 }
@@ -2276,12 +2394,6 @@ static void update_sampler_fill_reuse_per_reuse_epoch_perfctr(sampler_cache *sam
   
   /* Inrement fill reuse */
   SMPLRPERF_FREUSE_RE(&(sampler->perfctr), strm, epoch) += 1;
-  
-  /* Update max reuse */
-  if (SMPLRPERF_FREUSE_RE(&(sampler->perfctr), strm, epoch) > SMPLRPERF_MREUSE(&(sampler->perfctr)))
-  {
-    SMPLRPERF_MREUSE(&(sampler->perfctr)) = SMPLRPERF_FREUSE_RE(&(sampler->perfctr), strm, epoch);
-  }
 
 #undef REUSE_DISTANCE
 }
@@ -2366,6 +2478,8 @@ void sampler_cache_fill_block(sampler_cache *sampler, ub4 index, ub4 way,
   {
     update_sampler_spill_perfctr(sampler, index, way, info);
   }
+
+  sampler->perfctr.sampler_fill += 1;
 }
 
 void sampler_cache_access_block(sampler_cache *sampler, ub4 index, ub4 way,
@@ -2419,6 +2533,8 @@ void sampler_cache_access_block(sampler_cache *sampler, ub4 index, ub4 way,
   sampler->blocks[index][way].spill_or_fill[offset] = (info->spill ? TRUE : FALSE);
   sampler->blocks[index][way].stream[offset]        = info->stream;
   sampler->blocks[index][way].timestamp[offset]     = policy_data->miss_count;
+
+  sampler->perfctr.sampler_hit += 1;
 }
 
 void sampler_cache_lookup(sampler_cache *sampler, sarp_data *policy_data, 
@@ -2435,11 +2551,16 @@ void sampler_cache_lookup(sampler_cache *sampler, sarp_data *policy_data,
   page        = SAMPLER_TAG(info, sampler);
   offset      = SAMPLER_OFFSET(info, sampler);
   strm        = NEW_STREAM(info);
+  
+  sampler->perfctr.sampler_access += 1;
 
   for (way = 0; way < sampler->ways; way++)
   {
     if (sampler->blocks[index][way].page == page)
     {
+      assert(page != SARP_SAMPLER_INVALID_TAG);
+
+      sampler->perfctr.sampler_block_found += 1;
       break;
     }
   }
@@ -2451,7 +2572,10 @@ void sampler_cache_lookup(sampler_cache *sampler, sarp_data *policy_data,
     for (way = 0; way < sampler->ways; way++)
     {
       if (sampler->blocks[index][way].page == SARP_SAMPLER_INVALID_TAG)
+      {
+        sampler->perfctr.sampler_invalid_block_found += 1;
         break;
+      }
     }
   }
 
@@ -2473,6 +2597,8 @@ void sampler_cache_lookup(sampler_cache *sampler, sarp_data *policy_data,
         sampler->blocks[index][way].dynamic_blit[off]   = 0;
         sampler->blocks[index][way].dynamic_proc[off]   = 0;
       }
+
+      sampler->perfctr.sampler_replace += 1;
     }
   }
   
