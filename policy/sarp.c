@@ -733,7 +733,7 @@ void sampler_cache_reset(sarp_gdata *global_data, sampler_cache *sampler)
     sampler->perfctr.spill_reuse_distance_low[strm]   /= 2;
 
     sampler->perfctr.fill_count_epoch[strm]            = 0;
-    
+
     for (ub1 ep = 0; ep <= REPOCH_CNT; ep++)
     {
       sampler->perfctr.fill_count_per_reuse_epoch[strm][ep] /= 2;
@@ -1529,19 +1529,6 @@ end:
 
   }
 
-  sampler_cache_lookup(global_data->sampler, policy_data, info);
-
-  if (info && info->fill)
-  {
-    if (++((global_data->sampler)->epoch_length) == EPOCH_SIZE)
-    {
-      sampler_cache_reset(global_data, global_data->sampler);
-
-      /* Reset epoch length */
-      (global_data->sampler)->epoch_length = 0;
-    }
-  }
-
   return node;
 }
 
@@ -1789,6 +1776,19 @@ void cache_fill_block_sarp(sarp_data *policy_data,
 
       default:
         panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
+    }
+  }
+
+  sampler_cache_lookup(global_data->sampler, policy_data, info);
+
+  if (info && info->fill)
+  {
+    if (++((global_data->sampler)->epoch_length) == EPOCH_SIZE)
+    {
+      sampler_cache_reset(global_data, global_data->sampler);
+
+      /* Reset epoch length */
+      (global_data->sampler)->epoch_length = 0;
     }
   }
 }
@@ -2065,6 +2065,19 @@ void cache_access_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
 
     default:
       panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
+  }
+
+  sampler_cache_lookup(global_data->sampler, policy_data, info);
+
+  if (info && info->fill)
+  {
+    if (++((global_data->sampler)->epoch_length) == EPOCH_SIZE)
+    {
+      sampler_cache_reset(global_data, global_data->sampler);
+
+      /* Reset epoch length */
+      (global_data->sampler)->epoch_length = 0;
+    }
   }
 }
 

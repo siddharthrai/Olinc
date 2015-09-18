@@ -1099,7 +1099,8 @@ int cache_replace_block_sapdbp(sapdbp_data *policy_data,
   switch (GET_CURRENT_POLICY(global_data, policy_data->following))
   {
     case cache_policy_srrip:
-      ret_way = cache_replace_block_srrip(&(policy_data->srrip), &(global_data->srrip));
+      ret_way = cache_replace_block_srrip(&(policy_data->srrip), 
+          &(global_data->srrip), info);
       break; 
 
     case cache_policy_brrip:

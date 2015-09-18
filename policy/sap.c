@@ -906,7 +906,8 @@ int cache_replace_block_sap(sap_data *policy_data, sap_gdata *global_data,
       return (min_wayid != INVALID_WAYID) ? min_wayid : -1;
 
     case cache_policy_srrip:
-      min_wayid =  cache_replace_block_srrip(&(policy_data->srrip), &(global_data->srrip));
+      min_wayid =  cache_replace_block_srrip(&(policy_data->srrip), 
+          &(global_data->srrip), info);
 
       if (min_wayid != INVALID_WAYID)
       {

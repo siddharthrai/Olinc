@@ -278,6 +278,7 @@ void cache_fill_block_drrip(drrip_data *policy_data, drrip_gdata *global_data,
  *
  *  policy_data (IN)  - Set of the block 
  *  global_data (IN)  - Cache wide policy data
+ *  info        (IN)  - Access info
  *
  * RETURNS
  *  
@@ -285,7 +286,8 @@ void cache_fill_block_drrip(drrip_data *policy_data, drrip_gdata *global_data,
  *
  */
 
-int  cache_replace_block_drrip(drrip_data *policy_data, drrip_gdata *global_data);
+int  cache_replace_block_drrip(drrip_data *policy_data, 
+    drrip_gdata *global_data, memory_trace *info);
 
 /*
  *

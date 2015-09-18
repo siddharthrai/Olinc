@@ -991,7 +991,8 @@ int cache_replace_block_gsdrrip(gsdrrip_data *policy_data,
   switch (GET_CURRENT_POLICY(policy_data, global_data, GSSTRM(global_data, info)))
   {
     case cache_policy_srrip:
-      ret_way = cache_replace_block_srrip(&(policy_data->srrip), &(global_data->srrip));
+      ret_way = cache_replace_block_srrip(&(policy_data->srrip), 
+          &(global_data->srrip), info);
       break; 
 
     case cache_policy_brrip:

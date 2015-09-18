@@ -1707,7 +1707,7 @@ int cache_replace_block_sappriority(sappriority_data *policy_data,
   {
     case cache_policy_srrip:
       ret_way = cache_replace_block_srrip(&(policy_data->srrip), 
-          &(global_data->srrip));
+          &(global_data->srrip), info);
       break; 
 
     case cache_policy_customsrrip:

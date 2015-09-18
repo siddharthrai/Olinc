@@ -366,7 +366,8 @@ void cache_fill_block_gspc(gspc_data *policy_data, gspc_gdata *global_data,
 }
 
 /* Block replacement */
-int cache_replace_block_gspc(gspc_data *policy_data, gspc_gdata *global_data)
+int cache_replace_block_gspc(gspc_data *policy_data, gspc_gdata *global_data,
+    memory_trace *info)
 {
   struct cache_block_t *block;
 
@@ -375,7 +376,7 @@ int cache_replace_block_gspc(gspc_data *policy_data, gspc_gdata *global_data)
   if (policy_data->following == cache_policy_srrip)
   {
     return cache_replace_block_srrip(&(policy_data->srrip_policy_data), 
-        &(global_data->srrip));
+        &(global_data->srrip), info);
   }
   else
   {

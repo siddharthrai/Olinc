@@ -1272,7 +1272,7 @@ struct cache_block_t* cache_find_block_srripsage(srripsage_data *policy_data,
     else
     {
       min_wayid = cache_replace_block_srrip(&(policy_data->srrip_policy_data),
-          &(global_data->srrip));
+          &(global_data->srrip), info);
 
       assert(min_wayid != -1);
 

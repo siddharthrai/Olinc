@@ -82,7 +82,8 @@ void cache_fill_block_gshp(gshp_data *policy_data, gshp_gdata *global_data,
   int way, long long tag, enum cache_block_state_t state, int strm, 
   memory_trace *info);
 
-int  cache_replace_block_gshp(gshp_data *policy_data, gshp_gdata *global_data);
+int  cache_replace_block_gshp(gshp_data *policy_data, gshp_gdata *global_data,
+    memory_trace *info);
 
 void cache_access_block_gshp(gshp_data *policy_data, gshp_gdata *global_data, 
   int way, int strm, memory_trace *info);

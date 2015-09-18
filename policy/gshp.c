@@ -295,7 +295,8 @@ void cache_fill_block_gshp(gshp_data *policy_data, gshp_gdata *global_data,
 }
 
 
-int cache_replace_block_gshp(gshp_data *policy_data, gshp_gdata *global_data)
+int cache_replace_block_gshp(gshp_data *policy_data, gshp_gdata *global_data,
+    memory_trace *info)
 {
   struct cache_block_t *block;
 
@@ -303,7 +304,8 @@ int cache_replace_block_gshp(gshp_data *policy_data, gshp_gdata *global_data)
   
   if (policy_data->following == cache_policy_srrip)
   {
-    return cache_replace_block_srrip((srrip_data *)policy_data, &(global_data->srrip));
+    return cache_replace_block_srrip((srrip_data *)policy_data, 
+        &(global_data->srrip), info);
   }
   else
   {

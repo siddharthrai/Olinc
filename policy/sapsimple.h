@@ -285,6 +285,7 @@ void cache_fill_block_sapsimple(sapsimple_data *policy_data, sapsimple_gdata *gl
  *
  *  policy_data (IN)  - Set of the block 
  *  global_data (IN)  - Cache wide policy data
+ *  info        (IN)  - Access info
  *
  * RETURNS
  *  
@@ -292,7 +293,8 @@ void cache_fill_block_sapsimple(sapsimple_data *policy_data, sapsimple_gdata *gl
  *
  */
 
-int  cache_replace_block_sapsimple(sapsimple_data *policy_data, sapsimple_gdata *global_data);
+int  cache_replace_block_sapsimple(sapsimple_data *policy_data, 
+    sapsimple_gdata *global_data, memory_trace *info);
 
 /*
  *

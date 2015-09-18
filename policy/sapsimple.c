@@ -740,7 +740,8 @@ void cache_fill_block_sapsimple(sapsimple_data *policy_data,
 #undef THRESHOLD
 }
 
-int cache_replace_block_sapsimple(sapsimple_data *policy_data, sapsimple_gdata *global_data)
+int cache_replace_block_sapsimple(sapsimple_data *policy_data, 
+    sapsimple_gdata *global_data, memory_trace *info)
 {
   int ret_way;
 
@@ -752,7 +753,8 @@ int cache_replace_block_sapsimple(sapsimple_data *policy_data, sapsimple_gdata *
   switch (GET_CURRENT_POLICY(global_data, policy_data->following))
   {
     case cache_policy_srrip:
-      ret_way = cache_replace_block_srrip(&(policy_data->srrip), &(global_data->srrip));
+      ret_way = cache_replace_block_srrip(&(policy_data->srrip), 
+          &(global_data->srrip), info);
       break; 
 
     case cache_policy_brrip:

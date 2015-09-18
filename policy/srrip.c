@@ -279,55 +279,59 @@ void cache_fill_block_srrip(srrip_data *policy_data, srrip_gdata *global_data,
   /* Check: tag, state and insertion_position are valid */
   assert(tag >= 0);
   assert(state != cache_block_invalid);
-
-  /* Obtain SRRIP specific data */
-  block = &(SRRIP_DATA_BLOCKS(policy_data)[way]);
-  block->epoch  = 0;
-  block->access = 0;
   
-  assert(block->stream == 0);
+  if (way != BYPASS_WAY)
+  {
+    /* Obtain SRRIP specific data */
+    block = &(SRRIP_DATA_BLOCKS(policy_data)[way]);
+    block->epoch  = 0;
+    block->access = 0;
 
-  /* Get RRPV to be assigned to the new block */
+    assert(block->stream == 0);
 
-  rrpv = cache_get_fill_rrpv_srrip(policy_data, global_data, info, block->epoch);
+    /* Get RRPV to be assigned to the new block */
+
+    rrpv = cache_get_fill_rrpv_srrip(policy_data, global_data, info, block->epoch);
 
 #if 0
-  if (info && info->spill == TRUE)
-  {
-    rrpv = SRRIP_DATA_SPILL_RRPV(policy_data);
-  }
+    if (info && info->spill == TRUE)
+    {
+      rrpv = SRRIP_DATA_SPILL_RRPV(policy_data);
+    }
 #endif
 
-  /* If block is not bypassed */
-  if (rrpv != BYPASS_RRPV)
-  {
-    /* Ensure a valid RRPV */
-    assert(rrpv >= 0 && rrpv <= policy_data->max_rrpv); 
+    /* If block is not bypassed */
+    if (rrpv != BYPASS_RRPV)
+    {
+      /* Ensure a valid RRPV */
+      assert(rrpv >= 0 && rrpv <= policy_data->max_rrpv); 
 
-    /* Remove block from free list */
-    free_list_remove_block(policy_data, block);
+      /* Remove block from free list */
+      free_list_remove_block(policy_data, block);
 
-    /* Update new block state and stream */
-    CACHE_UPDATE_BLOCK_STATE(block, tag, info->vtl_addr, state);
-    CACHE_UPDATE_BLOCK_STREAM(block, strm);
-    block->dirty            = (info && info->spill) ? TRUE : FALSE;
-    block->spill            = (info && info->spill) ? TRUE : FALSE;
-    block->last_rrpv        = rrpv;
-    block->is_ct_block      = FALSE;
-    block->is_bt_block      = FALSE;
-    block->is_zt_block      = FALSE;
-    block->is_block_pinned  = FALSE;
+      /* Update new block state and stream */
+      CACHE_UPDATE_BLOCK_STATE(block, tag, info->vtl_addr, state);
+      CACHE_UPDATE_BLOCK_STREAM(block, strm);
+      block->dirty            = (info && info->spill) ? TRUE : FALSE;
+      block->spill            = (info && info->spill) ? TRUE : FALSE;
+      block->last_rrpv        = rrpv;
+      block->is_ct_block      = FALSE;
+      block->is_bt_block      = FALSE;
+      block->is_zt_block      = FALSE;
+      block->is_block_pinned  = FALSE;
 
-    /* Insert block in to the corresponding RRPV queue */
-    CACHE_APPEND_TO_QUEUE(block, 
-        SRRIP_DATA_VALID_HEAD(policy_data)[rrpv], 
-        SRRIP_DATA_VALID_TAIL(policy_data)[rrpv]);
+      /* Insert block in to the corresponding RRPV queue */
+      CACHE_APPEND_TO_QUEUE(block, 
+          SRRIP_DATA_VALID_HEAD(policy_data)[rrpv], 
+          SRRIP_DATA_VALID_TAIL(policy_data)[rrpv]);
+    }
   }
 
   SRRIP_DATA_CFPOLICY(policy_data) = SRRIP_DATA_DFPOLICY(policy_data);
 }
 
-int cache_replace_block_srrip(srrip_data *policy_data, srrip_gdata *global_data)
+int cache_replace_block_srrip(srrip_data *policy_data, srrip_gdata *global_data,
+    memory_trace *info)
 {
   struct cache_block_t *block;
   int    rrpv;
@@ -335,12 +339,18 @@ int cache_replace_block_srrip(srrip_data *policy_data, srrip_gdata *global_data)
   /* Remove a nonbusy block from the tail */
   unsigned int min_wayid = ~(0);
 
+  if ((info->stream != CS && info->stream != BS) && info->spill == TRUE)
+  {
+    min_wayid = BYPASS_WAY;
+    goto end;
+  }
+
   /* Try to find an invalid block always from head of the free list. */
   for (block = SRRIP_DATA_FREE_HEAD(policy_data); block; block = block->prev)
   {
     return block->way;
   }
-  
+ 
   /* Obtain RRPV from where to replace the block */
   rrpv = cache_get_replacement_rrpv_srrip(policy_data);
 
@@ -390,7 +400,8 @@ int cache_replace_block_srrip(srrip_data *policy_data, srrip_gdata *global_data)
         panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
     }
   }
-  
+
+end:
   /* If no non busy block can be found, return -1 */
   return (min_wayid != ~(0)) ? min_wayid : -1;
 }
@@ -615,16 +626,29 @@ void cache_set_block_srrip(srrip_data *policy_data, int way, long long tag,
 struct cache_block_t cache_get_block_srrip(srrip_data *policy_data, int way,
   long long *tag_ptr, enum cache_block_state_t *state_ptr, int *stream_ptr)
 {
+  struct cache_block_t ret_block;
+
   assert(policy_data);
   assert(tag_ptr);
   assert(state_ptr);
   assert(stream_ptr);
 
-  PTR_ASSIGN(tag_ptr, (SRRIP_DATA_BLOCKS(policy_data)[way]).tag);
-  PTR_ASSIGN(state_ptr, (SRRIP_DATA_BLOCKS(policy_data)[way]).state);
-  PTR_ASSIGN(stream_ptr, (SRRIP_DATA_BLOCKS(policy_data)[way]).stream);
+  memset(&ret_block, 0, sizeof(struct cache_block_t));
 
-  return SRRIP_DATA_BLOCKS(policy_data)[way];
+  if (way != BYPASS_WAY)
+  {
+    PTR_ASSIGN(tag_ptr, (SRRIP_DATA_BLOCKS(policy_data)[way]).tag);
+    PTR_ASSIGN(state_ptr, (SRRIP_DATA_BLOCKS(policy_data)[way]).state);
+    PTR_ASSIGN(stream_ptr, (SRRIP_DATA_BLOCKS(policy_data)[way]).stream);
+  }
+  else
+  {
+    PTR_ASSIGN(tag_ptr, 0xdead);
+    PTR_ASSIGN(state_ptr, cache_block_invalid);
+    PTR_ASSIGN(stream_ptr, NN);
+  }
+
+  return (way != BYPASS_WAY) ? SRRIP_DATA_BLOCKS(policy_data)[way] : ret_block;
 }
 
 /* Get tag and state of a block. */

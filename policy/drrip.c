@@ -624,7 +624,8 @@ void cache_fill_block_drrip(drrip_data *policy_data, drrip_gdata *global_data,
 #undef THRESHOLD
 }
 
-int cache_replace_block_drrip(drrip_data *policy_data, drrip_gdata *global_data)
+int cache_replace_block_drrip(drrip_data *policy_data, drrip_gdata *global_data, 
+    memory_trace *info)
 {
   int ret_way;
 
@@ -636,7 +637,8 @@ int cache_replace_block_drrip(drrip_data *policy_data, drrip_gdata *global_data)
   switch (GET_CURRENT_POLICY(policy_data, global_data, (memory_trace *)NULL))
   {
     case cache_policy_srrip:
-      ret_way = cache_replace_block_srrip(&(policy_data->srrip), &(global_data->srrip));
+      ret_way = cache_replace_block_srrip(&(policy_data->srrip), 
+          &(global_data->srrip), info);
       break; 
 
     case cache_policy_brrip:

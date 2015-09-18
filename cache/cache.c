@@ -924,9 +924,6 @@ void cache_fill_block( struct cache_t *cache, int set, int way,
     case cache_policy_srrip:
       cache_fill_block_srrip(CACHE_SET_DATA_SRRIP(CACHE_SET(cache, set)), 
           CACHE_SRRIP_GDATA(cache), way, tag, state, stream, info);
-
-      /* For verification */
-      UpdateOnFill(&(cache->srrip_policy), set, way);
       break;
 
     case cache_policy_srripbypass:
@@ -1151,9 +1148,6 @@ void cache_access_block(struct cache_t *cache, int set, int way, int stream,
     case cache_policy_srrip:
       cache_access_block_srrip(CACHE_SET_DATA_SRRIP(CACHE_SET(cache, set)), 
           CACHE_SRRIP_GDATA(cache), way, stream, info);
-
-      /* For verification */
-      UpdateOnHit(&(cache->srrip_policy), set, way);
       break;
 
     case cache_policy_srripbypass:
@@ -1360,12 +1354,8 @@ int cache_replace_block(struct cache_t *cache, int set, memory_trace *info)
       return cache_replace_block_fifo(CACHE_SET_DATA_FIFO(CACHE_SET(cache, set)));
 
     case cache_policy_srrip:
-      GetReplacementCandidate(&(cache->srrip_policy), set, &verified_way);
       new_way = cache_replace_block_srrip(CACHE_SET_DATA_SRRIP(CACHE_SET(cache, set)), 
-          CACHE_SRRIP_GDATA(cache));
-#if 0      
-      assert(new_way == verified_way);
-#endif
+          CACHE_SRRIP_GDATA(cache), info);
       return new_way;
 
     case cache_policy_srripbypass:
@@ -1403,7 +1393,7 @@ int cache_replace_block(struct cache_t *cache, int set, memory_trace *info)
 
     case cache_policy_xspdbp:
       return cache_replace_block_xspdbp(CACHE_SET_DATA_XSPDBP(CACHE_SET(cache, set)),
-        CACHE_XSPDBP_GDATA(cache));
+        CACHE_XSPDBP_GDATA(cache), info);
 
     case cache_policy_srripm:
       return cache_replace_block_srripm(CACHE_SET_DATA_SRRIPM(CACHE_SET(cache, set)));
@@ -1413,7 +1403,7 @@ int cache_replace_block(struct cache_t *cache, int set, memory_trace *info)
 
     case cache_policy_srripdbp:
       return cache_replace_block_srripdbp(CACHE_SET_DATA_SRRIPDBP(CACHE_SET(cache, set)),
-        CACHE_SRRIPDBP_GDATA(cache));
+        CACHE_SRRIPDBP_GDATA(cache), info);
 
     case cache_policy_srripsage:
       return cache_replace_block_srripsage(CACHE_SET_DATA_SRRIPSAGE(CACHE_SET(cache, set)),
@@ -1425,7 +1415,7 @@ int cache_replace_block(struct cache_t *cache, int set, memory_trace *info)
     case cache_policy_drrip:
       DRRIPGetReplacementCandidate(&(cache->drrip_policy), set, &verified_way);
       new_way = cache_replace_block_drrip(CACHE_SET_DATA_DRRIP(CACHE_SET(cache, set)),
-        CACHE_DRRIP_GDATA(cache));
+        CACHE_DRRIP_GDATA(cache), info);
 #if 0
       assert(new_way == verified_way);
 #endif
@@ -1433,7 +1423,7 @@ int cache_replace_block(struct cache_t *cache, int set, memory_trace *info)
 
     case cache_policy_sapsimple:
       return cache_replace_block_sapsimple(CACHE_SET_DATA_SAPSIMPLE(CACHE_SET(cache, set)),
-        CACHE_SAPSIMPLE_GDATA(cache));
+        CACHE_SAPSIMPLE_GDATA(cache), info);
       break;
 
     case cache_policy_sapdbp:
@@ -1472,7 +1462,7 @@ int cache_replace_block(struct cache_t *cache, int set, memory_trace *info)
 
     case cache_policy_gspc:
       return cache_replace_block_gspc(CACHE_SET_DATA_GSPC(CACHE_SET(cache, set)),
-        CACHE_GSPC_GDATA(cache));
+        CACHE_GSPC_GDATA(cache), info);
 
     case cache_policy_gspcm:
       return cache_replace_block_gspcm(CACHE_SET_DATA_GSPCM(CACHE_SET(cache, set)),
@@ -1484,7 +1474,7 @@ int cache_replace_block(struct cache_t *cache, int set, memory_trace *info)
 
     case cache_policy_gshp:
       cache_replace_block_gshp(CACHE_SET_DATA_GSHP(CACHE_SET(cache, set)), 
-        CACHE_GSHP_GDATA(cache));
+        CACHE_GSHP_GDATA(cache), info);
       break;
 
     case cache_policy_sap:

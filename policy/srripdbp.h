@@ -200,6 +200,8 @@ void cache_fill_block_srripdbp(srripdbp_data *policy_data, srripdbp_gdata *globa
  * PARAMETERS
  *
  *  policy_data (IN)  - Set of the block 
+ *  global_data (IN)  - Cache-wide data
+ *  info        (IN)  - Access info
  *
  * RETURNS
  *  
@@ -207,7 +209,8 @@ void cache_fill_block_srripdbp(srripdbp_data *policy_data, srripdbp_gdata *globa
  *
  */
 
-int  cache_replace_block_srripdbp(srripdbp_data *policy_data, srripdbp_gdata *global_data);
+int  cache_replace_block_srripdbp(srripdbp_data *policy_data, 
+    srripdbp_gdata *global_data, memory_trace *info);
 
 /*
  *
