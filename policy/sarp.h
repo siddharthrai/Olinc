@@ -20,12 +20,6 @@
 #ifndef MEM_SYSTEM_SARP_H
 #define	MEM_SYSTEM_SARP_H
 
-#ifdef __cplusplus
-# define EXPORT_C extern "C"
-#else
-# define EXPORT_C
-#endif
-
 #include "../common/intermod-common.h"
 #include "../common/sat-counter.h"
 #include "policy.h"
@@ -73,6 +67,8 @@
 #define SMPLRPERF_FREUSE_RE(p, s, e)  ((p)->fill_reuse_per_reuse_epoch[s][e])
 #define SMPLRPERF_FDHIGH_RE(p, s, e)  ((p)->fill_reuse_distance_high_per_reuse_epoch[s][e])
 #define SMPLRPERF_FDLOW_RE(p, s, e)   ((p)->fill_reuse_distance_low_per_reuse_epoch[s][e])
+#define SMPLRPERF_FRRPV(p, s)         ((p)->stream_fill_rrpv[s])
+#define SMPLRPERF_HRRPV(p, s)         ((p)->stream_hit_rrpv[s])
 
 typedef struct sampler_perfctr
 {
@@ -82,6 +78,8 @@ typedef struct sampler_perfctr
   ub8 sampler_access;
   ub8 sampler_block_found;
   ub8 sampler_invalid_block_found;
+  ub8 sstream_reuse;
+  ub8 xstream_reuse;
   ub8 max_reuse;
   ub8 fill_count[TST + 1];
   ub8 fill_count_epoch[TST + 1];
@@ -96,7 +94,29 @@ typedef struct sampler_perfctr
   ub8 fill_reuse_per_reuse_epoch[TST + 1][REPOCH_CNT + 1];
   ub8 fill_reuse_distance_high_per_reuse_epoch[TST + 1][REPOCH_CNT + 1];
   ub8 fill_reuse_distance_low_per_reuse_epoch[TST + 1][REPOCH_CNT + 1];
+
+#define MAX_RRPV (3)
+
+  ub8 stream_fill_rrpv[TST + 1][MAX_RRPV];
+  ub8 stream_hit_rrpv[TST + 1][MAX_RRPV];
+
+#undef MAX_RRPV
 }sampler_perfctr;
+
+/* 
+ * There is one sampler entry for the entire 4KB page. The entry tracks the page on 
+ * n-byte block granularity. For each block following counter are maintained
+ *
+ *  Timestamp         - # misses in the mapping set
+ *  spill_of_fill     - Kind of last access (spill / fill)
+ *  stream            - Last accessing stream
+ *  valid             - True, for a valid block
+ *  hit_count         - Reuse count (reuses go upto a maximum)
+ *  dynamic_[c,d,b,p] - True, if block is a dynamically generated block
+ *
+ * All sampler entries are reset after an epoch interval
+ *
+ * */
 
 typedef struct sampler_entry
 {
@@ -195,6 +215,7 @@ typedef struct cache_policy_sarp_data_t
   ub4         set_type;               /* SDPSIMPLE set type */
   ub4         max_rrpv;               /* Maximum RRPV supported */
   ub8         miss_count;             /* # misses seen by the set */
+  ub8         hit_count;              /* # misses seen by the set */
   rrip_list *valid_head;              /* Head pointers of RRPV specific list */
   rrip_list *valid_tail;              /* Tail pointers of RRPV specific list */
 
@@ -217,6 +238,7 @@ typedef struct cache_policy_sarp_gdata_t
 {
   ub4 ways;                   /* # ways */
   ub1 pin_blocks;             /* If true blocks are pinned as per algorithm  */
+  ub1 speedup_enabled;        /* If true speedup hints are used */
   ub4 sarp_cpu_cores;         /* CPU cores known to SARP */
   ub4 sarp_gpu_cores;         /* GPU cores known to SARP */
   ub4 sarp_streams;           /* Number of streams known to SARP */
@@ -249,6 +271,19 @@ typedef struct cache_policy_sarp_gdata_t
   ub8  smiss_count[TST + 1];  /* Per-stream miss count */
   sctr baccess[SAMPLES];      /* Separate BRRIP counter to decide epsilon for each BRRIP sampled set */
   ub8  bypass_count;          /* # bypass */
+  sctr sarp_hint[TST + 1];    /* Accumulation counter for per-stream speedup */
+  ub8  speedup_count[TST + 1];/* Per-stream speedup count */
+  ub1  speedup_stream;        /* Stream chosen to be sped-up */
+  ub8  stream_access[TST + 1];/* # accesses */
+  ub8  stream_miss[TST + 1];  /* # misses */
+  ub8  stream_pinned[TST + 1];/* # accesses pinned */
+  ub8  stream_upin[TST + 1];  /* # accesses unpinned */
+  ub8  stream_bypass[TST + 1];/* # accesses bypassed */
+  ub8  stream_fdemote[TST + 1];/* # fills demoted */
+  ub8  stream_hdemote[TST + 1];/* # hits demoted */
+  ub8  stream_pfill[TST + 1]; /* # accesses filled at low RRPV */
+  ub8  stream_phit[TST + 1];  /* # accesses moved to low RRPV */
+  ub8  speedup_interval;      /* # accesses for speedup interval */
   sampler_cache *sampler;     /* Sampler cache used for tracking reuses */
 }sarp_gdata;
 
@@ -506,9 +541,6 @@ void set_per_stream_policy_sarp(sarp_data *policy_data, sarp_gdata *global_data,
  *
  * PARAMETERS
  *  
- *  global_data (IN)  - Cache wide policy data
- *  stream_in   (IN)  - Accessing stream
- *  pid_in      (IN)  - Processing element id
  *  info        (IN)  - Access info
  *
  * RETURNS
@@ -516,8 +548,7 @@ void set_per_stream_policy_sarp(sarp_data *policy_data, sarp_gdata *global_data,
  *  SARP specific stream
  */
 
-sarp_stream get_sarp_stream(sarp_gdata *global_data, ub1 stream_in, ub1 pid_in,
-  memory_trace *info);
+sarp_stream get_sarp_stream(memory_trace *info);
 
 /*
  *
@@ -777,5 +808,4 @@ void sarp_penalize_gfx_core();
 
 void cache_sarp_unlock_activation(sarp_gdata *global_data);
 
-#undef EXPORT_C
 #endif	/* MEM_SYSTEM_CACHE_H */

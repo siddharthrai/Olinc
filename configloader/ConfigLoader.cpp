@@ -352,6 +352,9 @@ bool ConfigLoader::parseLCSectionParameter(LChParameters *lcP)
     if (!parseBooleanParameter("PinBlocks", id, lcP->pinBlocks))
         return FALSE;
 
+    if (!parseBooleanParameter("SpeedupEnabled", id, lcP->pinBlocks))
+        return FALSE;
+
     if ( !paramsTracker.wasAnyParamSectionDefined() ) {
         stringstream ss;
         ss << "Parameter '" << id << "' in section [LLC] is not supported";

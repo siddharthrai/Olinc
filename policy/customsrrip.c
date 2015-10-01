@@ -693,7 +693,7 @@ int cache_get_new_rrpv_customsrrip(struct cache_block_t *block,
 {
   sb4 ret_rrpv;
   
-  ret_rrpv = 0;
+  ret_rrpv = info->spill ? old_rrpv : 0;
 
 #define VALID_EPOCH(g, i) ((g)->epoch_valid && (g)->epoch_valid[(i)->stream])
 

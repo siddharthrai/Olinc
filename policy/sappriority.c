@@ -1724,7 +1724,7 @@ int cache_replace_block_sappriority(sappriority_data *policy_data,
   }
   
   /* Update xstream evict counters */
-  if (ret_way != -1)  
+  if (ret_way != -1 && ret_way != BYPASS_WAY)  
   {
     if (policy_data->set_type == SRRIP_SAMPLED_SET)
     {

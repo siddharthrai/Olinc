@@ -339,7 +339,7 @@ int cache_replace_block_srrip(srrip_data *policy_data, srrip_gdata *global_data,
   /* Remove a nonbusy block from the tail */
   unsigned int min_wayid = ~(0);
 
-  if ((info->stream != CS && info->stream != BS) && info->spill == TRUE)
+  if ((info->stream != CS && info->stream != ZS && info->stream != BS) && info->spill == TRUE)
   {
     min_wayid = BYPASS_WAY;
     goto end;

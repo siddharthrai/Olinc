@@ -73,6 +73,9 @@ struct cache_block_t
   /* TRUE, if block is pinned */
   unsigned char is_block_pinned;
 
+  /* TRUE, if block is given extra time  */
+  unsigned char is_block_etime;
+
   /* Access made to this block, used for measuring maximum reuse */
   unsigned int access;
   

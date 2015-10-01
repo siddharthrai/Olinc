@@ -57,7 +57,9 @@ int main(int argc, char **argv)
     assert(gzread(trc_file, &trace, sizeof(memory_trace)) != -1);
     if (!gzeof(trc_file))
     {
-      if (trace.stream == CS && trace.spill == TRUE)
+#if 0
+      if (trace.stream == TS && trace.spill == TRUE)
+#endif
       {
         printf("Original Stream %2s ", stream_name[trace.stream]);
         printf("core %2d ", trace.core);

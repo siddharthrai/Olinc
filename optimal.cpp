@@ -21,7 +21,7 @@ ub8 htblused = 0; /* entries in hash table */
 #define MAX_RDIS                  (2048)
 #define MAX_REUSE                 (64)
 #define MAX_TRANS                 (64)
-#define PHASE_BITS                (12)
+#define PHASE_BITS                (19)
 #define PHASE_SIZE                (1 << PHASE_BITS)
 #define BMP_ENTRIES               (4)
 #define IS_SPILL_ALLOCATED(s)     ((s) == CS || (s) == BS || (s) == PS)
@@ -3108,10 +3108,10 @@ int main(int argc, char **argv)
   ub8  address;
   ub8  bt_blocks;
   ub8  bt_access;
-  ub8  fills[TST];
-  ub8  blocks[TST];
-  ub8  hits[TST];
-  ub8  replacement[TST];
+  ub8  fills[TST + 1];
+  ub8  blocks[TST + 1];
+  ub8  hits[TST + 1];
+  ub8  replacement[TST + 1];
   ub8  total_access;
   sb1  *trc_file_name;
 
@@ -4693,18 +4693,22 @@ int main(int argc, char **argv)
 #undef CH
           if (++total_access >= PHASE_SIZE)
           {
-            printf("CTPRED:%ld BTPRED:%ld\n", ct_correct_pred, bt_correct_pred);
+            printf("\nCTPRED:%ld BTPRED:%ld\n", ct_correct_pred, bt_correct_pred);
             printf("CTNOSEEN:%ld BTNOTSEEN:%ld\n", ct_not_seen, bt_not_seen);
-#if 0
             printf("CF:%ld ZF:%ld TF:%ld IF:%ld BF:%ld\n", fills[CS], 
                 fills[ZS], fills[TS], fills[IS], fills[BS]);
             printf("CH:%ld ZH:%ld TH:%ld IH:%ld BH:%ld\n", hits[CS], 
                 hits[ZS], hits[TS], hits[IS], hits[BS]);
+#if 0
             printf("CR:%ld ZR:%ld TR:%ld IR:%ld BR:%ld\n", replacement[CS],
                 replacement[ZS], replacement[TS], replacement[IS], replacement[BS]);
             printf("CB:%ld ZB:%ld TB:%ld IB:%ld BB:%ld\n", blocks[CS], 
                 blocks[ZS], blocks[TS], blocks[IS], blocks[BS]);
 #endif
+            memset(fills, 0, sizeof(ub8) * (TST + 1));
+            memset(hits, 0, sizeof(ub8) * (TST + 1));
+            memset(replacement, 0, sizeof(ub8) * (TST + 1));
+
             total_access = 0;  
           }
         }

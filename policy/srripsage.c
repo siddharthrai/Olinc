@@ -1285,7 +1285,7 @@ struct cache_block_t* cache_find_block_srripsage(srripsage_data *policy_data,
             tag_ptr, cache_block_invalid, stream_ptr, info);
       }
       
-      if (policy_data->blocks[min_wayid].demote)
+      if (min_wayid != BYPASS_WAY && policy_data->blocks[min_wayid].demote)
       {
         cache_remove_reuse_blocks(global_data, OP_DEMOTE, policy_data->blocks[min_wayid].stream);
       }
@@ -3239,11 +3239,11 @@ int cache_get_new_rrpv_srripsage(srripsage_data *policy_data,
   int ret_rrpv;
   struct cache_block_t *block;
   
-  ret_rrpv = 0;
+  ret_rrpv = info->spill ? old_rrpv : 0;
 
   /* Get the LRU block */
   block = SRRIPSAGE_DATA_VALID_HEAD(policy_data)[ret_rrpv].head;
-
+  
 #if 0
   /* Choose new rrpv based on LRU block at RRPV 0 */
   if (block && policy_data->evictions)

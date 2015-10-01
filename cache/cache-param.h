@@ -55,6 +55,7 @@ struct cache_params
   ub4     sampler_sets;           /* SARP sampler sets */
   ub4     sampler_ways;           /* SARP sampler ways */
   ub1     sarp_pin_blocks;        /* If true, blocks are pinned */
+  ub1     speedup_enabled;        /* If true, speedup hints are used */
 };
 
 #endif	/* MEM_SYSTEM_CACHE_H */
