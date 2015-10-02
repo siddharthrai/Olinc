@@ -71,7 +71,7 @@
 #define OLD_STREAM(b, o)          (KNOWN_STREAM((b).stream[o]) ? (b).stream[o] : OS)
 #define ODYNBP(b ,o, i)           (DYNB(b ,o) ? DBS : DYNP(b ,o) ? DPS : OLD_STREAM(b, o))
 #define SARP_OSTREAM(b, o, i)     (DYNC(b, o) ? DCS : DYNZ(b, o) ? DZS : ODYNBP(b, o, i))
-#define CR_TH                     (4)
+#define CR_TH                     (3)
 #define KNOWN_CSTREAM(s)          (s == CS || s == ZS || s == TS)
 #define STRMSPD(g, s)             ((g)->speedup_count[s])
 #define SPDSTRM(g)                ((g)->speedup_stream)
@@ -83,11 +83,28 @@
 #define BLK_I(i, s)               (SAMPLER_INDX(i, s))
 #define BLK_O(i, s)               (SAMPLER_OFFSET(i, s))
 #define SMBLK(g, i)               (sampler_cache_get_block(SMPLR(g), i))
-#define CHK_CRTCL(g, s)           (s == PS || s == BS || (KNOWN_CSTREAM(s) && CRITICAL_COND(g, s)))
+#define CHK_CRTCL(g, s)           (s == CS || s == PS || s == BS || (KNOWN_CSTREAM(s) && CRITICAL_COND(g, s)))
 #define GST(i)                    ((i)->stream)
-#define DYNCBLK(g, i)             (SMBLK(g, i) && DYNC(*SMBLK(g, i), BLK_O(i, SMPLR(g))) && GST(i) == CS)
-#define DYNBBLK(g, i)             (SMBLK(g, i) && DYNB(*SMBLK(g, i), BLK_O(i, SMPLR(g))) && GST(i) == BS)
+#define DYNCBLK(g, i)             (SMBLK(g, i) && DYNC(*SMBLK(g, i), BLK_O(i, SMPLR(g))) && GST(i) == TS)
+#define DYNBBLK(g, i)             (SMBLK(g, i) && DYNB(*SMBLK(g, i), BLK_O(i, SMPLR(g))) && GST(i) == TS)
+#if 0
 #define CRITICAL_STREAM(g, i)     ((DYNCBLK(g, i) || DYNBBLK(g, i)) ? CHK_CRTCL(g, TS) : CHK_CRTCL(g, GST(i)))
+#endif
+#define G_CACC(g, i)              (SMBLK(g, i)->c_access[BLK_O(i, SMPLR(g))])
+#define G_TACC(g, i)              (SMBLK(g, i)->t_access[BLK_O(i, SMPLR(g))])
+#define CHK_CTA(g, i)             (SMPLR(g)->perfctr.fill_count[DCS])
+#define CHK_BTA(g, i)             (SMPLR(g)->perfctr.fill_count[DBS])
+
+#if 0
+#define CHK_CTA(g, i)             (TRUE)
+#define CHK_CTA(g, i)             (SMPLR(g)->perfctr.fill_reuse_count[DCS])
+#endif
+
+#define CHK_CTA(g, i)             (SMPLR(g)->perfctr.fill_reuse_count[DCS])
+
+#define CTC_CNT(g, i)             (CHK_CTA(g, i) && GST(i) == CS)
+#define BTC_CNT(g, i)             (CHK_BTA(g, i) && GST(i) == BS)
+#define CRITICAL_STREAM(g, i)     ((CTC_CNT(g, i)|| BTC_CNT(g, i)) ? CHK_CRTCL(g, TS)  || CHK_CRTCL(g, GST(i)) : CHK_CRTCL(g, GST(i)))
 
 #define CACHE_UPDATE_BLOCK_SSTREAM(block, strm)               \
 do                                                            \
@@ -666,6 +683,8 @@ void sampler_cache_init(sampler_cache *sampler, ub4 sets, ub4 ways)
       (sampler->blocks)[i][j].dynamic_depth  = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
       (sampler->blocks)[i][j].dynamic_blit   = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
       (sampler->blocks)[i][j].dynamic_proc   = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
+      (sampler->blocks)[i][j].c_access       = (ub8 *)xcalloc(BLK_PER_ENTRY, sizeof(ub8));
+      (sampler->blocks)[i][j].t_access       = (ub8 *)xcalloc(BLK_PER_ENTRY, sizeof(ub8));
     }
   }
   
@@ -765,6 +784,12 @@ void sampler_cache_reset(sarp_gdata *global_data, sampler_cache *sampler)
   printf("[T] F:%5ld R: %5ld\n", sampler->perfctr.fill_count[TS], 
       sampler->perfctr.fill_reuse_count[TS]);
 
+  printf("[O] F:%5ld R: %5ld\n", sampler->perfctr.fill_count[OS], 
+      sampler->perfctr.fill_reuse_count[OS]);
+
+  printf("[CT] F:%5ld R: %5ld\n", sampler->perfctr.fill_count[DCS], 
+      sampler->perfctr.fill_reuse_count[DCS]);
+
   printf("[C] FDLOW:%5ld FDHIGH: %5ld SDLOW:%5ld SDHIGH: %5ld\n", sampler->perfctr.fill_reuse_distance_low[CS], 
       sampler->perfctr.fill_reuse_distance_high[CS], sampler->perfctr.spill_reuse_distance_low[CS],
       sampler->perfctr.spill_reuse_distance_high[CS]);
@@ -783,6 +808,9 @@ void sampler_cache_reset(sarp_gdata *global_data, sampler_cache *sampler)
 
   printf("[T] SDLOW:%5ld SDHIGH: %5ld\n", sampler->perfctr.fill_reuse_distance_low[TS], 
       sampler->perfctr.fill_reuse_distance_high[TS]);
+
+  printf("[O] SDLOW:%5ld SDHIGH: %5ld\n", sampler->perfctr.fill_reuse_distance_low[OS], 
+      sampler->perfctr.fill_reuse_distance_high[OS]);
 
   printf("[CT] FDLOW:%5ld FDHIGH: %5ld SDLOW:%5ld SDHIGH: %5ld\n", sampler->perfctr.fill_reuse_distance_low[DCS], 
       sampler->perfctr.fill_reuse_distance_high[DCS], sampler->perfctr.spill_reuse_distance_low[DCS],
@@ -815,6 +843,10 @@ void sampler_cache_reset(sarp_gdata *global_data, sampler_cache *sampler)
         (sampler->blocks)[i][j].dynamic_depth[off]  = 0;
         (sampler->blocks)[i][j].dynamic_blit[off]   = 0;
         (sampler->blocks)[i][j].dynamic_proc[off]   = 0;
+#if 0
+        (sampler->blocks)[i][j].c_access[off]       = 0;
+        (sampler->blocks)[i][j].t_access[off]       = 0;
+#endif
       }
     }
   }
@@ -1003,9 +1035,7 @@ int cache_get_fill_rrpv_sarp(sarp_data *policy_data, sarp_gdata *global_data,
 
 #define CHK_SCRTCL(g, i) ((g)->speedup_enabled ? CRITICAL_STREAM(g, i) : TRUE)
 
-#if 0
   if (CHK_SCRTCL(global_data, info))
-#endif
   {
     if ((RRPV1(perfctr, strm) || RRPV2(perfctr, strm))) 
     {
@@ -1020,15 +1050,14 @@ int cache_get_fill_rrpv_sarp(sarp_data *policy_data, sarp_gdata *global_data,
       }
     }
   }
-#if 0
   else
   {
 
     assert(global_data->speedup_enabled);
 
-#define CSBYTH_D            (2)
+#define CSBYTH_D            (3)
 #define CSBYTH_N            (1)
-#define CFBYTH_D            (4)
+#define CFBYTH_D            (3)
 #define CFBYTH_N            (1)
 #define FCOUNT(p, s)        (SMPLRPERF_FILL(p, s))
 #define FREUSE(p, s)        (SMPLRPERF_FREUSE(p, s))
@@ -1054,7 +1083,7 @@ int cache_get_fill_rrpv_sarp(sarp_data *policy_data, sarp_gdata *global_data,
 #undef CBYPASS
 #undef NCRTCL_BYPASS
   }
-#endif
+
 #undef CHK_SCRTCL
 
   return ret_rrpv;
@@ -1094,7 +1123,7 @@ int cache_get_replacement_rrpv_sarp(sarp_data *policy_data)
 
 #define CSBYTH_D                (2)
 #define CSBYTH_N                (1)
-#define CFBYTH_D                (32)
+#define CFBYTH_D                (4)
 #define CFBYTH_N                (1)
 #define FBYPASS_TH(sp, s, e)    (FRUSE(&((sp)->perfctr), s, e) * CFBYTH_D <= FCOUNT(&((sp)->perfctr), s, e) * CFBYTH_N)
 #define SBYPASS_TH(sp, s)       (SRUSE(&((sp)->perfctr), s) * CSBYTH_D <= SCOUNT(&((sp)->perfctr), s) * CSBYTH_N)
@@ -1117,18 +1146,12 @@ int cache_get_new_rrpv_sarp(sarp_data *policy_data, sarp_gdata *global_data,
   epoch   = block->epoch;
   strm    = NEW_STREAM(info);
 
-#if 0
   ret_rrpv  = CHK_SCRTCL(global_data, info) ? 0 : old_rrpv;
-#endif
-  ret_rrpv  = 0;
 
   if (info->spill == TRUE)
   {
-#if 0
     if (CHK_SSPD(global_data, info, epoch) && 
         (RRPV1(perfctr, strm) || RRPV2(perfctr, strm)))
-#endif
-    if ((RRPV1(perfctr, strm) || RRPV2(perfctr, strm)))
     {
       ret_rrpv = 0; 
 
@@ -1181,17 +1204,15 @@ int cache_get_new_rrpv_sarp(sarp_data *policy_data, sarp_gdata *global_data,
           }
         }
       }
-#if 0
       else
       {
-        if (CHK_FSPD(global_data, info, epoch) ||
+        if (global_data->speedup_enabled && 
             FRUSE(perfctr, strm, epoch) * CT_TH1 <= FCOUNT(perfctr, strm, epoch))
         {
           global_data->stream_hdemote[info->stream] += 1;
           ret_rrpv = 3;
         }
       }
-#endif
     }
   }
 
@@ -1293,6 +1314,8 @@ void cache_init_sarp(long long int set_indx, struct cache_params *params,
     memset(global_data->stream_access, 0, sizeof(ub8) * (TST + 1));
     memset(global_data->stream_miss, 0, sizeof(ub8) * (TST + 1));
     memset(global_data->speedup_count, 0, sizeof(ub8) * (TST + 1));
+    memset(global_data->ctcrtcl_count, 0, sizeof(ub8) * (TST + 1));
+    memset(global_data->btcrtcl_count, 0, sizeof(ub8) * (TST + 1));
 
     /* Initialize bimodal access counter */
     SAT_CTR_INI(global_data->access_ctr, 8, 0, 255);
@@ -1779,6 +1802,23 @@ void cache_fill_block_sarp(sarp_data *policy_data,
   sstream = get_sarp_stream(info); 
 
   info->sap_stream = sstream;
+  
+#if 0
+  if (global_data->speedup_stream == CS)
+#endif
+  { 
+    if (info->stream == CS && CRITICAL_STREAM(global_data, info))
+    {
+      global_data->ctcrtcl_count[info->stream] += 1;
+    }
+    else
+    {
+      if (info->stream == BS && CRITICAL_STREAM(global_data, info))
+      {
+        global_data->btcrtcl_count[info->stream] += 1;
+      }
+    }
+  }
 
   /* Get per-stream policy */
   per_stream_policy = SARP_DATA_PSPOLICY(policy_data);
@@ -1977,8 +2017,8 @@ void cache_fill_block_sarp(sarp_data *policy_data,
 
           if (info->spill == TRUE)
           {
-#define CSBYTH_D            (3)
-#define CSBYTH_N            (2)
+#define CSBYTH_D            (4)
+#define CSBYTH_N            (1)
 #define CSRD_D              (4)
 #define CSRD_N              (1)
 #define SCOUNT(p, s)        (SMPLRPERF_SPILL(p, s))
@@ -1994,10 +2034,9 @@ void cache_fill_block_sarp(sarp_data *policy_data,
 #define PIN_MISS_BLK(g, i)  (((g)->speedup_enabled) ? EVAL_SCOND(g, i) : EVAL_PCOND(g, i))
 
 #if 0
-            if (PIN_MISS_BLK(global_data, info))
+            if ((global_data)->pin_blocks && is_miss_block_pinned((global_data)->sampler, info))
 #endif
-            if ((global_data)->pin_blocks && 
-                is_miss_block_pinned((global_data)->sampler, info))
+            if (PIN_MISS_BLK(global_data, info))
             {
               block->is_block_pinned = TRUE;
 
@@ -2086,14 +2125,21 @@ void cache_fill_block_sarp(sarp_data *policy_data,
         printf("ZS bypass %ld\n", global_data->stream_bypass[ZS]);
         printf("CS bypass %ld\n", global_data->stream_bypass[CS]);
         printf("TS bypass %ld\n", global_data->stream_bypass[TS]);
+        printf("IS bypass %ld\n", global_data->stream_bypass[IS]);
 
         printf("ZS fill demote %ld\n", global_data->stream_fdemote[ZS]);
         printf("CS fill demote %ld\n", global_data->stream_fdemote[CS]);
         printf("TS fill demote %ld\n", global_data->stream_fdemote[TS]);
+        printf("IS fill demote %ld\n", global_data->stream_fdemote[IS]);
 
         printf("ZS hit demote %ld\n", global_data->stream_hdemote[ZS]);
         printf("CS hit demote %ld\n", global_data->stream_hdemote[CS]);
         printf("TS hit demote %ld\n", global_data->stream_hdemote[TS]);
+        printf("IS hit demote %ld\n", global_data->stream_hdemote[IS]);
+        printf("CS critical %ld:%d\n", global_data->stream_access[CS], 
+            global_data->ctcrtcl_count[CS]);
+        printf("BS critical %ld:%d\n", global_data->stream_access[BS], 
+            global_data->btcrtcl_count[BS]);
 
         /* Reset sampler cache and epoch length */
         sampler_cache_reset(global_data, global_data->sampler);
@@ -2130,7 +2176,11 @@ void cache_fill_block_sarp(sarp_data *policy_data,
 
         memset(global_data->stream_pinned , 0, sizeof(ub8) * (TST + 1));
         memset(global_data->stream_upin , 0, sizeof(ub8) * (TST + 1));
+#if 0
+        memset(global_data->ctcrtcl_count, 0, sizeof(ub8) * (TST + 1));
+        memset(global_data->btcrtcl_count, 0, sizeof(ub8) * (TST + 1));
         memset(global_data->stream_access , 0, sizeof(ub8) * (TST + 1));
+#endif
         memset(global_data->stream_miss , 0, sizeof(ub8) * (TST + 1));
       }
     }
@@ -2179,11 +2229,11 @@ int cache_replace_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
       info, FALSE);
 
 #define CZSBYTH_D           (3)
-#define CZSBYTH_N           (1)
-#define COSBYTH_D           (4)
-#define COSBYTH_N           (1)
-#define CFBYTH_D            (32)
-#define CFBYTH_N            (1)
+#define CZSBYTH_N           (2)
+#define COSBYTH_D           (3)
+#define COSBYTH_N           (2)
+#define CFBYTH_D            (3)
+#define CFBYTH_N            (2)
 #define FCOUNT(p, s)        (SMPLRPERF_FILL(p, s))
 #define FREUSE(p, s)        (SMPLRPERF_FREUSE(p, s))
 #define SCOUNT(p, s)        (SMPLRPERF_SPILL(p, s))
@@ -2191,11 +2241,14 @@ int cache_replace_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
 #define FBYPASS_TH(sp, s)   (FREUSE(&((sp)->perfctr), s) * CFBYTH_D <= FCOUNT(&((sp)->perfctr), s) * CFBYTH_N)
 #define SZBYPASS_TH(sp, s)  (SREUSE(&((sp)->perfctr), s) * CZSBYTH_D <= SCOUNT(&((sp)->perfctr), s) * CZSBYTH_N)
 #define SOBYPASS_TH(sp, s)  (SREUSE(&((sp)->perfctr), s) * COSBYTH_D <= SCOUNT(&((sp)->perfctr), s) * COSBYTH_N)
-#define SBYPASS_TH(sp, s)   ((s == ZS) ? SZBYPASS_TH(sp, s) : SOBYPASS_TH(sp, s))
-#define CBYPASS(sp, i)      ((i)->fill ? FBYPASS_TH(sp, (i)->stream) : SBYPASS_TH(sp, (i)->stream))
+#define SBYPASS_TH(sp, s)   ((s == IS) ? SZBYPASS_TH(sp, s) : SOBYPASS_TH(sp, s))
+#define CBYPASS(sp, i)      ((i)->fill ? FBYPASS_TH(sp, NEW_STREAM(i)) : SBYPASS_TH(sp, NEW_STREAM(i)))
+#if 0
+#define NCRTCL_BYPASS(g, i) (!CRITICAL_STREAM(g, i))
+#endif
 #define NCRTCL_BYPASS(g, i) (!CRITICAL_STREAM(g, i) && CBYPASS((g)->sampler, i))
 #define EVAL_BCOND(g, i)    (!is_fill_bypass(global_data->sampler, info))
-#define EVAL_SCOND(g, i)    (!NCRTCL_BYPASS(global_data, info) && EVAL_BCOND(g, i))
+#define EVAL_SCOND(g, i)    (!NCRTCL_BYPASS(global_data, info))
 #define BYP_FILL_BLK(g, i)  ((g)->speedup_enabled ? EVAL_SCOND(g, i) : EVAL_BCOND(g, i))
 
 #if 0
@@ -2213,76 +2266,69 @@ int cache_replace_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
           return block->way;
 
         /* If fill is not bypassed, get the replacement candidate */
-        if (!is_fill_bypass(global_data->sampler, info))
+        struct  cache_block_t *head_block;
+
+        /* Obtain RRPV from where to replace the block */
+        rrpv = cache_get_replacement_rrpv_sarp(policy_data);
+
+        /* Ensure rrpv is with in max_rrpv bound */
+        assert(rrpv >= 0 && rrpv <= SARP_DATA_MAX_RRPV(policy_data));
+
+        head_block = SARP_DATA_VALID_HEAD(policy_data)[rrpv].head;
+
+        /* If there is no block with required RRPV, increment RRPV of all the blocks
+         * until we get one with the required RRPV */
+        do
         {
-          struct  cache_block_t *head_block;
+          struct  cache_block_t *old_block;
 
-          /* Obtain RRPV from where to replace the block */
-          rrpv = cache_get_replacement_rrpv_sarp(policy_data);
-
-          /* Ensure rrpv is with in max_rrpv bound */
-          assert(rrpv >= 0 && rrpv <= SARP_DATA_MAX_RRPV(policy_data));
-          
-          head_block = SARP_DATA_VALID_HEAD(policy_data)[rrpv].head;
-
-          /* If there is no block with required RRPV, increment RRPV of all the blocks
-           * until we get one with the required RRPV */
-          do
+          /* All blocks which are already pinned are promoted to RRPV 0 
+           * and are unpinned. So we iterate through the blocks at RRPV 3 
+           * and move all the blocks which are pinned to RRPV 0 */
+          if (head_block == NULL)
           {
-            struct  cache_block_t *old_block;
-
-            /* All blocks which are already pinned are promoted to RRPV 0 
-             * and are unpinned. So we iterate through the blocks at RRPV 3 
-             * and move all the blocks which are pinned to RRPV 0 */
-            if (head_block == NULL)
-            {
-              CACHE_SARP_INCREMENT_RRPV(SARP_DATA_VALID_HEAD(policy_data), 
-                  SARP_DATA_VALID_TAIL(policy_data), rrpv);
-            }
-
-            /* Find pinned block at victim rrpv and move it to minimum RRPV */
-            for (ub4 way_id = 0; way_id < global_data->ways; way_id++)
-            {
-              old_block = &SARP_DATA_BLOCKS(policy_data)[way_id];
-              old_rrpv  = ((rrip_list *)(old_block->data))->rrpv;
-
-              if (old_rrpv == rrpv && old_block->is_block_pinned == TRUE)
-              {
-                old_block->is_block_pinned  = FALSE;
-
-                /* Move block to min RRPV */
-                CACHE_REMOVE_FROM_QUEUE(old_block, SARP_DATA_VALID_HEAD(policy_data)[old_rrpv],
-                    SARP_DATA_VALID_TAIL(policy_data)[old_rrpv]);
-                CACHE_APPEND_TO_QUEUE(old_block, SARP_DATA_VALID_HEAD(policy_data)[min_rrpv], 
-                    SARP_DATA_VALID_TAIL(policy_data)[min_rrpv]);
-              }
-              else
-              {
-                if (old_rrpv == rrpv && old_block->is_block_pinned == FALSE)
-                {
-                  break;
-                }
-              }
-            }
-
-            head_block = SARP_DATA_VALID_HEAD(policy_data)[rrpv].head;
-          }while(!head_block);
-
-          /* Remove a nonbusy block from the tail */
-          unsigned int min_wayid = ~(0);
-
-          for (block = SARP_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
-          {
-            if (!block->busy && !block->is_block_pinned && block->way < min_wayid)
-              min_wayid = block->way;
+            CACHE_SARP_INCREMENT_RRPV(SARP_DATA_VALID_HEAD(policy_data), 
+                SARP_DATA_VALID_TAIL(policy_data), rrpv);
           }
 
-          ret_wayid = (min_wayid != ~(0)) ? min_wayid : -1;
-        }
-        else
+          /* Find pinned block at victim rrpv and move it to minimum RRPV */
+          for (ub4 way_id = 0; way_id < global_data->ways; way_id++)
+          {
+            old_block = &SARP_DATA_BLOCKS(policy_data)[way_id];
+            old_rrpv  = ((rrip_list *)(old_block->data))->rrpv;
+
+            if (old_rrpv == rrpv && old_block->is_block_pinned == TRUE)
+            {
+              old_block->is_block_pinned  = FALSE;
+
+              /* Move block to min RRPV */
+              CACHE_REMOVE_FROM_QUEUE(old_block, SARP_DATA_VALID_HEAD(policy_data)[old_rrpv],
+                  SARP_DATA_VALID_TAIL(policy_data)[old_rrpv]);
+              CACHE_APPEND_TO_QUEUE(old_block, SARP_DATA_VALID_HEAD(policy_data)[min_rrpv], 
+                  SARP_DATA_VALID_TAIL(policy_data)[min_rrpv]);
+            }
+            else
+            {
+              if (old_rrpv == rrpv && old_block->is_block_pinned == FALSE)
+              {
+                break;
+              }
+            }
+          }
+
+          head_block = SARP_DATA_VALID_HEAD(policy_data)[rrpv].head;
+        }while(!head_block);
+
+        /* Remove a nonbusy block from the tail */
+        unsigned int min_wayid = ~(0);
+
+        for (block = SARP_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
         {
-          global_data->bypass_count++;
+          if (!block->busy && !block->is_block_pinned && block->way < min_wayid)
+            min_wayid = block->way;
         }
+
+        ret_wayid = (min_wayid != ~(0)) ? min_wayid : -1;
 
         break;
 
@@ -2373,6 +2419,27 @@ void cache_access_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
   assert(blk->tag >= 0);
   assert(blk->state != cache_block_invalid);
 
+#if 0
+  if (global_data->speedup_stream == CS)
+#endif
+  { 
+#if 0
+    if (DYNCBLK(global_data, info))
+#endif
+    if (info->stream == CS && CRITICAL_STREAM(global_data, info))
+    {
+      global_data->ctcrtcl_count[info->stream] += 1;
+    }
+    else
+    {
+      if (info->stream == BS && CRITICAL_STREAM(global_data, info))
+      {
+        global_data->btcrtcl_count[info->stream] += 1;
+      }
+    }
+  }
+
+  /* Get per-stream policy */
   following_policy = FOLLOW_POLICY(per_stream_policy[info->stream], info);
 
   assert(FSRRIP(following_policy) || FBRRIP(following_policy) || FSARP(following_policy));
@@ -2454,10 +2521,9 @@ void cache_access_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
 #define PIN_HIT_BLK(g, i)   ((g)->speedup_enabled ? EVAL_SCOND(g, i) : EVAL_PCOND(g, i))
 
 #if 0
-        if (PIN_HIT_BLK(global_data, info))
+        if ((global_data)->pin_blocks && is_hit_block_pinned((global_data)->sampler, info))
 #endif
-        if ((global_data)->pin_blocks && 
-            is_hit_block_pinned((global_data)->sampler, info))
+        if (PIN_HIT_BLK(global_data, info))
         {
           blk->is_block_pinned = TRUE;
 
@@ -2564,6 +2630,10 @@ void cache_access_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
         printf("ZS hit demote %ld\n", global_data->stream_hdemote[ZS]);
         printf("CS hit demote %ld\n", global_data->stream_hdemote[CS]);
         printf("TS hit demote %ld\n", global_data->stream_hdemote[TS]);
+        printf("CS critical %ld:%d\n", global_data->stream_access[CS], 
+            global_data->ctcrtcl_count[CS]);
+        printf("BS critical %ld:%d\n", global_data->stream_access[BS], 
+            global_data->btcrtcl_count[BS]);
 
         sampler_cache_reset(global_data, global_data->sampler);
 
@@ -2598,7 +2668,11 @@ void cache_access_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
 
         memset(global_data->stream_pinned , 0, sizeof(ub8) * (TST + 1));
         memset(global_data->stream_upin , 0, sizeof(ub8) * (TST + 1));
+#if 0
         memset(global_data->stream_access , 0, sizeof(ub8) * (TST + 1));
+        memset(global_data->ctcrtcl_count , 0, sizeof(ub8) * (TST + 1));
+        memset(global_data->btcrtcl_count , 0, sizeof(ub8) * (TST + 1));
+#endif
         memset(global_data->stream_miss , 0, sizeof(ub8) * (TST + 1));
       }
     }
@@ -3019,6 +3093,8 @@ void sampler_cache_fill_block(sampler_cache *sampler, ub4 index, ub4 way,
   sampler->blocks[index][way].dynamic_depth[offset] = FALSE;
   sampler->blocks[index][way].dynamic_blit[offset]  = FALSE;
   sampler->blocks[index][way].dynamic_proc[offset]  = FALSE;
+  sampler->blocks[index][way].c_access[offset]      = 0;
+  sampler->blocks[index][way].t_access[offset]      = 0;
   sampler->blocks[index][way].timestamp[offset]     = policy_data->miss_count;
 
   /* Update fill */
@@ -3030,6 +3106,16 @@ void sampler_cache_fill_block(sampler_cache *sampler, ub4 index, ub4 way,
   else
   {
     update_sampler_spill_perfctr(sampler, index, way, info);
+  }
+  
+  if (info->stream == TS)
+  {
+    sampler->blocks[index][way].t_access[offset] += 1;
+  }
+
+  if (info->stream == CS)
+  {
+    sampler->blocks[index][way].c_access[offset] += 1;
   }
 
   sampler->perfctr.sampler_fill += 1;
@@ -3089,6 +3175,16 @@ void sampler_cache_access_block(sampler_cache *sampler, ub4 index, ub4 way,
   sampler->blocks[index][way].stream[offset]        = info->stream;
   sampler->blocks[index][way].timestamp[offset]     = policy_data->miss_count;
   
+  if (info->stream == TS)
+  {
+    sampler->blocks[index][way].t_access[offset] += 1;
+  }
+
+  if (info->stream == CS)
+  {
+    sampler->blocks[index][way].c_access[offset] += 1;
+  }
+
   sampler->perfctr.sampler_hit += 1;
 }
 
@@ -3153,6 +3249,8 @@ void sampler_cache_lookup(sampler_cache *sampler, sarp_data *policy_data,
         sampler->blocks[index][way].dynamic_depth[off]  = 0;
         sampler->blocks[index][way].dynamic_blit[off]   = 0;
         sampler->blocks[index][way].dynamic_proc[off]   = 0;
+        sampler->blocks[index][way].c_access[off]       = 0;
+        sampler->blocks[index][way].t_access[off]       = 0;
       }
 
       sampler->perfctr.sampler_replace += 1;
