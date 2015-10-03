@@ -29,7 +29,7 @@
 #include "sarp.h"
 #include "zlib.h"
 
-#define INTERVAL_SIZE             (1 << 17)
+#define INTERVAL_SIZE             (1 << 19)
 #define PSEL_WIDTH                (30)
 #define PSEL_MIN_VAL              (0x00)  
 #define PSEL_MAX_VAL              (1 << PSEL_WIDTH)  
@@ -71,40 +71,29 @@
 #define OLD_STREAM(b, o)          (KNOWN_STREAM((b).stream[o]) ? (b).stream[o] : OS)
 #define ODYNBP(b ,o, i)           (DYNB(b ,o) ? DBS : DYNP(b ,o) ? DPS : OLD_STREAM(b, o))
 #define SARP_OSTREAM(b, o, i)     (DYNC(b, o) ? DCS : DYNZ(b, o) ? DZS : ODYNBP(b, o, i))
-#define CR_TH                     (3)
-#define KNOWN_CSTREAM(s)          (s == CS || s == ZS || s == TS)
-#define STRMSPD(g, s)             ((g)->speedup_count[s])
-#define SPDSTRM(g)                ((g)->speedup_stream)
-#define CRITICAL_COND(g, s)       ((s == SPDSTRM(g)) || (STRMSPD(g, s) * CR_TH >= STRMSPD(g, SPDSTRM(g))))
 #define SAMPLER_INDX(i, s)        ((((i)->address >> (s)->log_grain_size)) & ((s)->sets - 1))
 #define SAMPLER_TAG(i, s)         ((i)->address >> (s)->log_grain_size)
 #define SAMPLER_OFFSET(i, s)      (((i)->address >> (s)->log_block_size) & ((s)->entry_size - 1))
+#define CR_DTH                    (2)
+#define CR_NTH                    (1)
+#define KNOWN_CSTREAM(s)          (s == CS || s == ZS || s == TS)
+#define STRMSPD(g, s)             ((g)->speedup_count[s])
+#define SPDSTRM(g)                ((g)->speedup_stream)
+#define INSPD_RANGE(g, s)         (STRMSPD(g, s) * CR_DTH >= STRMSPD(g, SPDSTRM(g)) * CR_NTH)
+#define CRITICAL_COND(g, s)       (s == SPDSTRM(g) || INSPD_RANGE(g, s))
 #define SMPLR(g)                  ((g)->sampler)
-#define BLK_I(i, s)               (SAMPLER_INDX(i, s))
-#define BLK_O(i, s)               (SAMPLER_OFFSET(i, s))
-#define SMBLK(g, i)               (sampler_cache_get_block(SMPLR(g), i))
-#define CHK_CRTCL(g, s)           (s == CS || s == PS || s == BS || (KNOWN_CSTREAM(s) && CRITICAL_COND(g, s)))
 #define GST(i)                    ((i)->stream)
-#define DYNCBLK(g, i)             (SMBLK(g, i) && DYNC(*SMBLK(g, i), BLK_O(i, SMPLR(g))) && GST(i) == TS)
-#define DYNBBLK(g, i)             (SMBLK(g, i) && DYNB(*SMBLK(g, i), BLK_O(i, SMPLR(g))) && GST(i) == TS)
-#if 0
-#define CRITICAL_STREAM(g, i)     ((DYNCBLK(g, i) || DYNBBLK(g, i)) ? CHK_CRTCL(g, TS) : CHK_CRTCL(g, GST(i)))
-#endif
-#define G_CACC(g, i)              (SMBLK(g, i)->c_access[BLK_O(i, SMPLR(g))])
-#define G_TACC(g, i)              (SMBLK(g, i)->t_access[BLK_O(i, SMPLR(g))])
+#define CPRD(g, s)                ((g)->sampler->epoch_count == 0 && (s == CS || s == BS))
+#define ALWAYS_CTRCL(g, s)        (CPRD(g, s) || s == PS || s == BS)
+#define FOUND_CTRCL(g, s)         (KNOWN_CSTREAM(s) && CRITICAL_COND(g, s))
+#define CHK_CRTCL(g, s)           (ALWAYS_CTRCL(g, s) || FOUND_CTRCL(g, s))
 #define CHK_CTA(g, i)             (SMPLR(g)->perfctr.fill_count[DCS])
 #define CHK_BTA(g, i)             (SMPLR(g)->perfctr.fill_count[DBS])
-
-#if 0
-#define CHK_CTA(g, i)             (TRUE)
-#define CHK_CTA(g, i)             (SMPLR(g)->perfctr.fill_reuse_count[DCS])
-#endif
-
-#define CHK_CTA(g, i)             (SMPLR(g)->perfctr.fill_reuse_count[DCS])
-
 #define CTC_CNT(g, i)             (CHK_CTA(g, i) && GST(i) == CS)
 #define BTC_CNT(g, i)             (CHK_BTA(g, i) && GST(i) == BS)
-#define CRITICAL_STREAM(g, i)     ((CTC_CNT(g, i)|| BTC_CNT(g, i)) ? CHK_CRTCL(g, TS)  || CHK_CRTCL(g, GST(i)) : CHK_CRTCL(g, GST(i)))
+#define IS_INTERS(g, i)           ((i)->spill && (CTC_CNT(g, i)|| BTC_CNT(g, i)))
+#define INSTRS_CRTCL(g, i)        (CHK_CRTCL(g, TS) || CHK_CRTCL(g, GST(i)))
+#define CRITICAL_STREAM(g, i)     (IS_INTERS(g, i) ? INSTRS_CRTCL(g, i) : CHK_CRTCL(g, GST(i)))
 
 #define CACHE_UPDATE_BLOCK_SSTREAM(block, strm)               \
 do                                                            \
@@ -218,15 +207,7 @@ do                                                                              
 #define PCSRRIP(p, g, i)              ((SRRIP_VAL(g) <= PSEL_MID_VAL) ? PCSRRIPGSRRIP(i) : PCBRRIPGSRRIP(i))
 #define FANDH(i, h)                   ((i)->fill == TRUE && (h) == TRUE)
 #define FANDM(i, h)                   ((i)->fill == TRUE && (h) == FALSE)
-
 #define DPSARP(p, g, i)               ((SARP_VAL(g) <= PSEL_MID_VAL) ? PCSRRIP(p, g, i) : PCBRRIP(p, g, i))
-
-#define FM_D                          (4)
-#define FM_N                          (1)
-#define FM_FC(sp, s)                  (SMPLRPERF_FILL(sp, s))
-#define FM_FR(sp, s)                  (SMPLRPERF_FREUSE(sp, s))
-#define FM_TH(sp, s)                  (FM_FR(&((sp)->perfctr), s) * FM_D <= FM_FC(&((sp)->perfctr), s) * FM_N)
-#define NCRTCL_FM(g, i)               (!CRITICAL_STREAM(g, i) && FM_TH((g)->sampler, (i)->stream))
 #define SPSARP(p, g, i, f)            (FSARP(f) ? DPSARP(p, g, i) : f)
 #define CURRENT_POLICY(p, g, f, i, h) ((FANDM(i, h)) ? SPSARP(p, g, i, f) : f)
 #define FOLLOW_POLICY(f, i)           ((!FSARP(f) && ((i)->fill)) ? f : PSARP)
@@ -683,8 +664,6 @@ void sampler_cache_init(sampler_cache *sampler, ub4 sets, ub4 ways)
       (sampler->blocks)[i][j].dynamic_depth  = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
       (sampler->blocks)[i][j].dynamic_blit   = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
       (sampler->blocks)[i][j].dynamic_proc   = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
-      (sampler->blocks)[i][j].c_access       = (ub8 *)xcalloc(BLK_PER_ENTRY, sizeof(ub8));
-      (sampler->blocks)[i][j].t_access       = (ub8 *)xcalloc(BLK_PER_ENTRY, sizeof(ub8));
     }
   }
   
@@ -843,10 +822,6 @@ void sampler_cache_reset(sarp_gdata *global_data, sampler_cache *sampler)
         (sampler->blocks)[i][j].dynamic_depth[off]  = 0;
         (sampler->blocks)[i][j].dynamic_blit[off]   = 0;
         (sampler->blocks)[i][j].dynamic_proc[off]   = 0;
-#if 0
-        (sampler->blocks)[i][j].c_access[off]       = 0;
-        (sampler->blocks)[i][j].t_access[off]       = 0;
-#endif
       }
     }
   }
@@ -1054,19 +1029,24 @@ int cache_get_fill_rrpv_sarp(sarp_data *policy_data, sarp_gdata *global_data,
   {
 
     assert(global_data->speedup_enabled);
-
+#if 0
 #define CSBYTH_D            (3)
 #define CSBYTH_N            (1)
 #define CFBYTH_D            (3)
 #define CFBYTH_N            (1)
+#endif
+#define CSBYTH_D            (2)
+#define CSBYTH_N            (1)
+#define CFBYTH_D            (2)
+#define CFBYTH_N            (1)
 #define FCOUNT(p, s)        (SMPLRPERF_FILL(p, s))
 #define FREUSE(p, s)        (SMPLRPERF_FREUSE(p, s))
-#define FBYPASS_TH(sp, s)   (FREUSE(&((sp)->perfctr), s) * CFBYTH_D <= FCOUNT(&((sp)->perfctr), s) * CFBYTH_N)
-#define SBYPASS_TH(sp, s)   (SREUSE(&((sp)->perfctr), s) * CSBYTH_D <= SCOUNT(&((sp)->perfctr), s) * CSBYTH_N)
-#define CBYPASS(sp, i)      ((i)->fill ? FBYPASS_TH(sp, (i)->stream) : SBYPASS_TH(sp, (i)->stream))
-#define NCRTCL_BYPASS(g, i) (!CRITICAL_STREAM(g, i) && CBYPASS((g)->sampler, i))
+#define FUSE_TH(sp, s)      (FREUSE(&((sp)->perfctr), s) * CFBYTH_D <= FCOUNT(&((sp)->perfctr), s) * CFBYTH_N)
+#define SUSE_TH(sp, s)      (SREUSE(&((sp)->perfctr), s) * CSBYTH_D <= SCOUNT(&((sp)->perfctr), s) * CSBYTH_N)
+#define CLOWUSE(sp, i)      ((i)->fill ? FUSE_TH(sp, (i)->stream) : SUSE_TH(sp, (i)->stream))
+#define NCRTCL_LOWUSE(g, i) (!CRITICAL_STREAM(g, i) && CLOWUSE((g)->sampler, i))
 
-    if (NCRTCL_BYPASS(global_data, info))
+    if (NCRTCL_LOWUSE(global_data, info))
     {
       ret_rrpv = 3;
       global_data->stream_fdemote[info->stream] += 1;
@@ -1078,10 +1058,10 @@ int cache_get_fill_rrpv_sarp(sarp_data *policy_data, sarp_gdata *global_data,
 #undef CFBYTH_N
 #undef FCOUNT
 #undef FREUSE
-#undef FBYPASS_TH
-#undef SBYPASS_TH
-#undef CBYPASS
-#undef NCRTCL_BYPASS
+#undef FUSE_TH
+#undef SUSE_TH
+#undef CLOWUSE
+#undef NCRTCL_LOWUSE
   }
 
 #undef CHK_SCRTCL
@@ -1121,9 +1101,13 @@ int cache_get_replacement_rrpv_sarp(sarp_data *policy_data)
 #define BT_TH1            (32)
 #define TH2               (2)
 
+#if 0
+#define CSBYTH_D                (2)
+#endif
+
 #define CSBYTH_D                (2)
 #define CSBYTH_N                (1)
-#define CFBYTH_D                (4)
+#define CFBYTH_D                (2)
 #define CFBYTH_N                (1)
 #define FBYPASS_TH(sp, s, e)    (FRUSE(&((sp)->perfctr), s, e) * CFBYTH_D <= FCOUNT(&((sp)->perfctr), s, e) * CFBYTH_N)
 #define SBYPASS_TH(sp, s)       (SRUSE(&((sp)->perfctr), s) * CSBYTH_D <= SCOUNT(&((sp)->perfctr), s) * CSBYTH_N)
@@ -1305,7 +1289,6 @@ void cache_init_sarp(long long int set_indx, struct cache_params *params,
     memset(global_data->fmiss_count, 0, sizeof(ub8) * (TST + 1));
     memset(global_data->smiss_count, 0, sizeof(ub8) * (TST + 1));
     memset(global_data->stream_pinned, 0, sizeof(ub8) * (TST + 1));
-    memset(global_data->stream_upin, 0, sizeof(ub8) * (TST + 1));
     memset(global_data->stream_bypass, 0, sizeof(ub8) * (TST + 1));
     memset(global_data->stream_fdemote, 0, sizeof(ub8) * (TST + 1));
     memset(global_data->stream_hdemote, 0, sizeof(ub8) * (TST + 1));
@@ -1314,8 +1297,6 @@ void cache_init_sarp(long long int set_indx, struct cache_params *params,
     memset(global_data->stream_access, 0, sizeof(ub8) * (TST + 1));
     memset(global_data->stream_miss, 0, sizeof(ub8) * (TST + 1));
     memset(global_data->speedup_count, 0, sizeof(ub8) * (TST + 1));
-    memset(global_data->ctcrtcl_count, 0, sizeof(ub8) * (TST + 1));
-    memset(global_data->btcrtcl_count, 0, sizeof(ub8) * (TST + 1));
 
     /* Initialize bimodal access counter */
     SAT_CTR_INI(global_data->access_ctr, 8, 0, 255);
@@ -1803,23 +1784,6 @@ void cache_fill_block_sarp(sarp_data *policy_data,
 
   info->sap_stream = sstream;
   
-#if 0
-  if (global_data->speedup_stream == CS)
-#endif
-  { 
-    if (info->stream == CS && CRITICAL_STREAM(global_data, info))
-    {
-      global_data->ctcrtcl_count[info->stream] += 1;
-    }
-    else
-    {
-      if (info->stream == BS && CRITICAL_STREAM(global_data, info))
-      {
-        global_data->btcrtcl_count[info->stream] += 1;
-      }
-    }
-  }
-
   /* Get per-stream policy */
   per_stream_policy = SARP_DATA_PSPOLICY(policy_data);
   assert(per_stream_policy);
@@ -2017,9 +1981,9 @@ void cache_fill_block_sarp(sarp_data *policy_data,
 
           if (info->spill == TRUE)
           {
-#define CSBYTH_D            (4)
+#define CSBYTH_D            (2)
 #define CSBYTH_N            (1)
-#define CSRD_D              (4)
+#define CSRD_D              (2)
 #define CSRD_N              (1)
 #define SCOUNT(p, s)        (SMPLRPERF_SPILL(p, s))
 #define SREUSE(p, s)        (SMPLRPERF_SREUSE(p, s))
@@ -2033,9 +1997,6 @@ void cache_fill_block_sarp(sarp_data *policy_data,
 #define EVAL_SCOND(g, i)    (!NCRTCL_BYPASS(g, i) && EVAL_PCOND(g, i))
 #define PIN_MISS_BLK(g, i)  (((g)->speedup_enabled) ? EVAL_SCOND(g, i) : EVAL_PCOND(g, i))
 
-#if 0
-            if ((global_data)->pin_blocks && is_miss_block_pinned((global_data)->sampler, info))
-#endif
             if (PIN_MISS_BLK(global_data, info))
             {
               block->is_block_pinned = TRUE;
@@ -2136,10 +2097,6 @@ void cache_fill_block_sarp(sarp_data *policy_data,
         printf("CS hit demote %ld\n", global_data->stream_hdemote[CS]);
         printf("TS hit demote %ld\n", global_data->stream_hdemote[TS]);
         printf("IS hit demote %ld\n", global_data->stream_hdemote[IS]);
-        printf("CS critical %ld:%d\n", global_data->stream_access[CS], 
-            global_data->ctcrtcl_count[CS]);
-        printf("BS critical %ld:%d\n", global_data->stream_access[BS], 
-            global_data->btcrtcl_count[BS]);
 
         /* Reset sampler cache and epoch length */
         sampler_cache_reset(global_data, global_data->sampler);
@@ -2156,17 +2113,17 @@ void cache_fill_block_sarp(sarp_data *policy_data,
         printf("TSAccess:%ld TSMiss:%ld\n", global_data->stream_access[TS],
             global_data->stream_miss[TS]);
 
-        printf("CSPin:%ld CSPFill:%ld CSPhit:%ld CSUPin:%ld\n", 
+        printf("CSPin:%ld CSPFill:%ld CSPhit:%ld\n", 
             global_data->stream_pinned[CS], global_data->stream_pfill[CS],
-            global_data->stream_phit[CS], global_data->stream_upin[CS]);
+            global_data->stream_phit[CS]);
 
-        printf("ZSPin:%ld ZSPFill:%ld ZSPhit:%ld ZSUpin:%ld\n", 
+        printf("ZSPin:%ld ZSPFill:%ld ZSPhit:%ld\n", 
             global_data->stream_pinned[ZS], global_data->stream_pfill[ZS],
-            global_data->stream_phit[ZS], global_data->stream_upin[ZS]);
+            global_data->stream_phit[ZS]);
 
-        printf("TSPin:%ld TSPFill:%ld TSPhit:%ld TSUpin:%ld\n", 
+        printf("TSPin:%ld TSPFill:%ld TSPhit:%ld\n", 
             global_data->stream_pinned[TS], global_data->stream_pfill[TS],
-            global_data->stream_phit[TS], global_data->stream_upin[TS]);
+            global_data->stream_phit[TS]);
 
         for (ub1 strm = NN; strm <= TST; strm++)
         {
@@ -2175,12 +2132,7 @@ void cache_fill_block_sarp(sarp_data *policy_data,
         }
 
         memset(global_data->stream_pinned , 0, sizeof(ub8) * (TST + 1));
-        memset(global_data->stream_upin , 0, sizeof(ub8) * (TST + 1));
-#if 0
-        memset(global_data->ctcrtcl_count, 0, sizeof(ub8) * (TST + 1));
-        memset(global_data->btcrtcl_count, 0, sizeof(ub8) * (TST + 1));
         memset(global_data->stream_access , 0, sizeof(ub8) * (TST + 1));
-#endif
         memset(global_data->stream_miss , 0, sizeof(ub8) * (TST + 1));
       }
     }
@@ -2228,32 +2180,6 @@ int cache_replace_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
   current_policy = CURRENT_POLICY(policy_data, global_data, following_policy, 
       info, FALSE);
 
-#define CZSBYTH_D           (3)
-#define CZSBYTH_N           (2)
-#define COSBYTH_D           (3)
-#define COSBYTH_N           (2)
-#define CFBYTH_D            (3)
-#define CFBYTH_N            (2)
-#define FCOUNT(p, s)        (SMPLRPERF_FILL(p, s))
-#define FREUSE(p, s)        (SMPLRPERF_FREUSE(p, s))
-#define SCOUNT(p, s)        (SMPLRPERF_SPILL(p, s))
-#define SREUSE(p, s)        (SMPLRPERF_SREUSE(p, s))
-#define FBYPASS_TH(sp, s)   (FREUSE(&((sp)->perfctr), s) * CFBYTH_D <= FCOUNT(&((sp)->perfctr), s) * CFBYTH_N)
-#define SZBYPASS_TH(sp, s)  (SREUSE(&((sp)->perfctr), s) * CZSBYTH_D <= SCOUNT(&((sp)->perfctr), s) * CZSBYTH_N)
-#define SOBYPASS_TH(sp, s)  (SREUSE(&((sp)->perfctr), s) * COSBYTH_D <= SCOUNT(&((sp)->perfctr), s) * COSBYTH_N)
-#define SBYPASS_TH(sp, s)   ((s == IS) ? SZBYPASS_TH(sp, s) : SOBYPASS_TH(sp, s))
-#define CBYPASS(sp, i)      ((i)->fill ? FBYPASS_TH(sp, NEW_STREAM(i)) : SBYPASS_TH(sp, NEW_STREAM(i)))
-#if 0
-#define NCRTCL_BYPASS(g, i) (!CRITICAL_STREAM(g, i))
-#endif
-#define NCRTCL_BYPASS(g, i) (!CRITICAL_STREAM(g, i) && CBYPASS((g)->sampler, i))
-#define EVAL_BCOND(g, i)    (!is_fill_bypass(global_data->sampler, info))
-#define EVAL_SCOND(g, i)    (!NCRTCL_BYPASS(global_data, info))
-#define BYP_FILL_BLK(g, i)  ((g)->speedup_enabled ? EVAL_SCOND(g, i) : EVAL_BCOND(g, i))
-
-#if 0
-  if (BYP_FILL_BLK(global_data, info))
-#endif
   if (!is_fill_bypass(global_data->sampler, info))
   {
     switch (current_policy)
@@ -2348,21 +2274,6 @@ end:
 }
 
 #undef INVALID_WAYID
-#undef CFBYTH_D
-#undef CFBYTH_N
-#undef CSBYTH_D
-#undef CSBYTH_N
-#undef FCOUNT
-#undef FREUSE
-#undef FBYPASS_TH
-#undef SCOUNT
-#undef SREUSE
-#undef SBYPASS_TH
-#undef CBYPASS
-#undef NCRTCL_BYPASS
-#undef EVAL_BCOND
-#undef EVAL_SCOND
-#undef BYP_FILL_BLK
 
 static void update_block_xstream(struct cache_block_t *block, memory_trace *info)
 {
@@ -2418,26 +2329,6 @@ void cache_access_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
   /* Check: block's tag and state are valid */
   assert(blk->tag >= 0);
   assert(blk->state != cache_block_invalid);
-
-#if 0
-  if (global_data->speedup_stream == CS)
-#endif
-  { 
-#if 0
-    if (DYNCBLK(global_data, info))
-#endif
-    if (info->stream == CS && CRITICAL_STREAM(global_data, info))
-    {
-      global_data->ctcrtcl_count[info->stream] += 1;
-    }
-    else
-    {
-      if (info->stream == BS && CRITICAL_STREAM(global_data, info))
-      {
-        global_data->btcrtcl_count[info->stream] += 1;
-      }
-    }
-  }
 
   /* Get per-stream policy */
   following_policy = FOLLOW_POLICY(per_stream_policy[info->stream], info);
@@ -2520,9 +2411,6 @@ void cache_access_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
 #define EVAL_SCOND(g, i)    (!NCRTCL_BYPASS(g, i) && EVAL_PCOND(g, i))
 #define PIN_HIT_BLK(g, i)   ((g)->speedup_enabled ? EVAL_SCOND(g, i) : EVAL_PCOND(g, i))
 
-#if 0
-        if ((global_data)->pin_blocks && is_hit_block_pinned((global_data)->sampler, info))
-#endif
         if (PIN_HIT_BLK(global_data, info))
         {
           blk->is_block_pinned = TRUE;
@@ -2532,11 +2420,6 @@ void cache_access_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
         else
         {
           blk->is_block_pinned = FALSE;
-
-          if (blk->access == 0)
-          {
-            global_data->stream_upin[info->stream] += 1;
-          }
         }
 
 #undef CSBYTH_D
@@ -2553,11 +2436,6 @@ void cache_access_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
       else
       {
         blk->is_block_pinned = FALSE;
-
-        if (blk->access == 0)
-        {
-          global_data->stream_upin[info->stream] += 1;
-        }
       }
       
       blk->access += 1;
@@ -2630,10 +2508,6 @@ void cache_access_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
         printf("ZS hit demote %ld\n", global_data->stream_hdemote[ZS]);
         printf("CS hit demote %ld\n", global_data->stream_hdemote[CS]);
         printf("TS hit demote %ld\n", global_data->stream_hdemote[TS]);
-        printf("CS critical %ld:%d\n", global_data->stream_access[CS], 
-            global_data->ctcrtcl_count[CS]);
-        printf("BS critical %ld:%d\n", global_data->stream_access[BS], 
-            global_data->btcrtcl_count[BS]);
 
         sampler_cache_reset(global_data, global_data->sampler);
 
@@ -2645,20 +2519,20 @@ void cache_access_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
         printf("CSAccess:%ld CSMiss:%ld\n", global_data->stream_access[CS],
             global_data->stream_miss[CS]);
 
-        printf("CSPin:%ld CSPFill:%ld CSPhit:%ld CSUPin:%ld\n", 
+        printf("CSPin:%ld CSPFill:%ld CSPhit:%ld\n", 
             global_data->stream_pinned[CS], global_data->stream_pfill[CS],
-            global_data->stream_phit[CS], global_data->stream_upin[CS]);
+            global_data->stream_phit[CS]);
 
         printf("ZSAccess:%ld ZSMiss:%ld\n", global_data->stream_access[ZS],
             global_data->stream_miss[ZS]);
 
-        printf("ZSPin:%ld ZSPFill:%ld ZSPhit:%ld ZSUpin:%ld\n", 
+        printf("ZSPin:%ld ZSPFill:%ld ZSPhit:%ld\n", 
             global_data->stream_pinned[ZS], global_data->stream_pfill[ZS],
-            global_data->stream_phit[ZS], global_data->stream_upin[ZS]);
+            global_data->stream_phit[ZS]);
 
-        printf("TSPin:%ld TSPFill:%ld TSPhit:%ld TSUpin:%ld\n", 
+        printf("TSPin:%ld TSPFill:%ld TSPhit:%ld\n", 
             global_data->stream_pinned[TS], global_data->stream_pfill[TS],
-            global_data->stream_phit[TS], global_data->stream_upin[TS]);
+            global_data->stream_phit[TS]);
 
         for (ub1 strm = NN; strm <= TST; strm++)
         {
@@ -2667,12 +2541,7 @@ void cache_access_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
         }
 
         memset(global_data->stream_pinned , 0, sizeof(ub8) * (TST + 1));
-        memset(global_data->stream_upin , 0, sizeof(ub8) * (TST + 1));
-#if 0
         memset(global_data->stream_access , 0, sizeof(ub8) * (TST + 1));
-        memset(global_data->ctcrtcl_count , 0, sizeof(ub8) * (TST + 1));
-        memset(global_data->btcrtcl_count , 0, sizeof(ub8) * (TST + 1));
-#endif
         memset(global_data->stream_miss , 0, sizeof(ub8) * (TST + 1));
       }
     }
@@ -3093,8 +2962,6 @@ void sampler_cache_fill_block(sampler_cache *sampler, ub4 index, ub4 way,
   sampler->blocks[index][way].dynamic_depth[offset] = FALSE;
   sampler->blocks[index][way].dynamic_blit[offset]  = FALSE;
   sampler->blocks[index][way].dynamic_proc[offset]  = FALSE;
-  sampler->blocks[index][way].c_access[offset]      = 0;
-  sampler->blocks[index][way].t_access[offset]      = 0;
   sampler->blocks[index][way].timestamp[offset]     = policy_data->miss_count;
 
   /* Update fill */
@@ -3108,16 +2975,6 @@ void sampler_cache_fill_block(sampler_cache *sampler, ub4 index, ub4 way,
     update_sampler_spill_perfctr(sampler, index, way, info);
   }
   
-  if (info->stream == TS)
-  {
-    sampler->blocks[index][way].t_access[offset] += 1;
-  }
-
-  if (info->stream == CS)
-  {
-    sampler->blocks[index][way].c_access[offset] += 1;
-  }
-
   sampler->perfctr.sampler_fill += 1;
 }
 
@@ -3175,16 +3032,6 @@ void sampler_cache_access_block(sampler_cache *sampler, ub4 index, ub4 way,
   sampler->blocks[index][way].stream[offset]        = info->stream;
   sampler->blocks[index][way].timestamp[offset]     = policy_data->miss_count;
   
-  if (info->stream == TS)
-  {
-    sampler->blocks[index][way].t_access[offset] += 1;
-  }
-
-  if (info->stream == CS)
-  {
-    sampler->blocks[index][way].c_access[offset] += 1;
-  }
-
   sampler->perfctr.sampler_hit += 1;
 }
 
@@ -3249,8 +3096,6 @@ void sampler_cache_lookup(sampler_cache *sampler, sarp_data *policy_data,
         sampler->blocks[index][way].dynamic_depth[off]  = 0;
         sampler->blocks[index][way].dynamic_blit[off]   = 0;
         sampler->blocks[index][way].dynamic_proc[off]   = 0;
-        sampler->blocks[index][way].c_access[off]       = 0;
-        sampler->blocks[index][way].t_access[off]       = 0;
       }
 
       sampler->perfctr.sampler_replace += 1;
@@ -3344,6 +3189,7 @@ sampler_entry* sampler_cache_get_block(sampler_cache *sampler, memory_trace *inf
 #undef CR_TH
 #undef CRITICAL_STREAM
 #undef KNOWN_CSTREAM
+#undef INSPD_RANGE
 #undef CRITICAL_COND
 #undef DYNC
 #undef DYNZ
@@ -3391,10 +3237,14 @@ sampler_entry* sampler_cache_get_block(sampler_cache *sampler, memory_trace *inf
 #undef SAMPLER_TAG
 #undef SAMPLER_OFFSET
 #undef SMPLR
-#undef BLK_I
-#undef BLK_O
-#undef SMBLK
+#undef CPRD
 #undef CHK_CRTCL
+#undef ALWAYS_CTRCL
+#undef FOUND_CTRCL
 #undef GST
-#undef DYNCBLK
-#undef DYNBBLK
+#undef CHK_CTA
+#undef CHK_BTA
+#undef CTC_CNT
+#undef BTC_CNT
+#undef IS_INTERS
+#undef INSTRS_CRTCL

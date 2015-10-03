@@ -130,8 +130,6 @@ typedef struct sampler_entry
   ub1 *dynamic_depth; /* True, if dynamic zs */
   ub1 *dynamic_blit;  /* True, if dynamic bs */
   ub1 *dynamic_proc;  /* True, if dynamic ps */
-  ub8 *c_access;      /* True, if dynamic cs */
-  ub8 *t_access;      /* True, if dynamic cs */
 }sampler_entry;
 
 /*
@@ -275,13 +273,10 @@ typedef struct cache_policy_sarp_gdata_t
   ub8  bypass_count;            /* # bypass */
   sctr sarp_hint[TST + 1];      /* Accumulation counter for per-stream speedup */
   ub8  speedup_count[TST + 1];  /* Per-stream speedup count */
-  ub8  ctcrtcl_count[TST + 1];  /* # stream is considered CT critical */
-  ub8  btcrtcl_count[TST + 1];  /* # stream is considered BT critical */
   ub1  speedup_stream;          /* Stream chosen to be sped-up */
   ub8  stream_access[TST + 1];  /* # accesses */
   ub8  stream_miss[TST + 1];    /* # misses */
   ub8  stream_pinned[TST + 1];  /* # accesses pinned */
-  ub8  stream_upin[TST + 1];    /* # accesses unpinned */
   ub8  stream_bypass[TST + 1];  /* # accesses bypassed */
   ub8  stream_fdemote[TST + 1]; /* # fills demoted */
   ub8  stream_hdemote[TST + 1]; /* # hits demoted */
