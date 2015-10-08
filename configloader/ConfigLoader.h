@@ -84,6 +84,7 @@ struct LChParameters
   ub1   stream;                 /* Stream to be simulated */
   bool  useVa;                  /* True, if va is to be used */
   bool  useBs;                  /* True, if baseline samples are used */
+  bool  speedupEnabled;         /* True, if speedup hints are used */
   bool  useStep;                /* True, if step function is to be used in sappridepri policy */
   bool  pinBlocks;              /* True, SARP blocks are pinned */
   enum  cache_policy_t policy;  /* Cache policy */

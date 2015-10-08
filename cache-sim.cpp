@@ -485,6 +485,7 @@ void set_cache_params(struct cache_params *params, LChParameters *lcP,
   params->stream          = lcP->stream;
   params->streams         = lcP->streams;
   params->bs_epoch        = lcP->useBs;
+  params->speedup_enabled = lcP->speedupEnabled;
   params->use_step        = lcP->useStep;
   params->sampler_sets    = lcP->samplerSets;
   params->sampler_ways    = lcP->samplerWays;

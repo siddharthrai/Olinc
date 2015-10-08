@@ -352,7 +352,7 @@ bool ConfigLoader::parseLCSectionParameter(LChParameters *lcP)
     if (!parseBooleanParameter("PinBlocks", id, lcP->pinBlocks))
         return FALSE;
 
-    if (!parseBooleanParameter("SpeedupEnabled", id, lcP->pinBlocks))
+    if (!parseBooleanParameter("SpeedupEnabled", id, lcP->speedupEnabled))
         return FALSE;
 
     if ( !paramsTracker.wasAnyParamSectionDefined() ) {

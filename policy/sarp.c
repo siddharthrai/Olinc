@@ -2180,7 +2180,7 @@ int cache_replace_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
   current_policy = CURRENT_POLICY(policy_data, global_data, following_policy, 
       info, FALSE);
 
-  if (!is_fill_bypass(global_data->sampler, info))
+  if (!is_fill_bypass(global_data->sampler, info) && CRITICAL_STREAM(global_data, info))
   {
     switch (current_policy)
     {

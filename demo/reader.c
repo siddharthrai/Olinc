@@ -57,6 +57,7 @@ int main(int argc, char **argv)
     assert(gzread(trc_file, &trace, sizeof(memory_trace)) != -1);
     if (!gzeof(trc_file))
     {
+      assert(trace.stream > NN && trace.stream < TST + 5);
 #if 0
       if (trace.stream == TS && trace.spill == TRUE)
 #endif
