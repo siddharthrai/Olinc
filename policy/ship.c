@@ -89,30 +89,36 @@ do                                                            \
 /* Macros to obtain signature */
 #define SIGNSIZE(g)     ((g)->sign_size)
 #define SHCTSIZE(g)     ((g)->shct_size)
+#define COREBTS(g)      ((g)->core_size)
 #define SB(g)           ((g)->sign_source == USE_MEMPC)
 #define SP(g)           ((g)->sign_source == USE_PC)
 #define SM(g)           ((g)->sign_source == USE_MEM)
 #define SIGMAX_VAL(g)   (((1 << SIGNSIZE(g)) - 1))
 #define SIGNMASK(g)     (SIGMAX_VAL(g) << SHCTSIZE(g))
-#define SIGNP(g, i)     ((((i)->pc) & SIGNMASK(g)) >> SHCTSIZE(g))
-#define SIGNM(g, i)     ((((i)->address) & SIGNMASK(g)) >> SHCTSIZE(g))
-#define GET_SSIGN(g, i) ((i)->stream < TST ? SIGNM(g, i) : SIGNP(g, i))
-#define GET_SIGN(g, i)  (SM(g) ? SIGNM(g, i) : SIGNP(g, i))  
+#define SIGNP(g, i)     (((i)->pc) & SIGMAX_VAL(g))
+#define SIGNM(g, i)     ((((i)->address >> SHCTSIZE(g)) & SIGMAX_VAL(g)))
+#define SIGNCORE(g, i)  (((i)->core - 1) << (SHCTSIZE(g) - COREBTS(g)))
+#define GET_SSIGN(g, i) ((i)->stream < PS ? SIGNM(g, i) : SIGNP(g, i) ^ SIGNCORE(g, i))
+#define GET_SIGN(g, i)  (SM(g) ? SIGNM(g, i) : SIGNP(g, i))
 #define SHIPSIGN(g, i)  (SB(g) ? GET_SSIGN(g, i) : GET_SIGN(g, i))
 
 /* Update blocks for Color stream */
 #define CACHE_UPDATE_BLOCK_SIGN(b, g, i) ((b)->ship_sign = SHIPSIGN(g, i))
 
-#define CACHE_UPDATE_SHCT(block, g)                           \
+#define CACHE_INC_SHCT(block, g)                              \
 do                                                            \
 {                                                             \
   assert(block->ship_sign <= SIGMAX_VAL(g));                  \
                                                               \
-  if (block->access)                                          \
-  {                                                           \
-    SAT_CTR_INC((g)->shct[block->ship_sign]);                 \
-  }                                                           \
-  else                                                        \
+  SAT_CTR_INC((g)->shct[block->ship_sign]);                   \
+}while(0)
+
+#define CACHE_DEC_SHCT(block, g)                              \
+do                                                            \
+{                                                             \
+  assert(block->ship_sign <= SIGMAX_VAL(g));                  \
+                                                              \
+  if (!block->access)                                         \
   {                                                           \
     SAT_CTR_DEC((g)->shct[block->ship_sign]);                 \
   }                                                           \
@@ -153,6 +159,8 @@ static void cache_init_gdata(struct cache_params *params, ship_gdata *global_dat
   global_data->shct_size  = params->ship_shct_size;   /* Signature history table size */
   global_data->sign_size  = params->ship_sig_size;    /* Signature size */
   global_data->entry_size = params->ship_entry_size;  /* Size of a counter */
+  global_data->core_size  = params->ship_core_size;   /* Size of a counter */
+  global_data->threshold  = params->threshold;        /* BRRIP threshold */
 
   if (params->ship_use_pc && params->ship_use_mem)
   {
@@ -183,10 +191,16 @@ static void cache_init_gdata(struct cache_params *params, ship_gdata *global_dat
 #define CTR_MAX_VAL ((1 << global_data->entry_size) - 1)
 
   /* Initialize counter table */ 
-  for (ub4 i = 0; i < global_data->shct_size; i++)
+  for (ub4 i = 0; i < (1 << global_data->shct_size); i++)
   {
     SAT_CTR_INI(global_data->shct[i], global_data->entry_size, CTR_MIN_VAL, CTR_MAX_VAL);
   }
+
+#define CORE_COUNT(g)  ((1 << (g)->core_size) + 1)
+
+  global_data->brrip_ctr = xcalloc(CORE_COUNT(global_data), sizeof(ub1));
+
+#undef CORE_COUNT
 
 #undef CTR_MIN_VAL
 #undef CTR_MAX_VAL
@@ -200,7 +214,10 @@ void cache_init_ship(ub4 set_idx, struct cache_params *params,
   assert(policy_data);
   
   /* Initialize global data */
-  cache_init_gdata(params, global_data);
+  if (set_idx == 0)
+  {
+    cache_init_gdata(params, global_data);
+  }
 
   /* For RRIP blocks are organized in per RRPV list */
 #define MAX_RRPV        (params->max_rrpv)
@@ -323,17 +340,17 @@ void cache_fill_block_ship(ship_data *policy_data,
   assert(tag >= 0);
   assert(state != cache_block_invalid);
   
-  /* Obtain SHIP specific data */
-  block = &(SHIP_DATA_BLOCKS(policy_data)[way]);
-  
-  assert(block->stream == 0);
-
-  /* Get RRPV to be assigned to the new block */
-  rrpv = cache_get_fill_rrpv_ship(policy_data, global_data, info);
-
   /* If block is not bypassed */
-  if (rrpv != BYPASS_RRPV)
+  if (way != BYPASS_WAY)
   {
+    /* Obtain SHIP specific data */
+    block = &(SHIP_DATA_BLOCKS(policy_data)[way]);
+
+    assert(block->stream == 0);
+
+    /* Get RRPV to be assigned to the new block */
+    rrpv = cache_get_fill_rrpv_ship(policy_data, global_data, info);
+
     /* Ensure a valid RRPV */
     assert(rrpv >= 0 && rrpv <= policy_data->max_rrpv); 
 
@@ -353,6 +370,7 @@ void cache_fill_block_ship(ship_data *policy_data,
 
     block->dirty  = (info && info->dirty) ? TRUE : FALSE;
     block->epoch  = 0;
+    block->access = 0;
 
     /* Insert block in to the corresponding RRPV queue */
     CACHE_APPEND_TO_QUEUE(block, 
@@ -363,11 +381,19 @@ void cache_fill_block_ship(ship_data *policy_data,
   SHIP_DATA_CFPOLICY(policy_data) = SHIP_DATA_DFPOLICY(policy_data);
 }
 
-int cache_replace_block_ship(ship_data *policy_data, ship_gdata *global_data)
+int cache_replace_block_ship(ship_data *policy_data, 
+    ship_gdata *global_data, memory_trace *info)
 {
   struct cache_block_t *block;
-
-  int rrpv;
+  ub4    min_wayid;
+  int    rrpv;
+  
+  if (info->spill && (info->stream != CS) && (info->stream != BS) && 
+      (info->stream != ZS))
+  {
+    min_wayid = BYPASS_WAY;
+    goto end;
+  }
 
   /* Try to find an invalid block always from head of the free list. */
   for (block = SHIP_DATA_FREE_HEAD(policy_data); block; block = block->prev)
@@ -387,9 +413,8 @@ int cache_replace_block_ship(ship_data *policy_data, ship_gdata *global_data)
       SHIP_DATA_VALID_TAIL(policy_data), rrpv);
   }
  
-  /* Remove a nonbusy block from the tail */
-  unsigned int min_wayid = ~(0);
-  
+  min_wayid = ~(0);
+
   switch (SHIP_DATA_CRPOLICY(policy_data))
   {
     case cache_policy_ship:
@@ -398,6 +423,15 @@ int cache_replace_block_ship(ship_data *policy_data, ship_gdata *global_data)
         if (!block->busy && block->way < min_wayid)
           min_wayid = block->way;
       }
+
+      /* If a replacement has happeded, update signature counter table  */
+      if (min_wayid != ~(0))
+      {
+        block = &(policy_data->blocks[min_wayid]);
+
+        CACHE_DEC_SHCT(block, global_data);
+      }
+
       break;
 
     case cache_policy_cpulast:
@@ -407,7 +441,7 @@ int cache_replace_block_ship(ship_data *policy_data, ship_gdata *global_data)
         if (!block->busy && (block->way < min_wayid && block->stream < TST))
           min_wayid = block->way;
       }
-      
+
       /* If there so no GPU replacement candidate, replace CPU block */
       if (min_wayid == ~(0))
       {
@@ -423,20 +457,14 @@ int cache_replace_block_ship(ship_data *policy_data, ship_gdata *global_data)
       panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
   }
   
-  /* If a replacement has happeded, update signature counter table  */
-  if (min_wayid != ~(0))
-  {
-    block = &(policy_data->blocks[min_wayid]);
-
-    CACHE_UPDATE_SHCT(block, global_data);
-  }
+end:
 
   /* If no non busy block can be found, return -1 */
   return (min_wayid != ~(0)) ? min_wayid : -1;
 }
 
-struct cache_block_t cache_access_block_ship(ship_data *policy_data, int way, int strm,
-  memory_trace *info)
+struct cache_block_t cache_access_block_ship(ship_data *policy_data, ship_gdata *global_data, 
+    int way, int strm, memory_trace *info)
 {
   struct cache_block_t *blk   = NULL;
   struct cache_block_t *next  = NULL;
@@ -445,67 +473,75 @@ struct cache_block_t cache_access_block_ship(ship_data *policy_data, int way, in
 
   int old_rrpv;
   int new_rrpv;
-  
-  blk  = &(SHIP_DATA_BLOCKS(policy_data)[way]);
-  prev = blk->prev;
-  next = blk->next;
-
-  /* Check: block's tag and state are valid */
-  assert(blk->tag >= 0);
-  assert(blk->state != cache_block_invalid);
-  
-  /* Copy block data into return block */
-  memcpy(&ret_block, blk, sizeof(struct cache_block_t));
-
-  switch (SHIP_DATA_CAPOLICY(policy_data))
+ 
+  if (way != BYPASS_WAY)
   {
-    case cache_policy_ship:
-      /* Update RRPV and epoch only for read hits */
-      if (info)
-      {
-        /* Get old RRPV from the block */
-        old_rrpv = (((rrip_list *)(blk->data))->rrpv);
+    blk  = &(SHIP_DATA_BLOCKS(policy_data)[way]);
+    prev = blk->prev;
+    next = blk->next;
 
-        /* Get new RRPV using policy specific function */
-        new_rrpv = cache_get_new_rrpv_ship(old_rrpv);
+    /* Check: block's tag and state are valid */
+    assert(blk->tag >= 0);
+    assert(blk->state != cache_block_invalid);
 
-        /* Update block queue if block got new RRPV */
-        if (new_rrpv != old_rrpv)
+    /* Copy block data into return block */
+    memcpy(&ret_block, blk, sizeof(struct cache_block_t));
+
+    switch (SHIP_DATA_CAPOLICY(policy_data))
+    {
+      case cache_policy_ship:
+        /* Update RRPV and epoch only for read hits */
+        if (info)
         {
-          CACHE_REMOVE_FROM_QUEUE(blk, SHIP_DATA_VALID_HEAD(policy_data)[old_rrpv],
-              SHIP_DATA_VALID_TAIL(policy_data)[old_rrpv]);
-          CACHE_APPEND_TO_QUEUE(blk, SHIP_DATA_VALID_HEAD(policy_data)[new_rrpv], 
-              SHIP_DATA_VALID_TAIL(policy_data)[new_rrpv]);
+          /* Get old RRPV from the block */
+          old_rrpv = (((rrip_list *)(blk->data))->rrpv);
+
+          /* Get new RRPV using policy specific function */
+          new_rrpv = cache_get_new_rrpv_ship(info, old_rrpv);
+
+          /* Update block queue if block got new RRPV */
+          if (new_rrpv != old_rrpv)
+          {
+            CACHE_REMOVE_FROM_QUEUE(blk, SHIP_DATA_VALID_HEAD(policy_data)[old_rrpv],
+                SHIP_DATA_VALID_TAIL(policy_data)[old_rrpv]);
+            CACHE_APPEND_TO_QUEUE(blk, SHIP_DATA_VALID_HEAD(policy_data)[new_rrpv], 
+                SHIP_DATA_VALID_TAIL(policy_data)[new_rrpv]);
+          }
+
+          if (blk->stream == info->stream)
+          {
+            blk->epoch  = (blk->epoch == 3) ? 3 : blk->epoch + 1;
+          }
+          else
+          {
+            blk->epoch = 0;
+          }
+
+          if (info->dirty)
+          {
+            assert(info->spill);
+            blk->dirty  = TRUE;
+          }
+
+          CACHE_UPDATE_BLOCK_PC(blk, info->pc);
+          CACHE_UPDATE_BLOCK_STREAM(blk, strm);
+          CACHE_UPDATE_STREAM_BLOCKS(blk, strm);
+
+          if (info->fill)
+          {
+            CACHE_UPDATE_BLOCK_ACCESS(blk);
+            CACHE_INC_SHCT(blk, global_data);
+          }
         }
 
-        if (blk->stream == info->stream)
-        {
-          blk->epoch  = (blk->epoch == 3) ? 3 : blk->epoch + 1;
-        }
-        else
-        {
-          blk->epoch = 0;
-        }
+        break;
 
-        if (info->dirty)
-        {
-          assert(info->spill);
-          blk->dirty  = TRUE;
-        }
+      case cache_policy_bypass:
+        break;
 
-        CACHE_UPDATE_BLOCK_PC(blk, info->pc);
-        CACHE_UPDATE_BLOCK_ACCESS(blk);
-        CACHE_UPDATE_BLOCK_STREAM(blk, strm);
-        CACHE_UPDATE_STREAM_BLOCKS(blk, strm);
-      }
-
-      break;
-
-    case cache_policy_bypass:
-      break;
-
-    default:
-      panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
+      default:
+        panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
+    }
   }
 
   return ret_block;
@@ -514,33 +550,57 @@ struct cache_block_t cache_access_block_ship(ship_data *policy_data, int way, in
 int cache_get_fill_rrpv_ship(ship_data *policy_data, 
     ship_gdata *global_data, memory_trace *info)
 {
+  int ret_rrpv;
+
   switch (SHIP_DATA_CFPOLICY(policy_data))
   {
     case cache_policy_lru:
-      return 0;
+      ret_rrpv = 0;
+      break;
 
     case cache_policy_lip:
-      return SHIP_DATA_MAX_RRPV(policy_data);
+      ret_rrpv = SHIP_DATA_MAX_RRPV(policy_data);
+      break;
 
     case cache_policy_ship:
       /* Get RRPV based on Ship signature history counter value */
-      if (SAT_CTR_VAL(global_data->shct[SHIPSIGN(global_data, info)]))
+      if (info->spill)
       {
-        return SHIP_DATA_MAX_RRPV(policy_data) - 1;
+        ret_rrpv = SHIP_DATA_MAX_RRPV(policy_data) - 1;
       }
       else
       {
-        return SHIP_DATA_MAX_RRPV(policy_data);
+        if (global_data->brrip_ctr[info->core] == global_data->threshold - 1)
+        {
+          global_data->brrip_ctr[info->core] = 0;
+          ret_rrpv = SHIP_DATA_MAX_RRPV(policy_data) - 1;
+        }
+        else
+        {
+          if (SAT_CTR_VAL(global_data->shct[SHIPSIGN(global_data, info)]))
+          {
+            ret_rrpv = SHIP_DATA_MAX_RRPV(policy_data) - 1;
+          }
+          else
+          {
+            ret_rrpv = SHIP_DATA_MAX_RRPV(policy_data);
+          }
+        }
+
+        global_data->brrip_ctr[info->core] += 1;
       }
-    
+      break;
+
     case cache_policy_bypass:
       /* Not to insert */
-      return BYPASS_RRPV;  
+      ret_rrpv = BYPASS_RRPV;  
+      break;
 
     default:
       panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
-      return 0;
   }
+
+  return ret_rrpv;
 }
 
 int cache_get_replacement_rrpv_ship(ship_data *policy_data)
@@ -548,9 +608,12 @@ int cache_get_replacement_rrpv_ship(ship_data *policy_data)
   return SHIP_DATA_MAX_RRPV(policy_data);
 }
 
-int cache_get_new_rrpv_ship(int old_rrpv)
+int cache_get_new_rrpv_ship(memory_trace *info, int old_rrpv)
 {
-  return 0;
+  int ret_rrpv;
+  
+  ret_rrpv = (info->spill) ? old_rrpv : 0;
+  return ret_rrpv;
 }
 
 /* Update state of block. */
@@ -558,40 +621,42 @@ void cache_set_block_ship(ship_data *policy_data, int way, long long tag,
   enum cache_block_state_t state, ub1 stream, memory_trace *info)
 {
   struct cache_block_t *block;
-
-  block = &(SHIP_DATA_BLOCKS(policy_data))[way];
-
-  /* Check: tag matches with the block's tag. */
-  assert(block->tag == tag);
-
-  /* Check: block must be in valid state. It is not possible to set
-   * state for an invalid block.*/
-  assert(block->state != cache_block_invalid);
-
-  if (state != cache_block_invalid)
+  
+  if (way != BYPASS_WAY)
   {
-    /* Assign access stream */
-    CACHE_UPDATE_BLOCK_STATE(block, tag, state);
-    CACHE_UPDATE_BLOCK_STREAM(block, stream);
+    block = &(SHIP_DATA_BLOCKS(policy_data))[way];
+
+    /* Check: tag matches with the block's tag. */
+    assert(block->tag == tag);
+
+    /* Check: block must be in valid state. It is not possible to set
+     * state for an invalid block.*/
+    assert(block->state != cache_block_invalid);
+
+    if (state != cache_block_invalid)
+    {
+      /* Assign access stream */
+      CACHE_UPDATE_BLOCK_STATE(block, tag, state);
+      CACHE_UPDATE_BLOCK_STREAM(block, stream);
+      CACHE_UPDATE_STREAM_BLOCKS(block, stream);
+      return;
+    }
+
+    /* Invalidate block */
+    CACHE_UPDATE_BLOCK_STATE(block, tag, cache_block_invalid);
+    CACHE_UPDATE_BLOCK_STREAM(block, NN);
     CACHE_UPDATE_STREAM_BLOCKS(block, stream);
-    return;
+    block->epoch  = 0;
+
+    /* Get old RRPV from the block */
+    int old_rrpv = (((rrip_list *)(block->data))->rrpv);
+
+    /* Remove block from valid list and insert into free list */
+    CACHE_REMOVE_FROM_QUEUE(block, SHIP_DATA_VALID_HEAD(policy_data)[old_rrpv],
+        SHIP_DATA_VALID_TAIL(policy_data)[old_rrpv]);
+    CACHE_APPEND_TO_SQUEUE(block, SHIP_DATA_FREE_HEAD(policy_data), 
+        SHIP_DATA_FREE_TAIL(policy_data));
   }
-
-  /* Invalidate block */
-  CACHE_UPDATE_BLOCK_STATE(block, tag, cache_block_invalid);
-  CACHE_UPDATE_BLOCK_STREAM(block, NN);
-  CACHE_UPDATE_STREAM_BLOCKS(block, stream);
-  block->epoch  = 0;
-
-  /* Get old RRPV from the block */
-  int old_rrpv = (((rrip_list *)(block->data))->rrpv);
-
-  /* Remove block from valid list and insert into free list */
-  CACHE_REMOVE_FROM_QUEUE(block, SHIP_DATA_VALID_HEAD(policy_data)[old_rrpv],
-      SHIP_DATA_VALID_TAIL(policy_data)[old_rrpv]);
-  CACHE_APPEND_TO_SQUEUE(block, SHIP_DATA_FREE_HEAD(policy_data), 
-      SHIP_DATA_FREE_TAIL(policy_data));
-
 }
 
 
@@ -599,16 +664,29 @@ void cache_set_block_ship(ship_data *policy_data, int way, long long tag,
 struct cache_block_t cache_get_block_ship(ship_data *policy_data, int way,
   long long *tag_ptr, enum cache_block_state_t *state_ptr, int *stream_ptr)
 {
+  struct cache_block_t ret_block;
+
   assert(policy_data);
   assert(tag_ptr);
   assert(state_ptr);
   assert(stream_ptr);
 
-  PTR_ASSIGN(tag_ptr, (SHIP_DATA_BLOCKS(policy_data)[way]).tag);
-  PTR_ASSIGN(state_ptr, (SHIP_DATA_BLOCKS(policy_data)[way]).state);
-  PTR_ASSIGN(stream_ptr, (SHIP_DATA_BLOCKS(policy_data)[way]).stream);
+  memset(&ret_block, 0, sizeof(struct cache_block_t)); 
 
-  return SHIP_DATA_BLOCKS(policy_data)[way];
+  if (way != BYPASS_WAY)
+  {
+    PTR_ASSIGN(tag_ptr, (SHIP_DATA_BLOCKS(policy_data)[way]).tag);
+    PTR_ASSIGN(state_ptr, (SHIP_DATA_BLOCKS(policy_data)[way]).state);
+    PTR_ASSIGN(stream_ptr, (SHIP_DATA_BLOCKS(policy_data)[way]).stream);
+  }
+  else
+  {
+    PTR_ASSIGN(tag_ptr, 0xdead);
+    PTR_ASSIGN(state_ptr, cache_block_invalid);
+    PTR_ASSIGN(stream_ptr, NN);
+  }
+
+  return (way != BYPASS_WAY) ? SHIP_DATA_BLOCKS(policy_data)[way] : ret_block;
 }
 
 /* Get tag and state of a block. */
@@ -667,11 +745,13 @@ void cache_set_current_replacement_policy_ship(ship_data *policy_data, cache_pol
 }
 
 #undef SIGNSIZE
+#undef COREBTS
 #undef SB
 #undef SP
 #undef SM
 #undef SIGNP
 #undef SIGNM
+#undef SIGNCORE
 #undef GET_SSIGN
 #undef GET_SIGN
 #undef SHIPSIGN

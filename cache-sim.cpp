@@ -490,6 +490,12 @@ void set_cache_params(struct cache_params *params, LChParameters *lcP,
   params->sampler_sets    = lcP->samplerSets;
   params->sampler_ways    = lcP->samplerWays;
   params->sarp_pin_blocks = lcP->pinBlocks;
+  params->ship_shct_size  = lcP->shctSize;        /* Ship signature history table size */
+  params->ship_sig_size   = lcP->signSize;        /* Ship signature size */
+  params->ship_entry_size = lcP->entrySize;       /* Ship counter width */
+  params->ship_core_size  = lcP->coreSize;        /* Ship number of cores */
+  params->ship_use_mem    = lcP->useMem;          /* Ship-mem flag */
+  params->ship_use_pc     = lcP->usePc;           /* Ship-pc flag */
 
 #define CS_BYTE(cache_size) (cache_size * 1024)
 #define SS_BYTE(lcP)        (lcP->cacheBlockSize * cache_way)

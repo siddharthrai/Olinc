@@ -70,11 +70,14 @@ typedef struct cache_policy_ship_data_t
 /* SHiP-mem cache-wide data */
 typedef struct cache_policy_ship_gdata_t
 {
+  ub1   threshold;  /* BRRIP threshold */
   ub4   shct_size;  /* Signature history counter table size in log of entries */
   ub4   sign_size;  /* Signature size in bits */
+  ub4   core_size;  /* Core count */
   ub4   entry_size; /* Counter size */
   sctr *shct;       /* Signature history counter table */
   ub1   sign_source;/* Source of sign (PC / MEM / PC + MEM) */
+  ub1  *brrip_ctr;  /* BRRIP counter */
 }ship_gdata;
 
 /*
@@ -188,6 +191,7 @@ void cache_fill_block_ship(ship_data *policy_data,
  *
  *  policy_data (IN)  - Set of the block 
  *  global_data (IN)  - Cache-wide data
+ *  info        (IN)  - Access info
  *
  * RETURNS
  *  
@@ -195,7 +199,8 @@ void cache_fill_block_ship(ship_data *policy_data,
  *
  */
 
-int  cache_replace_block_ship(ship_data *policy_data, ship_gdata *global_data);
+int  cache_replace_block_ship(ship_data *policy_data, 
+    ship_gdata *global_data, memory_trace *info);
 
 /*
  *
@@ -220,8 +225,8 @@ int  cache_replace_block_ship(ship_data *policy_data, ship_gdata *global_data);
  *
  */
 
-struct cache_block_t cache_access_block_ship(ship_data *policy_data, int way,
-  int strm, memory_trace *info);
+struct cache_block_t cache_access_block_ship(ship_data *policy_data, 
+    ship_gdata *global_data, int way, int strm, memory_trace *info);
 
 /*
  *
@@ -339,7 +344,7 @@ int cache_get_replacement_rrpv_ship(ship_data *policy_data);
  *  New RRPV
  */
 
-int cache_get_new_rrpv_ship(int old_rrpv);
+int cache_get_new_rrpv_ship(memory_trace *info, int old_rrpv);
 
 /*
  *

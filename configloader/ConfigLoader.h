@@ -87,6 +87,12 @@ struct LChParameters
   bool  speedupEnabled;         /* True, if speedup hints are used */
   bool  useStep;                /* True, if step function is to be used in sappridepri policy */
   bool  pinBlocks;              /* True, SARP blocks are pinned */
+  ub4   shctSize;
+  ub4   signSize;
+  ub4   coreSize;
+  ub4   entrySize;
+  bool  useMem;
+  bool  usePc;
   enum  cache_policy_t policy;  /* Cache policy */
 };
 

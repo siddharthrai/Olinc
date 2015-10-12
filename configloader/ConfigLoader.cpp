@@ -355,6 +355,24 @@ bool ConfigLoader::parseLCSectionParameter(LChParameters *lcP)
     if (!parseBooleanParameter("SpeedupEnabled", id, lcP->speedupEnabled))
         return FALSE;
 
+    if (!parseDecimalParameter("ShctSize", id, lcP->shctSize))
+        return FALSE;
+
+    if (!parseDecimalParameter("SignSize", id, lcP->signSize))
+        return FALSE;
+
+    if (!parseDecimalParameter("CoreSize", id, lcP->coreSize))
+        return FALSE;
+
+    if (!parseDecimalParameter("EntrySize", id, lcP->entrySize))
+        return FALSE;
+
+    if (!parseBooleanParameter("UseMem", id, lcP->useMem))
+        return FALSE;
+
+    if (!parseBooleanParameter("UsePc", id, lcP->usePc))
+        return FALSE;
+
     if ( !paramsTracker.wasAnyParamSectionDefined() ) {
         stringstream ss;
         ss << "Parameter '" << id << "' in section [LLC] is not supported";
@@ -731,6 +749,14 @@ bool ConfigLoader::parseCachePolicy(char *paramName, char *id, enum cache_policy
         if (!strcmp(auxStr, "SARP"))
         {
           val = cache_policy_sarp;
+
+          goto end;
+        }
+       
+        /*  Return boolean parameter.  */
+        if (!strcmp(auxStr, "SHIP"))
+        {
+          val = cache_policy_ship;
 
           goto end;
         }

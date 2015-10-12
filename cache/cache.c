@@ -1300,7 +1300,7 @@ void cache_access_block(struct cache_t *cache, int set, int way, int stream,
 
     case cache_policy_ship:
       cache_access_block_ship(CACHE_SET_DATA_SHIP(CACHE_SET(cache, set)), 
-        way, stream, info);
+        CACHE_SHIP_GDATA(cache), way, stream, info);
       break;
 
     case cache_policy_bypass:
@@ -1487,7 +1487,7 @@ int cache_replace_block(struct cache_t *cache, int set, memory_trace *info)
 
     case cache_policy_ship:
       return cache_replace_block_ship(CACHE_SET_DATA_SHIP(CACHE_SET(cache, set)), 
-        CACHE_SHIP_GDATA(cache));
+        CACHE_SHIP_GDATA(cache), info);
 
     case cache_policy_bypass:
     case cache_policy_cpulast:

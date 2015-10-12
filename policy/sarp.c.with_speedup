@@ -354,20 +354,9 @@ static void cache_init_brrip_from_sarp(struct cache_params *params,
 
 /* Returns SARP stream corresponding to access stream based on stream 
  * classification algoritm. */
-sarp_stream get_sarp_stream(sarp_gdata *global_data, memory_trace *info)
+sarp_stream get_sarp_stream(memory_trace *info)
 {
-  sarp_stream ret_stream;
-
-  if (global_data->speedup_enabled)
-  {
-    ret_stream = info->sap_stream;
-  }
-  else
-  {
-    ret_stream = sarp_stream_u;
-  }
-
-  return ret_stream;
+  return info->sap_stream;
 }
 
 /* Public interface to initialize SARP statistics */
@@ -689,7 +678,7 @@ static void sarp_update_hint_count(sarp_gdata *global_data, memory_trace *info)
 {
   assert(info->stream <= TST);
   
-  if (SPEEDUP(get_sarp_stream(global_data, info)))
+  if (SPEEDUP(get_sarp_stream(info)))
   {
     SAT_CTR_INC(global_data->sarp_hint[info->stream]);
   }
@@ -1020,6 +1009,7 @@ int cache_get_fill_rrpv_sarp(sarp_data *policy_data, sarp_gdata *global_data,
   ret_rrpv  = 2;
 
 #define CHK_SCRTCL(g, i) ((g)->speedup_enabled ? CRITICAL_STREAM(g, i) : TRUE)
+
   if (CHK_SCRTCL(global_data, info))
   {
     if ((RRPV1(perfctr, strm) || RRPV2(perfctr, strm))) 
@@ -1534,7 +1524,7 @@ end:
 
   if (info)
   {
-    info->sap_stream = get_sarp_stream(global_data, info);
+    info->sap_stream = get_sarp_stream(info);
     /* Update sampler epoch length */
   }
 
@@ -1790,7 +1780,7 @@ void cache_fill_block_sarp(sarp_data *policy_data,
   }
 
   /* Obtain SAP stream */
-  sstream = get_sarp_stream(global_data, info); 
+  sstream = get_sarp_stream(info); 
 
   info->sap_stream = sstream;
   
@@ -2006,6 +1996,7 @@ void cache_fill_block_sarp(sarp_data *policy_data,
 #define EVAL_PCOND(g, i)    ((g)->pin_blocks && is_miss_block_pinned((g)->sampler, i))
 #define EVAL_SCOND(g, i)    (!NCRTCL_BYPASS(g, i) && EVAL_PCOND(g, i))
 #define PIN_MISS_BLK(g, i)  (((g)->speedup_enabled) ? EVAL_SCOND(g, i) : EVAL_PCOND(g, i))
+
             if (PIN_MISS_BLK(global_data, info))
             {
               block->is_block_pinned = TRUE;
@@ -2189,9 +2180,7 @@ int cache_replace_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
   current_policy = CURRENT_POLICY(policy_data, global_data, following_policy, 
       info, FALSE);
 
-#define IS_CRITICAL_STREAM(g, i)  ((g)->speedup_enabled ? CRITICAL_STREAM(g, i) : TRUE)
-
-  if (!is_fill_bypass(global_data->sampler, info) && IS_CRITICAL_STREAM(global_data, info))
+  if (!is_fill_bypass(global_data->sampler, info) && CRITICAL_STREAM(global_data, info))
   {
     switch (current_policy)
     {
@@ -2280,8 +2269,6 @@ int cache_replace_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
     global_data->stream_bypass[info->stream] += 1;
   }
 
-#undef IS_CRITICAL_STREAM
-
 end:
   return ret_wayid;
 }
@@ -2329,7 +2316,7 @@ void cache_access_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
   per_stream_policy = SARP_DATA_PSPOLICY(policy_data);
   assert(per_stream_policy);
 
-  sstream = get_sarp_stream(global_data, info);
+  sstream = get_sarp_stream(info);
   
   info->sap_stream = sstream;
 
@@ -2579,7 +2566,7 @@ void cache_set_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
   assert(block->tag == tag);
 
   /* Obtian SAP stream */
-  sstream = get_sarp_stream(global_data, info);
+  sstream = get_sarp_stream(info);
 
   /* Setting state of an invalid block is not allowed. */
   assert(block->state != cache_block_invalid);

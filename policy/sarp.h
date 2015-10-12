@@ -547,7 +547,7 @@ void set_per_stream_policy_sarp(sarp_data *policy_data, sarp_gdata *global_data,
  *  SARP specific stream
  */
 
-sarp_stream get_sarp_stream(memory_trace *info);
+sarp_stream get_sarp_stream(sarp_gdata *global_data, memory_trace *info);
 
 /*
  *
