@@ -477,25 +477,27 @@ cache_access_status cachesim_incl_cache( cachesim_cache *cache, ub8 addr,
 void set_cache_params(struct cache_params *params, LChParameters *lcP, 
   ub8 cache_size, ub8 cache_way, ub8 cache_set)
 {
-  params->policy          = lcP->policy;
-  params->max_rrpv        = lcP->max_rrpv;
-  params->spill_rrpv      = lcP->spill_rrpv;
-  params->threshold       = lcP->threshold;
-  params->ways            = cache_way;
-  params->stream          = lcP->stream;
-  params->streams         = lcP->streams;
-  params->bs_epoch        = lcP->useBs;
-  params->speedup_enabled = lcP->speedupEnabled;
-  params->use_step        = lcP->useStep;
-  params->sampler_sets    = lcP->samplerSets;
-  params->sampler_ways    = lcP->samplerWays;
-  params->sarp_pin_blocks = lcP->pinBlocks;
-  params->ship_shct_size  = lcP->shctSize;        /* Ship signature history table size */
-  params->ship_sig_size   = lcP->signSize;        /* Ship signature size */
-  params->ship_entry_size = lcP->entrySize;       /* Ship counter width */
-  params->ship_core_size  = lcP->coreSize;        /* Ship number of cores */
-  params->ship_use_mem    = lcP->useMem;          /* Ship-mem flag */
-  params->ship_use_pc     = lcP->usePc;           /* Ship-pc flag */
+  params->policy                = lcP->policy;
+  params->max_rrpv              = lcP->max_rrpv;
+  params->spill_rrpv            = lcP->spill_rrpv;
+  params->threshold             = lcP->threshold;
+  params->ways                  = cache_way;
+  params->stream                = lcP->stream;
+  params->streams               = lcP->streams;
+  params->bs_epoch              = lcP->useBs;
+  params->speedup_enabled       = lcP->speedupEnabled;
+  params->use_step              = lcP->useStep;
+  params->sampler_sets          = lcP->samplerSets;
+  params->sampler_ways          = lcP->samplerWays;
+  params->sarp_pin_blocks       = lcP->pinBlocks;
+  params->sarp_cpu_fill_enable  = lcP->cpuFillEnable;
+  params->sarp_gpu_fill_enable  = lcP->gpuFillEnable;
+  params->ship_shct_size        = lcP->shctSize;        /* Ship signature history table size */
+  params->ship_sig_size         = lcP->signSize;        /* Ship signature size */
+  params->ship_entry_size       = lcP->entrySize;       /* Ship counter width */
+  params->ship_core_size        = lcP->coreSize;        /* Ship number of cores */
+  params->ship_use_mem          = lcP->useMem;          /* Ship-mem flag */
+  params->ship_use_pc           = lcP->usePc;           /* Ship-pc flag */
 
 #define CS_BYTE(cache_size) (cache_size * 1024)
 #define SS_BYTE(lcP)        (lcP->cacheBlockSize * cache_way)

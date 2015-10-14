@@ -318,6 +318,7 @@ void cache_fill_block_srrip(srrip_data *policy_data, srrip_gdata *global_data,
       block->is_ct_block      = FALSE;
       block->is_bt_block      = FALSE;
       block->is_zt_block      = FALSE;
+      block->is_proc_block    = FALSE;
       block->is_block_pinned  = FALSE;
 
       /* Insert block in to the corresponding RRPV queue */

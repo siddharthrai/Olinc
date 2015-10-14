@@ -267,6 +267,7 @@ void cache_fill_block_brrip(brrip_data *policy_data, brrip_gdata *global_data,
   block->is_ct_block      = FALSE;
   block->is_bt_block      = FALSE;
   block->is_zt_block      = FALSE;
+  block->is_proc_block    = FALSE;
   block->is_block_pinned  = FALSE;
 
   /* Get RRPV to be assigned to the new block */
@@ -294,13 +295,19 @@ void cache_fill_block_brrip(brrip_data *policy_data, brrip_gdata *global_data,
 }
 
 
-int cache_replace_block_brrip(brrip_data *policy_data)
+int cache_replace_block_brrip(brrip_data *policy_data, memory_trace *info)
 {
   struct cache_block_t *block;
   ub4 min_wayid;
   ub4 ret_wayid;
   
   ret_wayid = BYPASS_WAY;
+
+  if ((info->stream != CS && info->stream != ZS && info->stream != BS) && info->spill == TRUE)
+  {
+    min_wayid = BYPASS_WAY;
+    goto end;
+  }
 
   /* Try to find an invalid block. */
   for (block = BRRIP_DATA_FREE_HEAD(policy_data); block; block = block->prev)
@@ -441,7 +448,7 @@ int cache_get_fill_rrpv_brrip(brrip_data *policy_data,
     brrip_gdata *global_data, memory_trace *info, ub4 epoch)
 {
   sb4 new_rrpv;
-
+  
 #define CTR_VAL(data)   (SAT_CTR_VAL(data->access_ctr))
 #define THRESHOLD(data) (data->threshold)
 
@@ -469,6 +476,7 @@ int cache_get_fill_rrpv_brrip(brrip_data *policy_data,
        * value is 0. */
       if (CTR_VAL(global_data) == 0)
       {
+#if 0
         /* If epoch counter are valid use them to decide fill RRPV */
         if (policy_data->use_epoch && VALID_EPOCH(global_data, info))
         {
@@ -492,6 +500,7 @@ int cache_get_fill_rrpv_brrip(brrip_data *policy_data,
 
         }
         else
+#endif
         {
           new_rrpv = BRRIP_DATA_MAX_RRPV(policy_data) - 1;
         }

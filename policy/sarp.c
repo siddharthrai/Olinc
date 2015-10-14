@@ -30,6 +30,7 @@
 #include "zlib.h"
 
 #define INTERVAL_SIZE             (1 << 19)
+#define PAGE_COVERAGE             (8)
 #define PSEL_WIDTH                (30)
 #define PSEL_MIN_VAL              (0x00)  
 #define PSEL_MAX_VAL              (1 << PSEL_WIDTH)  
@@ -63,7 +64,7 @@
 #define DYNZ(b, o)                ((b).dynamic_depth[o] == TRUE)
 #define DYNB(b, o)                ((b).dynamic_blit[o] == TRUE)
 #define DYNP(b, o)                ((b).dynamic_proc[o] == TRUE)
-#define KNOWN_STREAM(s)           (s == CS || s == ZS || s == TS || s == BS || s == PS)
+#define KNOWN_STREAM(s)           (s == CS || s == ZS || s == TS || s == BS || s >= PS)
 #define OTHER_STREAM(s)           (!(KNOWN_STREAM(s)))
 #define NEW_STREAM(i)             (KNOWN_STREAM((i)->stream) ? (i)->stream : OS)
 #define DYNBP(b ,o, i)            (DYNB(b ,o) ? DBS : DYNP(b ,o) ? DPS : NEW_STREAM(i))
@@ -203,14 +204,56 @@ do                                                                              
 #define BRRIP_VAL(g)                  (SAT_CTR_VAL((g)->brrip_psel))
 #define SRRIP_VAL(g)                  (SAT_CTR_VAL((g)->srrip_psel))
 #define SARP_VAL(g)                   (SAT_CTR_VAL((g)->sarp_psel))
+#define GFILL_VAL(g)                  (SAT_CTR_VAL((g)->gpu_srrip_brrip_psel))
 #define PCBRRIP(p, g, i)              ((BRRIP_VAL(g) <= PSEL_MID_VAL) ? PCSRRIPGBRRIP(i) : PCBRRIPGBRRIP(i))
 #define PCSRRIP(p, g, i)              ((SRRIP_VAL(g) <= PSEL_MID_VAL) ? PCSRRIPGSRRIP(i) : PCBRRIPGSRRIP(i))
 #define FANDH(i, h)                   ((i)->fill == TRUE && (h) == TRUE)
-#define FANDM(i, h)                   ((i)->fill == TRUE && (h) == FALSE)
+#define FANDM(i, h)                   (GPU_STREAM(i->stream) && (i)->fill == TRUE && (h) == FALSE)
 #define DPSARP(p, g, i)               ((SARP_VAL(g) <= PSEL_MID_VAL) ? PCSRRIP(p, g, i) : PCBRRIP(p, g, i))
-#define SPSARP(p, g, i, f)            (FSARP(f) ? DPSARP(p, g, i) : f)
+#define GFENBL(g)                     ((g)->gpu_fill_enable == TRUE)
+#define DGFILL(p, g, i)               ((GFILL_VAL(g) <= PSEL_MID_VAL) ? PSRRIP : PBRRIP)
+#define CHGFILL(p, g, i)              (GFENBL(g) ? DGFILL(p, g, i) : PSRRIP)
+#define SPSARP(p, g, i, f)            (FSARP(f) ? CHGFILL(p, g, i) : f)
 #define CURRENT_POLICY(p, g, f, i, h) ((FANDM(i, h)) ? SPSARP(p, g, i, f) : f)
 #define FOLLOW_POLICY(f, i)           ((!FSARP(f) && ((i)->fill)) ? f : PSARP)
+
+/* Macros to obtain signature */
+#define SHIP_MAX                      (7)
+#define SIGNSIZE(g)                   ((g)->sign_size)
+#define SHCTSIZE(g)                   ((g)->shct_size)
+#define COREBTS(g)                    ((g)->core_size)
+#define SIGMAX_VAL(g)                 (((1 << SIGNSIZE(g)) - 1))
+#define SIGNMASK(g)                   (SIGMAX_VAL(g) << SHCTSIZE(g))
+#define SIGNP(g, i)                   (((i)->pc) & SIGMAX_VAL(g))
+#define SIGNM(g, i)                   ((((i)->address >> SHCTSIZE(g)) & SIGMAX_VAL(g)))
+#define SIGNCORE(g, i)                (((i)->core - 1) << (SHCTSIZE(g) - COREBTS(g)))
+#define GET_SSIGN(g, i)               ((i)->stream < PS ? SIGNM(g, i) : SIGNP(g, i) ^ SIGNCORE(g, i))
+#define SHIPSIGN(g, i)                (GET_SSIGN(g, i))
+
+#define CACHE_INC_SHCT(block, g)                              \
+do                                                            \
+{                                                             \
+  assert(block->ship_sign <= SIGMAX_VAL(g));                  \
+                                                              \
+  if ((g)->ship_shct[block->ship_sign] < SHIP_MAX)            \
+  {                                                           \
+    (g)->ship_shct[block->ship_sign] += 1;                    \
+  }                                                           \
+}while(0)
+
+#define CACHE_DEC_SHCT(block, g)                              \
+do                                                            \
+{                                                             \
+  assert(block->ship_sign <= SIGMAX_VAL(g));                  \
+                                                              \
+  if (!block->access)                                         \
+  {                                                           \
+    if ((g)->ship_shct[block->ship_sign] > 0)                 \
+    {                                                         \
+      (g)->ship_shct[block->ship_sign] -= 1;                  \
+    }                                                         \
+  }                                                           \
+}while(0)
 
 extern struct cpu_t *cpu;
 extern ffifo_info ffifo_global_info;
@@ -221,42 +264,185 @@ void sampler_cache_lookup(sampler_cache *sampler, sarp_data *policy_data,
 
 sampler_entry* sampler_cache_get_block(sampler_cache *sampler, memory_trace *info);
 
+static ub1 is_ship_sample_set(long long int indx)
+{
+  ub4 upper;
+  ub4 lower;
+  ub4 alternate;
+
+  upper     = (indx >> 5) & 0x1f;
+  lower     = indx & 0x1f;
+  alternate = (lower ^ 0xa) & 0x1f;
+
+  if ((upper == alternate))
+  { 
+    /* These are the SHiP-PC training sets */
+    return TRUE;
+  }
+
+  return FALSE;
+}
+
 static ub4 get_set_type_sarp(long long int indx, ub4 sarp_samples)
 {
-  int   lsb_bits;
-  int   msb_bits;
+  ub4 upper;
+  ub4 lower;
+  ub4 alternate;
+  ub4 middle;
+  ub4 not_lower;
+  ub4 alternate1;
+  ub4 alternate2;
+  ub4 set_type;
+  
+  set_type = SARP_FOLLOWER_SET;
 
   /* BS and PS will always be present */
-  assert(sarp_samples >= 2 && sarp_samples <= 4);
+  assert(sarp_samples >= 2 && sarp_samples <= 30);
 
-  lsb_bits = indx & 0x1f;
-  msb_bits = (indx >> 5) & 0x1f;
-  
-  /* CPU and GPU both are running SRRIP */
-  if (msb_bits == lsb_bits && sarp_samples >= 1)
+  upper     = (indx >> 7) & 0x7;
+  lower     = indx & 0x7;
+  middle    = (indx >> 3) & 0xf;
+  not_lower = (~lower) & 0x7;
+
+  if ((upper == lower) && (middle == 0))
   {
-    return SARP_CSRRIP_GSRRIP_SET;
-  }
-  
-  /* CPU is running SRRIP while GPU is running BRRIP */
-  if (msb_bits == (~lsb_bits & 0x1f) && sarp_samples >= 2)
-  {
-    return SARP_CBRRIP_GSRRIP_SET;
-  }
-  
-  /* CPU is running BRRIP while, GPU is running SRRIP  */
-  if ((msb_bits ^ lsb_bits) == 0xa && sarp_samples >= 3)
-  {
-    return SARP_CSRRIP_GBRRIP_SET;
-  }
-  
-  /* CPU and GPU both are running BRRIP */
-  if ((msb_bits ^ (~lsb_bits & 0x1f)) == 0xa && sarp_samples >= 4)
-  {
-    return SARP_CBRRIP_GBRRIP_SET;
+    /* These are SRRIP sets */
+    set_type = SARP_GPU_SRRIP_SAMPLE;
   }
 
-  return SARP_FOLLOWER_SET;
+  if ((upper == not_lower) && (middle == 0))
+  {
+    /* These are BRRIP sets */
+    set_type = SARP_GPU_BRRIP_SAMPLE;
+  }
+
+  if ((upper == not_lower) && (middle == 0x1))
+  {
+      /* These are bypass samples */
+    set_type = SARP_ZS_BYPASS_SAMPLE;
+  }
+
+  if ((upper == not_lower) && (middle == 0x2))
+  {
+    /* These are non-bypass samplee */
+    set_type = SARP_ZS_NO_BYPASS_SAMPLE;
+  }
+
+  alternate   = (lower ^ 0x5) & 0x7;
+  alternate1  = (lower ^ 0x6) & 0x7;
+  alternate2  = (lower ^ 0x4) & 0x7;
+
+  if ((upper == lower) && (middle == 0x3))
+  {
+    /* CORE1 never pin */
+    set_type = SARP_CORE1_NOT_PIN_SAMPLE;
+  }
+
+  if ((upper == not_lower) && (middle == 0x3))
+  {
+    /* CORE1 pin if policy says so */
+    set_type = SARP_CORE1_PIN_SAMPLE;
+  }
+  
+  
+  if (((upper == lower) && (middle == 0x1)))
+  {
+    /* CORE2 never pin */
+    set_type = SARP_CORE2_NOT_PIN_SAMPLE;
+  }
+
+  if ((upper == lower) && (middle == 0x2))
+  {
+    /* CORE3 pin if policy says so */
+    set_type = SARP_CORE2_PIN_SAMPLE;
+  }
+  
+  if (((upper == alternate) && (middle == 0)))
+  {
+    /* CORE3 never pin */
+    set_type = SARP_CORE3_NOT_PIN_SAMPLE;
+  }
+
+  if (((upper == alternate) && (middle == 0x3)))
+  {
+    /* CORE4 pin if policy says so */
+    set_type = SARP_CORE3_PIN_SAMPLE;
+  }
+  
+  if (((upper == alternate) && (middle == 0x1)))
+  {
+    /* CORE4 never pin */
+    set_type = SARP_CORE4_NOT_PIN_SAMPLE;
+  }
+
+  if (((upper == alternate) && (middle == 0x2)))
+  {
+    /* CORE4 pin if policy says so */
+    set_type = SARP_CORE4_PIN_SAMPLE;
+  }
+  
+  if (((upper == alternate1) && (middle == 0)))
+  {
+    /* CS never pin */
+    set_type = SARP_CS_NOT_PIN_SAMPLE;
+  }
+
+  if (((upper == alternate1) && (middle == 0x3)))
+  {
+    /* CS pin if policy says so */
+    set_type = SARP_CS_PIN_SAMPLE;
+  }
+  
+  if (((upper == alternate1) && (middle == 0x1)))
+  {
+    /* ZS never pin */
+    set_type = SARP_ZS_NOT_PIN_SAMPLE;
+  }
+
+  if (((upper == alternate1) && (middle == 0x2)))
+  {
+    /* ZS pin if policy says so */
+    set_type = SARP_ZS_PIN_SAMPLE;
+  }
+  
+  if (((upper == alternate2) && (middle == 0)))
+  {
+    /* BS never pin */
+    set_type = SARP_BS_NOT_PIN_SAMPLE;
+  }
+
+  if (((upper == alternate2) && (middle == 0x3)))
+  {
+    /* BS pin if policy says so */
+    set_type = SARP_BS_PIN_SAMPLE;
+  }
+  
+  if (((upper == alternate2) && (middle == 0x1)))
+  {
+    /* OS never pin */
+    set_type = SARP_OS_NOT_PIN_SAMPLE;
+  }
+
+  if (((upper == alternate2) && (middle == 0x2)))
+  {
+    /* OS pin if policy says so */
+    set_type = SARP_OS_PIN_SAMPLE;
+  }
+  
+
+  if (((upper == not_lower) && (middle == 0x4)))
+  {
+    /* Only promote */
+    set_type = SARP_SPILL_HIT_PROMOTE_SAMPLE;
+  }
+
+  if (((upper == not_lower) && (middle == 0x7)))
+  {
+    /* Promote and pin */
+    set_type = SARP_SPILL_HIT_PIN_SAMPLE;
+  }
+  
+  return set_type;
 }
 
 static void cache_init_srrip_from_sarp(struct cache_params *params, 
@@ -952,19 +1138,44 @@ static ub1 is_fill_bypass(sampler_cache *sampler, memory_trace *info)
 #define PINHBLK(p, s)   ((SRUSE(p, s) > MRUSE(p) / 2) || SHPIN_TH(p, s))
 #define PINMBLK(p, s)   ((SRUSE(p, s) > MRUSE(p) / 2) || SMPIN_TH(p, s))
 
-static ub1 is_hit_block_pinned(sampler_cache *sampler, memory_trace *info)
+static ub1 is_hit_block_pinned(sarp_data *policy_data, sarp_gdata *global_data, 
+    sampler_cache *sampler, memory_trace *info)
 {
   ub1 strm;
+  ub1 ret_val;
 
-  strm = NEW_STREAM(info);
-
+  strm    = NEW_STREAM(info);
+  ret_val = FALSE;
+  
   if (info->spill == TRUE) 
   {
-    if (PINHBLK(&(sampler->perfctr), strm)) 
-      return TRUE;
+    switch (policy_data->set_type)
+    {
+      case SARP_SPILL_HIT_PROMOTE_SAMPLE:
+        ret_val = FALSE;
+        break;
+
+      case SARP_SPILL_HIT_PIN_SAMPLE:
+        if (PINHBLK(&(sampler->perfctr), strm)) 
+        {
+          ret_val = TRUE;
+        }
+        break;
+
+      default:
+        assert(policy_data->set_type <= SARP_SAMPLE_COUNT);
+
+        if (SAT_CTR_VAL(global_data->spill_hit_psel) <= PSEL_MID_VAL)
+        {
+          if (PINHBLK(&(sampler->perfctr), strm)) 
+          {
+            ret_val = TRUE;
+          }
+        }
+    }
   }
 
-  return FALSE;
+  return ret_val;
 }
 
 static ub1 is_miss_block_pinned(sampler_cache *sampler, memory_trace *info)
@@ -972,7 +1183,7 @@ static ub1 is_miss_block_pinned(sampler_cache *sampler, memory_trace *info)
   ub1 strm;
 
   strm = NEW_STREAM(info);
-
+  
   if (info->spill == TRUE) 
   {
     if (PINMBLK(&(sampler->perfctr), strm)) 
@@ -990,6 +1201,101 @@ static ub1 is_miss_block_pinned(sampler_cache *sampler, memory_trace *info)
 #undef PINHBLK
 #undef PINMBLK
 
+static ub1 is_block_unpinned(sarp_data *policy_data, sarp_gdata *global_data, 
+    memory_trace *info)
+{
+  ub1 ret_val;
+
+  ret_val = FALSE;
+
+  if (CPU_STREAM(info->stream))
+  {
+    switch (info->core) 
+    {
+      case 1:
+        if (policy_data->set_type == SARP_CORE1_NOT_PIN_SAMPLE || 
+            (policy_data->set_type != SARP_CORE1_PIN_SAMPLE && 
+             SAT_CTR_VAL(global_data->core1_pin_psel) <= PSEL_MID_VAL))
+        {
+          ret_val = TRUE; 
+        }
+
+        break;
+
+      case 2:
+        if (policy_data->set_type == SARP_CORE2_NOT_PIN_SAMPLE || 
+            (policy_data->set_type != SARP_CORE2_PIN_SAMPLE && 
+             SAT_CTR_VAL(global_data->core2_pin_psel) <= PSEL_MID_VAL))
+        {
+          ret_val = TRUE; 
+        }
+        break;
+
+      case 3:
+        if (policy_data->set_type == SARP_CORE3_NOT_PIN_SAMPLE || 
+            (policy_data->set_type != SARP_CORE3_PIN_SAMPLE && 
+             SAT_CTR_VAL(global_data->core3_pin_psel) <= PSEL_MID_VAL))
+        {
+          ret_val = TRUE; 
+        }
+        break;
+
+      case 4:
+        if (policy_data->set_type == SARP_CORE4_NOT_PIN_SAMPLE || 
+            (policy_data->set_type != SARP_CORE4_PIN_SAMPLE && 
+             SAT_CTR_VAL(global_data->core4_pin_psel) <= PSEL_MID_VAL))
+        {
+          ret_val = TRUE; 
+        }
+        break;
+    }
+  }
+  else
+  {
+    switch (NEW_STREAM(info))
+    {
+      case CS:
+        if (policy_data->set_type == SARP_CS_NOT_PIN_SAMPLE || 
+            (policy_data->set_type != SARP_CS_PIN_SAMPLE && 
+             SAT_CTR_VAL(global_data->cs_pin_psel) <= PSEL_MID_VAL))
+        {
+          ret_val = TRUE; 
+        }
+        break;
+
+      case ZS:
+        if (policy_data->set_type == SARP_ZS_NOT_PIN_SAMPLE || 
+            (policy_data->set_type != SARP_ZS_PIN_SAMPLE && 
+             SAT_CTR_VAL(global_data->cs_pin_psel) <= PSEL_MID_VAL))
+        {
+          ret_val = TRUE; 
+        }
+        break;
+
+      case BS:
+        if (policy_data->set_type == SARP_BS_NOT_PIN_SAMPLE || 
+            (policy_data->set_type != SARP_BS_PIN_SAMPLE && 
+             SAT_CTR_VAL(global_data->cs_pin_psel) <= PSEL_MID_VAL))
+        {
+          ret_val = TRUE; 
+        }
+        break;
+
+      case OS:
+        if (policy_data->set_type == SARP_OS_NOT_PIN_SAMPLE || 
+            (policy_data->set_type != SARP_OS_PIN_SAMPLE && 
+             SAT_CTR_VAL(global_data->cs_pin_psel) <= PSEL_MID_VAL))
+        {
+          ret_val = TRUE; 
+        }
+        break;
+    }
+  }
+
+  return ret_val;
+}
+
+
 #define SCOUNT(p, s)      (SMPLRPERF_SPILL(p, s))
 #define SRUSE(p, s)       (SMPLRPERF_SREUSE(p, s))
 #define MRUSE(p)          (SMPLRPERF_MREUSE(p))
@@ -1002,7 +1308,7 @@ static ub1 is_miss_block_pinned(sampler_cache *sampler, memory_trace *info)
 #define SREUSE_LOW(p, s)  (SREUSE(p, s) == 0 && SCOUNT(p, s) > BYPASS_ACCESS_TH)
 
 int cache_get_fill_rrpv_sarp(sarp_data *policy_data, sarp_gdata *global_data,
-    memory_trace *info)
+    memory_trace *info, struct cache_block_t *block)
 {
   sampler_perfctr *perfctr;
   int ret_rrpv;
@@ -1013,38 +1319,36 @@ int cache_get_fill_rrpv_sarp(sarp_data *policy_data, sarp_gdata *global_data,
   assert(info);
 
   /* Ensure current policy is sarp */
-  assert(info->spill == TRUE && info->fill == FALSE);
-  
+  assert(info->spill == TRUE || (info->fill == TRUE && CPU_STREAM(info->stream)));
+
   strm      = NEW_STREAM(info);
   perfctr   = &((global_data->sampler)->perfctr);
   ret_rrpv  = 2;
 
-#define CHK_SCRTCL(g, i) ((g)->speedup_enabled ? CRITICAL_STREAM(g, i) : TRUE)
-  if (CHK_SCRTCL(global_data, info))
+
+  if (GPU_STREAM(info->stream))
   {
-    if ((RRPV1(perfctr, strm) || RRPV2(perfctr, strm))) 
+#define CHK_SCRTCL(g, i) ((g)->speedup_enabled ? CRITICAL_STREAM(g, i) : TRUE)
+    if (CHK_SCRTCL(global_data, info))
     {
-      ret_rrpv = 0;
-      global_data->stream_pfill[info->stream] += 1;
+      if (RRPV1(perfctr, strm) || RRPV2(perfctr, strm))
+      {
+        ret_rrpv = 0;
+        global_data->stream_pfill[info->stream] += 1;
+      }
+      else
+      {
+        if (SRD_LOW(perfctr, strm) || SREUSE_LOW(perfctr, strm))
+        {
+          ret_rrpv = 3;
+        }
+      }
     }
     else
     {
-      if (SRD_LOW(perfctr, strm) || SREUSE_LOW(perfctr, strm))
-      {
-        ret_rrpv = 3;
-      }
-    }
-  }
-  else
-  {
 
-    assert(global_data->speedup_enabled);
-#if 0
-#define CSBYTH_D            (3)
-#define CSBYTH_N            (1)
-#define CFBYTH_D            (3)
-#define CFBYTH_N            (1)
-#endif
+      assert(global_data->speedup_enabled);
+
 #define CSBYTH_D            (2)
 #define CSBYTH_N            (1)
 #define CFBYTH_D            (2)
@@ -1056,11 +1360,11 @@ int cache_get_fill_rrpv_sarp(sarp_data *policy_data, sarp_gdata *global_data,
 #define CLOWUSE(sp, i)      ((i)->fill ? FUSE_TH(sp, (i)->stream) : SUSE_TH(sp, (i)->stream))
 #define NCRTCL_LOWUSE(g, i) (!CRITICAL_STREAM(g, i) && CLOWUSE((g)->sampler, i))
 
-    if (NCRTCL_LOWUSE(global_data, info))
-    {
-      ret_rrpv = 3;
-      global_data->stream_fdemote[info->stream] += 1;
-    }
+      if (NCRTCL_LOWUSE(global_data, info))
+      {
+        ret_rrpv = 3;
+        global_data->stream_fdemote[info->stream] += 1;
+      }
 
 #undef CSBYTH_D
 #undef CSBYTH_N
@@ -1072,13 +1376,49 @@ int cache_get_fill_rrpv_sarp(sarp_data *policy_data, sarp_gdata *global_data,
 #undef SUSE_TH
 #undef CLOWUSE
 #undef NCRTCL_LOWUSE
+    }
   }
+  else
+  {
+    assert(block->ship_sign_valid == TRUE);
 
-#undef CHK_SCRTCL
+#define CTR_VAL(g)    (SAT_CTR_VAL((g)->baccess[SARP_SHIP_SAMPLE]))
+#define THRESHOLD(g)  ((g)->threshold)
+    
+    if (global_data->cpu_fill_enable)
+    {
+      /* Use ship for CPU fill */
+      if (CTR_VAL(global_data) == THRESHOLD(global_data) - 1)
+      {
+        ret_rrpv = 2;
+        SAT_CTR_RST(global_data->baccess[SARP_SHIP_SAMPLE]);
+      }
+      else
+      {
+        if (global_data->ship_shct[block->ship_sign] == 0)
+        {
+          ret_rrpv = 3;
+        }
+        else
+        {
+          ret_rrpv = 2;
+        }
+      }
+
+      SAT_CTR_INC(global_data->baccess[SARP_SHIP_SAMPLE]);
+    }
+    else
+    {
+      ret_rrpv = 2;
+    }
+#undef CTR_VAL
+#undef THRESHOLD
+  }
 
   return ret_rrpv;
 }
 
+#undef CHK_SCRTCL
 #undef SCOUNT
 #undef SRUSE
 #undef MRUSE
@@ -1144,24 +1484,55 @@ int cache_get_new_rrpv_sarp(sarp_data *policy_data, sarp_gdata *global_data,
 
   if (info->spill == TRUE)
   {
-    if (CHK_SSPD(global_data, info, epoch) && 
-        (RRPV1(perfctr, strm) || RRPV2(perfctr, strm)))
+    switch (policy_data->set_type)
     {
-      ret_rrpv = 0; 
+      case SARP_SPILL_HIT_PROMOTE_SAMPLE:
+        if (RRPV1(perfctr, strm) && old_rrpv >= 3)
+        {
+          ret_rrpv = 2;
+        }
+        else
+        {
+          ret_rrpv = old_rrpv;
+        }
+        break;
 
-      global_data->stream_phit[info->stream] += 1;
-    }
-    else
-    {
-      if (SRD_LOW(perfctr, strm) || SREUSE_LOW(perfctr, strm))
-      {
-        global_data->stream_hdemote[info->stream] += 1;
-        ret_rrpv = 3;
-      }
-      else
-      {
-        ret_rrpv = 2;
-      }
+      case SARP_SPILL_HIT_PIN_SAMPLE:
+        if (RRPV1(perfctr, strm) && old_rrpv >= 3)
+        {
+          ret_rrpv = 0;
+        }
+        else
+        {
+          ret_rrpv = old_rrpv;
+        }
+        break;
+
+      default:
+        assert(policy_data->set_type <= SARP_SAMPLE_COUNT);
+
+        if (SAT_CTR_VAL(global_data->spill_hit_psel) <= PSEL_MID_VAL)
+        {
+          if (RRPV1(perfctr, strm) && old_rrpv >= 3)
+          {
+            ret_rrpv = 0;
+          }
+          else
+          {
+            ret_rrpv = old_rrpv;
+          }
+        }
+        else
+        {
+          if (RRPV1(perfctr, strm) && old_rrpv >= 3)
+          {
+            ret_rrpv = 2;
+          }
+          else
+          {
+            ret_rrpv = old_rrpv;
+          }
+        }
     }
   }
   else
@@ -1186,7 +1557,7 @@ int cache_get_new_rrpv_sarp(sarp_data *policy_data, sarp_gdata *global_data,
     {
       if (block->is_bt_block)
       {
-        if (FRUSE(perfctr, DBS, epoch) * BT_TH1 <= FCOUNT(perfctr, DBS, epoch))
+        if (FRUSE(perfctr, DBS, epoch) * CT_TH1 <= FCOUNT(perfctr, DBS, epoch))
         {
           ret_rrpv = 3;
         }
@@ -1259,13 +1630,15 @@ void cache_init_sarp(long long int set_indx, struct cache_params *params,
 
 #undef SARP_SAMPLES
 
+  policy_data->is_ship_sampler = is_ship_sample_set(set_indx);
+
   /* Get set type */
   if (set_indx == 0)
   {
     /* Initialize DRRIP policy selection counter */
     SAT_CTR_INI(global_data->srrip_psel, PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
     SAT_CTR_SET(global_data->srrip_psel, PSEL_MID_VAL);
-    
+
     /* Initialize DRRIP policy selection counter */
     SAT_CTR_INI(global_data->brrip_psel, PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
     SAT_CTR_SET(global_data->brrip_psel, PSEL_MID_VAL);
@@ -1273,7 +1646,51 @@ void cache_init_sarp(long long int set_indx, struct cache_params *params,
     /* Initialize SAP policy selection counter */
     SAT_CTR_INI(global_data->sarp_psel, PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
     SAT_CTR_SET(global_data->sarp_psel, PSEL_MID_VAL);
-    
+
+    /* Initialize SAP policy selection counter */
+    SAT_CTR_INI(global_data->gpu_srrip_brrip_psel, PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
+    SAT_CTR_SET(global_data->gpu_srrip_brrip_psel, PSEL_MID_VAL);
+
+    /* Initialize SAP policy selection counter */
+    SAT_CTR_INI(global_data->zs_bypass_psel, PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
+    SAT_CTR_SET(global_data->zs_bypass_psel, PSEL_MID_VAL);
+
+    /* Initialize SAP policy selection counter */
+    SAT_CTR_INI(global_data->core1_pin_psel, PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
+    SAT_CTR_SET(global_data->core1_pin_psel, PSEL_MID_VAL);
+
+    /* Initialize SAP policy selection counter */
+    SAT_CTR_INI(global_data->core2_pin_psel, PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
+    SAT_CTR_SET(global_data->core2_pin_psel, PSEL_MID_VAL);
+
+    /* Initialize SAP policy selection counter */
+    SAT_CTR_INI(global_data->core3_pin_psel, PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
+    SAT_CTR_SET(global_data->core3_pin_psel, PSEL_MID_VAL);
+
+    /* Initialize SAP policy selection counter */
+    SAT_CTR_INI(global_data->core4_pin_psel, PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
+    SAT_CTR_SET(global_data->core4_pin_psel, PSEL_MID_VAL);
+
+    /* Initialize SAP policy selection counter */
+    SAT_CTR_INI(global_data->cs_pin_psel, PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
+    SAT_CTR_SET(global_data->cs_pin_psel, PSEL_MID_VAL);
+
+    /* Initialize SAP policy selection counter */
+    SAT_CTR_INI(global_data->zs_pin_psel, PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
+    SAT_CTR_SET(global_data->zs_pin_psel, PSEL_MID_VAL);
+
+    /* Initialize SAP policy selection counter */
+    SAT_CTR_INI(global_data->bs_pin_psel, PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
+    SAT_CTR_SET(global_data->bs_pin_psel, PSEL_MID_VAL);
+
+    /* Initialize SAP policy selection counter */
+    SAT_CTR_INI(global_data->os_pin_psel, PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
+    SAT_CTR_SET(global_data->os_pin_psel, PSEL_MID_VAL);
+
+    /* Initialize SAP policy selection counter */
+    SAT_CTR_INI(global_data->spill_hit_psel, PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
+    SAT_CTR_SET(global_data->spill_hit_psel, PSEL_MID_VAL);
+
     /* Initialize per-stream policy selection counter */
     for (ub1 i = 0; i <= TST; i++)
     {
@@ -1286,7 +1703,7 @@ void cache_init_sarp(long long int set_indx, struct cache_params *params,
 
     /* Initialize SARP specific statistics */
     cache_init_sarp_stats(&(global_data->stats), NULL);
-    
+
     /* Initialize cache-wide data for SARP. */
     global_data->threshold        = params->threshold;
     global_data->sarp_streams     = params->sdp_streams;
@@ -1295,7 +1712,14 @@ void cache_init_sarp(long long int set_indx, struct cache_params *params,
     global_data->speedup_enabled  = params->speedup_enabled;
     global_data->speedup_stream   = NN;
     global_data->speedup_interval = 0;
-    
+    global_data->sign_size        = params->ship_sig_size;
+    global_data->shct_size        = params->ship_shct_size;
+    global_data->core_size        = params->ship_core_size;
+    global_data->cpu_fill_enable  = params->sarp_cpu_fill_enable;
+    global_data->gpu_fill_enable  = params->sarp_gpu_fill_enable;
+    global_data->ship_access      = 0;
+    global_data->ship_access      = 0;
+
     memset(global_data->fmiss_count, 0, sizeof(ub8) * (TST + 1));
     memset(global_data->smiss_count, 0, sizeof(ub8) * (TST + 1));
     memset(global_data->stream_pinned, 0, sizeof(ub8) * (TST + 1));
@@ -1326,6 +1750,23 @@ void cache_init_sarp(long long int set_indx, struct cache_params *params,
     {
       SAT_CTR_INI(global_data->baccess[i], 8, 0, 255);
     }
+
+    global_data->ship_shct = (ub1 *) xcalloc((1 << global_data->shct_size), sizeof(ub1));
+    assert(global_data->ship_shct);
+
+#define SHCT_ENTRY_SIZE (3)
+#define CTR_MIN_VAL     (0)  
+#define CTR_MAX_VAL     ((1 << SHCT_ENTRY_SIZE) - 1)
+
+    /* Initialize counter table */ 
+    for (ub4 i = 0; i < (1 << global_data->shct_size); i++)
+    {
+      global_data->ship_shct[i] = 0;
+    }
+
+#undef SHCT_ENTRY_SIZE
+#undef CTR_MIN_VAL
+#undef CTR_MAX_VAL
   }
   
   /* Allocate and initialize per set data */
@@ -1390,49 +1831,56 @@ void cache_init_sarp(long long int set_indx, struct cache_params *params,
 
   for (int stream = 0; stream <= TST; stream++)
   {
-    if (CPU_STREAM(stream))
+    switch (set_type)
     {
-      switch (set_type)
-      {
-        case SARP_CSRRIP_GSRRIP_SET:
-        case SARP_CSRRIP_GBRRIP_SET:
+      case SARP_GPU_SRRIP_SAMPLE:
+        if (GPU_STREAM(stream))
+        {
           SARP_DATA_PSPOLICY(policy_data)[stream] = cache_policy_srrip; 
-          break;
-
-        case SARP_CBRRIP_GSRRIP_SET:
-        case SARP_CBRRIP_GBRRIP_SET:
-          SARP_DATA_PSPOLICY(policy_data)[stream] = cache_policy_brrip; 
-          break;
-
-        case SARP_FOLLOWER_SET:
+        }
+        else
+        {
           SARP_DATA_PSPOLICY(policy_data)[stream] = cache_policy_sarp; 
-          break;
+        }
+        break;
 
-        default:
-          panic("%s: line no %d - invalid sample type", __FUNCTION__, __LINE__);
-      }
-    }
-    else
-    {
-      switch (set_type)
-      {
-        case SARP_CSRRIP_GSRRIP_SET:
-        case SARP_CBRRIP_GSRRIP_SET:
-          SARP_DATA_PSPOLICY(policy_data)[stream] = cache_policy_srrip; 
-          break;
-
-        case SARP_CBRRIP_GBRRIP_SET:
-        case SARP_CSRRIP_GBRRIP_SET:
+      case SARP_GPU_BRRIP_SAMPLE:
+        if (GPU_STREAM(stream))
+        {
           SARP_DATA_PSPOLICY(policy_data)[stream] = cache_policy_brrip; 
-          break;
-
-        case SARP_FOLLOWER_SET:
+        }
+        else
+        {
           SARP_DATA_PSPOLICY(policy_data)[stream] = cache_policy_sarp; 
-          break;
+        }
+        break;
 
-        default:
-          panic("%s: line no %d - invalid sample type", __FUNCTION__, __LINE__);
-      }
+      case SARP_ZS_BYPASS_SAMPLE:
+      case SARP_ZS_NO_BYPASS_SAMPLE:
+      case SARP_CORE1_NOT_PIN_SAMPLE:
+      case SARP_CORE1_PIN_SAMPLE:
+      case SARP_CORE2_NOT_PIN_SAMPLE:
+      case SARP_CORE2_PIN_SAMPLE:
+      case SARP_CORE3_NOT_PIN_SAMPLE:
+      case SARP_CORE3_PIN_SAMPLE:
+      case SARP_CORE4_NOT_PIN_SAMPLE:
+      case SARP_CORE4_PIN_SAMPLE:
+      case SARP_CS_NOT_PIN_SAMPLE:
+      case SARP_CS_PIN_SAMPLE:
+      case SARP_ZS_NOT_PIN_SAMPLE:
+      case SARP_ZS_PIN_SAMPLE:
+      case SARP_BS_NOT_PIN_SAMPLE:
+      case SARP_BS_PIN_SAMPLE:
+      case SARP_OS_NOT_PIN_SAMPLE:
+      case SARP_OS_PIN_SAMPLE:
+      case SARP_SPILL_HIT_PROMOTE_SAMPLE:
+      case SARP_SPILL_HIT_PIN_SAMPLE:
+      case SARP_FOLLOWER_SET:
+        SARP_DATA_PSPOLICY(policy_data)[stream] = cache_policy_sarp; 
+        break;
+
+      default:
+        panic("%s: line no %d - invalid sample type", __FUNCTION__, __LINE__);
     }
   }
   
@@ -1477,6 +1925,8 @@ void cache_free_sarp(long long int set_indx, sarp_data *policy_data,
     cache_fini_sarp_stats(&(global_data->stats));
 
     printf("Bypass [%5d] MAX_REUSE[%5d]\n", global_data->bypass_count, global_data->sampler->perfctr.max_reuse);
+    printf("SHIP ACCESS %ld SHIP DEC %ld SHIP INC %ld\n", global_data->ship_access,
+        global_data->ship_dec, global_data->ship_inc);
 
     sampler_cache_reset(global_data, global_data->sampler);
   }
@@ -1516,6 +1966,11 @@ struct cache_block_t * cache_find_block_sarp(sarp_data *policy_data,
 
   max_rrpv  = policy_data->srrip.max_rrpv;
   node      = NULL;
+  
+  if (policy_data->is_ship_sampler)
+  {
+    global_data->ship_access += 1;
+  }
 
   for (int rrpv = 0; rrpv <= max_rrpv; rrpv++)
   {
@@ -1554,209 +2009,152 @@ end:
     {
       switch (policy_data->set_type)
       {
-        case SARP_CSRRIP_GSRRIP_SET:
-          assert(following_policy == cache_policy_srrip || 
-              following_policy == cache_policy_sarp);
-
-          SAT_CTR_INC(global_data->srrip_psel);
-
-          if (SAT_CTR_VAL(global_data->srrip_psel) <= PSEL_MID_VAL)
-          {
-            SAT_CTR_INC(global_data->sarp_psel);
-          }
+        case SARP_GPU_SRRIP_SAMPLE:
+          SAT_CTR_INC(global_data->gpu_srrip_brrip_psel);
           break;
 
-        case SARP_CBRRIP_GSRRIP_SET:
-          if (CPU_STREAM(info->stream))
-          {
-            assert(following_policy == cache_policy_brrip || 
-                following_policy == cache_policy_sarp);
-
-            /* Update brrip epsilon counter only for graphics */
-#define CTR_VAL(g)    (SAT_CTR_VAL((g)->baccess[SARP_CBRRIP_GSRRIP_SET]))
-#define THRESHOLD(g)  ((g)->threshold)
-
-            /* Update access counter for bimodal insertion */
-            if (CTR_VAL(global_data) < THRESHOLD(global_data))
-            {
-              /* Increment set access count */
-              SAT_CTR_INC(global_data->baccess[SARP_CBRRIP_GSRRIP_SET]);
-            }
-
-            if (CTR_VAL(global_data) >= THRESHOLD(global_data))
-            {
-              assert(CTR_VAL(global_data) == THRESHOLD(global_data));
-
-              /* Reset access count */
-              SAT_CTR_RST(global_data->baccess[SARP_CBRRIP_GSRRIP_SET]);
-            }
-
-            /* Set new value to brrip policy global data */
-            SAT_CTR_VAL(global_data->brrip.access_ctr) = CTR_VAL(global_data);
-
-#undef CTR_VAL
-#undef THRESHOLD
-          }
-          else
-          {
-            assert(following_policy == cache_policy_srrip || 
-                following_policy == cache_policy_sarp);
-          }
-
-          SAT_CTR_DEC(global_data->srrip_psel);
-
-          if (SAT_CTR_VAL(global_data->srrip_psel) > PSEL_MID_VAL)
-          {
-            SAT_CTR_INC(global_data->sarp_psel);
-          }
-          break;
-
-        case SARP_CSRRIP_GBRRIP_SET:
-          if (CPU_STREAM(info->stream))
-          {
-            assert(following_policy == cache_policy_srrip || 
-                following_policy == cache_policy_sarp);
-          }
-          else
-          {
-            assert(following_policy == cache_policy_brrip || 
-                following_policy == cache_policy_sarp);
-
-            /* Update brrip epsilon counter only for graphics */
-#define CTR_VAL(g)    (SAT_CTR_VAL((g)->baccess[SARP_CSRRIP_GBRRIP_SET]))
-#define THRESHOLD(g)  ((g)->threshold)
-
-            /* Update access counter for bimodal insertion */
-            if (CTR_VAL(global_data) < THRESHOLD(global_data))
-            {
-              /* Increment set access count */
-              SAT_CTR_INC(global_data->baccess[SARP_CSRRIP_GBRRIP_SET]);
-            }
-
-
-            if (CTR_VAL(global_data) >= THRESHOLD(global_data))
-            {
-              assert(CTR_VAL(global_data) == THRESHOLD(global_data));
-
-              /* Reset access count */
-              SAT_CTR_RST(global_data->baccess[SARP_CSRRIP_GBRRIP_SET]);
-            }
-
-            /* Set new value to brrip policy global data */
-            SAT_CTR_VAL(global_data->brrip.access_ctr) = CTR_VAL(global_data);
-
-#undef CTR_VAL
-#undef THRESHOLD
-          }
-
-          SAT_CTR_INC(global_data->brrip_psel); 
-
-          if (SAT_CTR_VAL(global_data->brrip_psel) <= PSEL_MID_VAL)
-          {
-            SAT_CTR_DEC(global_data->sarp_psel);
-          }
-          break;
-
-        case SARP_CBRRIP_GBRRIP_SET:
-          assert(following_policy == cache_policy_brrip || 
-              following_policy == cache_policy_sarp);
-
-          SAT_CTR_DEC(global_data->brrip_psel); 
-
-          if (SAT_CTR_VAL(global_data->brrip_psel) > PSEL_MID_VAL)
-          {
-            SAT_CTR_DEC(global_data->sarp_psel);
-          }
+        case SARP_GPU_BRRIP_SAMPLE:
+          SAT_CTR_DEC(global_data->gpu_srrip_brrip_psel);
 
           /* Update brrip epsilon counter only for graphics */
-#define CTR_VAL(g)    (SAT_CTR_VAL((g)->baccess[SARP_CBRRIP_GBRRIP_SET]))
+#define CTR_VAL(g)    (SAT_CTR_VAL((g)->baccess[SARP_GPU_BRRIP_SAMPLE]))
 #define THRESHOLD(g)  ((g)->threshold)
 
           /* Update access counter for bimodal insertion */
           if (CTR_VAL(global_data) < THRESHOLD(global_data))
           {
             /* Increment set access count */
-            SAT_CTR_INC(global_data->baccess[SARP_CBRRIP_GBRRIP_SET]);
+            SAT_CTR_INC(global_data->baccess[SARP_GPU_BRRIP_SAMPLE]);
           }
-
 
           if (CTR_VAL(global_data) >= THRESHOLD(global_data))
           {
             assert(CTR_VAL(global_data) == THRESHOLD(global_data));
 
             /* Reset access count */
-            SAT_CTR_RST(global_data->baccess[SARP_CBRRIP_GBRRIP_SET]);
+            SAT_CTR_RST(global_data->baccess[SARP_GPU_BRRIP_SAMPLE]);
           }
 
-          /* Set new value to brrip policy global data */
-          SAT_CTR_VAL(global_data->brrip.access_ctr) = CTR_VAL(global_data);
 
 #undef CTR_VAL
 #undef THRESHOLD
           break;
 
+        case SARP_ZS_BYPASS_SAMPLE:
+          SAT_CTR_INC(global_data->zs_bypass_psel);
+          break;
+
+        case SARP_ZS_NO_BYPASS_SAMPLE:
+          SAT_CTR_DEC(global_data->zs_bypass_psel);
+          break;
+
+        case SARP_CORE1_NOT_PIN_SAMPLE:
+          SAT_CTR_INC(global_data->core1_pin_psel);
+          break;
+
+        case SARP_CORE1_PIN_SAMPLE:
+          SAT_CTR_DEC(global_data->core1_pin_psel);
+          break;
+
+        case SARP_CORE2_NOT_PIN_SAMPLE:
+          SAT_CTR_INC(global_data->core2_pin_psel);
+          break;
+
+        case SARP_CORE2_PIN_SAMPLE:
+          SAT_CTR_DEC(global_data->core2_pin_psel);
+          break;
+
+        case SARP_CORE3_NOT_PIN_SAMPLE:
+          SAT_CTR_INC(global_data->core3_pin_psel);
+          break;
+
+        case SARP_CORE3_PIN_SAMPLE:
+          SAT_CTR_DEC(global_data->core3_pin_psel);
+          break;
+
+        case SARP_CORE4_NOT_PIN_SAMPLE:
+          SAT_CTR_INC(global_data->core4_pin_psel);
+          break;
+
+        case SARP_CORE4_PIN_SAMPLE:
+          SAT_CTR_DEC(global_data->core4_pin_psel);
+          break;
+
+        case SARP_CS_NOT_PIN_SAMPLE:
+          SAT_CTR_INC(global_data->cs_pin_psel);
+          break;
+
+        case SARP_CS_PIN_SAMPLE:
+          SAT_CTR_DEC(global_data->cs_pin_psel);
+          break;
+
+        case SARP_ZS_NOT_PIN_SAMPLE:
+          SAT_CTR_INC(global_data->zs_pin_psel);
+          break;
+
+        case SARP_ZS_PIN_SAMPLE:
+          SAT_CTR_DEC(global_data->zs_pin_psel);
+          break;
+
+        case SARP_BS_NOT_PIN_SAMPLE:
+          SAT_CTR_INC(global_data->bs_pin_psel);
+          break;
+
+        case SARP_BS_PIN_SAMPLE:
+          SAT_CTR_DEC(global_data->bs_pin_psel);
+          break;
+
+        case SARP_OS_NOT_PIN_SAMPLE:
+          SAT_CTR_INC(global_data->os_pin_psel);
+          break;
+
+        case SARP_OS_PIN_SAMPLE:
+          SAT_CTR_DEC(global_data->os_pin_psel);
+          break;
+
+        case SARP_SPILL_HIT_PROMOTE_SAMPLE:
+          SAT_CTR_DEC(global_data->spill_hit_psel);
+          break;
+
+        case SARP_SPILL_HIT_PIN_SAMPLE:
+          SAT_CTR_INC(global_data->spill_hit_psel);
+          break;
+
         case SARP_FOLLOWER_SET:
-          /* Update brrip epsilon counter only for graphics */
-          if (CPU_STREAM(info->stream))
-          {
-#define CTR_VAL(g)    (SAT_CTR_VAL((g)->baccess[SARP_FOLLOWER_CPU_SET]))
-#define THRESHOLD(g)  ((g)->threshold)
-
-            /* Update access counter for bimodal insertion */
-            if (CTR_VAL(global_data) < THRESHOLD(global_data))
-            {
-              /* Increment set access count */
-              SAT_CTR_INC(global_data->baccess[SARP_FOLLOWER_CPU_SET]);
-            }
-
-            if (CTR_VAL(global_data) >= THRESHOLD(global_data))
-            {   
-              assert(CTR_VAL(global_data) == THRESHOLD(global_data));
-
-              /* Reset access count */
-              SAT_CTR_RST(global_data->baccess[SARP_FOLLOWER_CPU_SET]);
-            }
-
-            /* Set new value to brrip policy global data */
-            SAT_CTR_VAL(global_data->brrip.access_ctr) = CTR_VAL(global_data);
-
-#undef CTR_VAL
-#undef THRESHOLD
-          }
-          else
-          {
-#define CTR_VAL(g)    (SAT_CTR_VAL((g)->baccess[SARP_FOLLOWER_GPU_SET]))
-#define THRESHOLD(g)  ((g)->threshold)
-
-            /* Update access counter for bimodal insertion */
-            if (CTR_VAL(global_data) < THRESHOLD(global_data))
-            {
-              /* Increment set access count */
-              SAT_CTR_INC(global_data->baccess[SARP_FOLLOWER_GPU_SET]);
-            }
-
-            if (CTR_VAL(global_data) >= THRESHOLD(global_data))
-            {
-              assert(CTR_VAL(global_data) == THRESHOLD(global_data));
-
-              /* Reset access count */
-              SAT_CTR_RST(global_data->baccess[SARP_FOLLOWER_GPU_SET]);
-            }
-
-            /* Set new value to brrip policy global data */
-            SAT_CTR_VAL(global_data->brrip.access_ctr) = CTR_VAL(global_data);
-
-#undef CTR_VAL
-#undef THRESHOLD
-          }
-
           break;
 
         default:
           panic("%s: line no %d - invalid sample type", __FUNCTION__, __LINE__);
       }
-    }
 
+      /* Update brrip epsilon counter only for graphics */
+#define CTR_VAL(g)    (SAT_CTR_VAL((g)->baccess[SARP_FOLLOWER_GPU_SET]))
+#define THRESHOLD(g)  ((g)->threshold)
+
+      if (policy_data->set_type != SARP_GPU_SRRIP_SAMPLE && 
+          policy_data->set_type != SARP_GPU_BRRIP_SAMPLE && 
+          GPU_STREAM(info->stream))
+      {
+        /* Update access counter for bimodal insertion */
+        if (CTR_VAL(global_data) < THRESHOLD(global_data))
+        {
+          /* Increment set access count */
+          SAT_CTR_INC(global_data->baccess[SARP_FOLLOWER_GPU_SET]);
+        }
+
+        if (CTR_VAL(global_data) >= THRESHOLD(global_data))
+        {
+          assert(CTR_VAL(global_data) == THRESHOLD(global_data));
+
+          /* Reset access count */
+          SAT_CTR_RST(global_data->baccess[SARP_FOLLOWER_GPU_SET]);
+        }
+      }
+
+#undef CTR_VAL
+#undef THRESHOLD
+
+    }
   }
 
   return node;
@@ -1807,102 +2205,27 @@ void cache_fill_block_sarp(sarp_data *policy_data,
   {
     switch (policy_data->set_type)
     {
-      case SARP_CSRRIP_GSRRIP_SET:
-        assert(following_policy == cache_policy_srrip || 
-            following_policy == cache_policy_sarp);
-        break;
-
-      case SARP_CBRRIP_GSRRIP_SET:
-        if (CPU_STREAM(info->stream))
-        {
-          assert(following_policy == cache_policy_brrip || 
-              following_policy == cache_policy_sarp);
-
-#define CTR_VAL(g)    (SAT_CTR_VAL((g)->baccess[SARP_CBRRIP_GSRRIP_SET]))
-#define THRESHOLD(g)  ((g)->threshold)
-
-          /* Set new value to brrip policy global data */
-          SAT_CTR_VAL(global_data->brrip.access_ctr) = CTR_VAL(global_data);
-
-#undef CTR_VAL
-#undef THRESHOLD
-        }
-        else
-        {
-          assert(following_policy == cache_policy_srrip || 
-              following_policy == cache_policy_sarp);
-        }
-        break;
-
-      case SARP_CSRRIP_GBRRIP_SET:
-        if (CPU_STREAM(info->stream))
-        {
-          assert(following_policy == cache_policy_srrip || 
-              following_policy == cache_policy_sarp);
-        }
-        else
-        {
-          assert(following_policy == cache_policy_brrip || 
-              following_policy == cache_policy_sarp);
-
-          /* Update brrip epsilon counter only for graphics */
-#define CTR_VAL(g)    (SAT_CTR_VAL((g)->baccess[SARP_CSRRIP_GBRRIP_SET]))
-#define THRESHOLD(g)  ((g)->threshold)
-
-          /* Set new value to brrip policy global data */
-          SAT_CTR_VAL(global_data->brrip.access_ctr) = CTR_VAL(global_data);
-
-#undef CTR_VAL
-#undef THRESHOLD
-        }
-
-        break;
-
-      case SARP_CBRRIP_GBRRIP_SET:
-        assert(following_policy == cache_policy_brrip || 
-            following_policy == cache_policy_sarp);
+      case SARP_GPU_BRRIP_SAMPLE:
 
         /* Update brrip epsilon counter only for graphics */
-#define CTR_VAL(g)    (SAT_CTR_VAL((g)->baccess[SARP_CBRRIP_GBRRIP_SET]))
-#define THRESHOLD(g)  ((g)->threshold)
+#define CTR_VAL(g)    (SAT_CTR_VAL((g)->baccess[SARP_GPU_BRRIP_SAMPLE]))
 
         /* Set new value to brrip policy global data */
         SAT_CTR_VAL(global_data->brrip.access_ctr) = CTR_VAL(global_data);
 
 #undef CTR_VAL
-#undef THRESHOLD
-        break;
-
-      case SARP_FOLLOWER_SET:
-        /* Update brrip epsilon counter only for graphics */
-        if (CPU_STREAM(info->stream))
-        {
-#define CTR_VAL(g)    (SAT_CTR_VAL((g)->baccess[SARP_FOLLOWER_CPU_SET]))
-#define THRESHOLD(g)  ((g)->threshold)
-
-          /* Set new value to brrip policy global data */
-          SAT_CTR_VAL(global_data->brrip.access_ctr) = CTR_VAL(global_data);
-
-#undef CTR_VAL
-#undef THRESHOLD
-        }
-        else
-        {
-#define CTR_VAL(g)    (SAT_CTR_VAL((g)->baccess[SARP_FOLLOWER_GPU_SET]))
-#define THRESHOLD(g)  ((g)->threshold)
-
-          /* Set new value to brrip policy global data */
-          SAT_CTR_VAL(global_data->brrip.access_ctr) = CTR_VAL(global_data);
-
-#undef CTR_VAL
-#undef THRESHOLD
-        }
-
         break;
 
       default:
-        panic("%s: line no %d - invalid sample type", __FUNCTION__, __LINE__);
+#define CTR_VAL(g)    (SAT_CTR_VAL((g)->baccess[SARP_FOLLOWER_GPU_SET]))
+
+        /* Set new value to brrip policy global data */
+        SAT_CTR_VAL(global_data->brrip.access_ctr) = CTR_VAL(global_data);
+
+#undef CTR_VAL
+        break;
     }
+
   }
 
   /* 
@@ -1937,12 +2260,22 @@ void cache_fill_block_sarp(sarp_data *policy_data,
         assert(block); 
         assert(block->stream == info->stream);
         assert(block->state != cache_block_invalid);
+
+        if (CPU_STREAM(info->stream))
+        {
+          block->ship_sign        = SHIPSIGN(global_data, info);
+          block->ship_sign_valid  = TRUE;
+        }
+        else
+        {
+          block->ship_sign_valid = FALSE;
+        }
         break;
 
       case cache_policy_brrip:
         assert(way != BYPASS_WAY);
         assert(info->fill);
-
+          
         cache_fill_block_brrip(&(policy_data->brrip), &(global_data->brrip), 
             way, tag, state, stream, info);
 
@@ -1952,6 +2285,16 @@ void cache_fill_block_sarp(sarp_data *policy_data,
         assert(block); 
         assert(block->stream == info->stream);
         assert(block->state != cache_block_invalid);
+
+        if (CPU_STREAM(info->stream))
+        {
+          block->ship_sign        = SHIPSIGN(global_data, info);
+          block->ship_sign_valid  = TRUE;
+        }
+        else
+        {
+          block->ship_sign_valid = FALSE;
+        }
         break;
 
       case cache_policy_sarp:
@@ -1964,8 +2307,18 @@ void cache_fill_block_sarp(sarp_data *policy_data,
 
           assert(block->stream == NN);
 
+          if (CPU_STREAM(info->stream))
+          {
+            block->ship_sign        = SHIPSIGN(global_data, info);
+            block->ship_sign_valid  = TRUE;
+          }
+          else
+          {
+            block->ship_sign_valid = FALSE;
+          }
+
           /* Get RRPV to be assigned to the new block */
-          rrpv = cache_get_fill_rrpv_sarp(policy_data, global_data, info);
+          rrpv = cache_get_fill_rrpv_sarp(policy_data, global_data, info, block);
           
           /* Update stream fill rrpv counter */
           SMPLRPERF_FRRPV(&(global_data->sampler->perfctr), info->stream)[rrpv] += 1;
@@ -1983,10 +2336,12 @@ void cache_fill_block_sarp(sarp_data *policy_data,
           block->dirty           = (info && info->spill) ? TRUE : FALSE;
           block->spill           = (info && info->spill) ? TRUE : FALSE;
           block->last_rrpv       = rrpv;
+          block->access          = 0;
           block->epoch           = 0;
           block->is_ct_block     = 0;
           block->is_zt_block     = 0;
           block->is_bt_block     = 0;
+          block->is_proc_block   = 0;
           block->is_block_pinned = 0;
 
           if (info->spill == TRUE)
@@ -2006,13 +2361,14 @@ void cache_fill_block_sarp(sarp_data *policy_data,
 #define EVAL_PCOND(g, i)    ((g)->pin_blocks && is_miss_block_pinned((g)->sampler, i))
 #define EVAL_SCOND(g, i)    (!NCRTCL_BYPASS(g, i) && EVAL_PCOND(g, i))
 #define PIN_MISS_BLK(g, i)  (((g)->speedup_enabled) ? EVAL_SCOND(g, i) : EVAL_PCOND(g, i))
+
             if (PIN_MISS_BLK(global_data, info))
             {
               block->is_block_pinned = TRUE;
 
               global_data->stream_pinned[info->stream] += 1;
             }
-
+            
 #undef CSBYTH_D
 #undef CSBYTH_N
 #undef SCOUNT
@@ -2026,6 +2382,11 @@ void cache_fill_block_sarp(sarp_data *policy_data,
 #undef EVAL_PCOND
 #undef EVAL_SCOND
 #undef PIN_MISS_BLK
+
+            if (is_block_unpinned(policy_data, global_data, info))
+            {
+              block->is_block_pinned = FALSE;
+            }
           }
 
           /* If block is spilled, and block is to be pinned set the flag  */
@@ -2041,7 +2402,7 @@ void cache_fill_block_sarp(sarp_data *policy_data,
         panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
     }
   }
-
+  
   sampler_cache_lookup(global_data->sampler, policy_data, info, TRUE);
 
   if (info)
@@ -2175,6 +2536,23 @@ int cache_replace_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
   {
     goto end;
   }
+  
+  /* Bypass depth spills */
+  if (info->spill && info->stream == ZS)
+  {
+#define Z_BYPASS(p)     ((p)->set_type == SARP_ZS_BYPASS_SAMPLE)
+#define Z_NO_BYPASS(p)  ((p)->set_type == SARP_ZS_NO_BYPASS_SAMPLE)
+#define F_BYPASS(g)     (SAT_CTR_VAL((g)->zs_bypass_psel) <= PSEL_MID_VAL)
+
+    if (Z_BYPASS(policy_data) || (!Z_NO_BYPASS(policy_data) && F_BYPASS(global_data)))
+    {
+      goto end;
+    }
+
+#undef Z_BYPASS
+#undef Z_NO_BYPASS
+#undef F_BYPASS
+  }
 
   per_stream_policy = SARP_DATA_PSPOLICY(policy_data);
   assert(per_stream_policy);
@@ -2191,8 +2569,6 @@ int cache_replace_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
 
 #define IS_CRITICAL_STREAM(g, i)  ((g)->speedup_enabled ? CRITICAL_STREAM(g, i) : TRUE)
 
-  if (!is_fill_bypass(global_data->sampler, info) && IS_CRITICAL_STREAM(global_data, info))
-  {
     switch (current_policy)
     {
       case cache_policy_srrip:
@@ -2200,7 +2576,9 @@ int cache_replace_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
       case cache_policy_sarp:
         /* Try to find an invalid block always from head of the free list. */
         for (block = SARP_DATA_FREE_HEAD(policy_data); block; block = block->prev)
+        {
           return block->way;
+        }
 
         /* If fill is not bypassed, get the replacement candidate */
         struct  cache_block_t *head_block;
@@ -2233,7 +2611,6 @@ int cache_replace_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
           {
             old_block = &SARP_DATA_BLOCKS(policy_data)[way_id];
             old_rrpv  = ((rrip_list *)(old_block->data))->rrpv;
-
             if (old_rrpv == rrpv && old_block->is_block_pinned == TRUE)
             {
               old_block->is_block_pinned  = FALSE;
@@ -2252,7 +2629,7 @@ int cache_replace_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
               }
             }
           }
-
+        
           head_block = SARP_DATA_VALID_HEAD(policy_data)[rrpv].head;
         }while(!head_block);
 
@@ -2265,6 +2642,31 @@ int cache_replace_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
             min_wayid = block->way;
         }
 
+        /* If a replacement has happeded, update signature counter table  */
+        if (policy_data->is_ship_sampler == TRUE)
+        {
+          block = &(policy_data->blocks[min_wayid]);
+          
+          if (!(block->access))
+          {
+            global_data->ship_dec += 1;
+          }
+
+          if (min_wayid != ~(0))
+          {
+
+            if (block->ship_sign_valid)
+            {
+              CACHE_DEC_SHCT(block, global_data);
+            }
+          }
+        }
+#if 0
+        if (min_wayid != ~(0))
+        {
+          printf("REP: %ld\n", policy_data->blocks[min_wayid].tag >> 6);
+        }
+#endif
         ret_wayid = (min_wayid != ~(0)) ? min_wayid : -1;
 
         break;
@@ -2273,16 +2675,11 @@ int cache_replace_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
         panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
         ret_wayid = 0;
     }
-  }
-  else
-  {
-    global_data->bypass_count++;
-    global_data->stream_bypass[info->stream] += 1;
-  }
 
 #undef IS_CRITICAL_STREAM
 
 end:
+
   return ret_wayid;
 }
 
@@ -2303,6 +2700,11 @@ static void update_block_xstream(struct cache_block_t *block, memory_trace *info
   if (block->stream == BS && info->stream != BS)
   {
     block->is_bt_block = TRUE; 
+  }
+
+  if (block->stream >= PS && info->stream == (PS + info->core - 1))
+  {
+    block->is_proc_block = TRUE; 
   }
 }
 
@@ -2372,7 +2774,7 @@ void cache_access_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
         blk->epoch = 0;
       }
 
-      if (blk->spill)
+      if (info->fill && blk->spill)
       {
         /* Update inter stream flags */
         update_block_xstream(blk, info);
@@ -2386,18 +2788,6 @@ void cache_access_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
 
       /* Update stream hit rrpv counter */
       SMPLRPERF_HRRPV(&(global_data->sampler->perfctr), info->stream)[new_rrpv] += 1;
-
-#if 0
-      if (info->fill)
-      {
-        new_rrpv = cache_get_new_rrpv_sarp(policy_data, global_data, info, blk, old_rrpv);
-      }
-      else
-      {
-        assert(info->spill);
-        new_rrpv = old_rrpv;
-      }
-#endif
 
       /* Update block queue if block got new RRPV */
       if (new_rrpv != old_rrpv)
@@ -2413,18 +2803,18 @@ void cache_access_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
       
       if (info->spill == TRUE)
       {
-#define CSBYTH_D            (2)
-#define CSBYTH_N            (1)
-#define SCOUNT(p, s)        (SMPLRPERF_SPILL(p, s))
-#define SREUSE(p, s)        (SMPLRPERF_SREUSE(p, s))
-#define SBYPASS_TH(sp, s)   (SREUSE(&((sp)->perfctr), s) * CSBYTH_D <= SCOUNT(&((sp)->perfctr), s) * CSBYTH_N)
-#define CBYPASS(sp, i)      SBYPASS_TH(sp, (i)->stream)
-#define NCRTCL_BYPASS(g, i) (!CRITICAL_STREAM(g, i) && CBYPASS((g)->sampler, i))
-#define EVAL_PCOND(g, i)    ((g)->pin_blocks && is_hit_block_pinned((g)->sampler, i))
-#define EVAL_SCOND(g, i)    (!NCRTCL_BYPASS(g, i) && EVAL_PCOND(g, i))
-#define PIN_HIT_BLK(g, i)   ((g)->speedup_enabled ? EVAL_SCOND(g, i) : EVAL_PCOND(g, i))
+#define CSBYTH_D              (2)
+#define CSBYTH_N              (1)
+#define SCOUNT(p, s)          (SMPLRPERF_SPILL(p, s))
+#define SREUSE(p, s)          (SMPLRPERF_SREUSE(p, s))
+#define SBYPASS_TH(sp, s)     (SREUSE(&((sp)->perfctr), s) * CSBYTH_D <= SCOUNT(&((sp)->perfctr), s) * CSBYTH_N)
+#define CBYPASS(sp, i)        SBYPASS_TH(sp, (i)->stream)
+#define NCRTCL_BYPASS(g, i)   (!CRITICAL_STREAM(g, i) && CBYPASS((g)->sampler, i))
+#define EVAL_PCOND(p, g, i)   ((g)->pin_blocks && is_hit_block_pinned(p, g, (g)->sampler, i))
+#define EVAL_SCOND(p, g, i)   (!NCRTCL_BYPASS(g, i) && EVAL_PCOND(p, g, i))
+#define PIN_HIT_BLK(p, g, i)  ((g)->speedup_enabled ? EVAL_SCOND(p, g, i) : EVAL_PCOND(p, g, i))
 
-        if (PIN_HIT_BLK(global_data, info))
+        if (PIN_HIT_BLK(policy_data, global_data, info))
         {
           blk->is_block_pinned = TRUE;
 
@@ -2434,7 +2824,7 @@ void cache_access_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
         {
           blk->is_block_pinned = FALSE;
         }
-
+        
 #undef CSBYTH_D
 #undef CSBYTH_N
 #undef SCOUNT
@@ -2445,13 +2835,35 @@ void cache_access_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
 #undef EVAL_PCOND
 #undef EVAL_SCOND
 #undef PIN_HIT_BLK
+
+        if (old_rrpv != new_rrpv)
+        {
+          if (is_block_unpinned(policy_data, global_data, info))
+          {
+            blk->is_block_pinned = FALSE;
+          }
+        }
       }
       else
       {
+        /* Update signature counter table  */
+        if (policy_data->is_ship_sampler == TRUE)
+        {
+
+          global_data->ship_inc += 1;
+          if (blk->ship_sign_valid)
+          {
+            CACHE_INC_SHCT(blk, global_data);
+          }
+        }
+
         blk->is_block_pinned = FALSE;
       }
       
-      blk->access += 1;
+      if (info->fill)
+      {
+        blk->access += 1;
+      }
 
       CACHE_UPDATE_BLOCK_PC(blk, info->pc);
       CACHE_UPDATE_BLOCK_STREAM(blk, info->stream);
@@ -3063,84 +3475,87 @@ void sampler_cache_lookup(sampler_cache *sampler, sarp_data *policy_data,
   offset  = SAMPLER_OFFSET(info, sampler);
   strm    = NEW_STREAM(info);
   
-  sampler->perfctr.sampler_access += 1;
-
-  for (way = 0; way < sampler->ways; way++)
+  if ((offset % ((1 << (LOG_GRAIN_SIZE - LOG_BLOCK_SIZE)) / PAGE_COVERAGE)) == 0)
   {
-    if (sampler->blocks[index][way].page == page)
-    {
-      assert(page != SARP_SAMPLER_INVALID_TAG);
+    sampler->perfctr.sampler_access += 1;
 
-      sampler->perfctr.sampler_block_found += 1;
-      break;
-    }
-  }
-  
-  /* Find an invalid entry in sampler cache */
-  if (way == sampler->ways)
-  { 
-    /* Walk through entire sampler set */
     for (way = 0; way < sampler->ways; way++)
     {
-      if (sampler->blocks[index][way].page == SARP_SAMPLER_INVALID_TAG)
+      if (sampler->blocks[index][way].page == page)
       {
-        sampler->perfctr.sampler_invalid_block_found += 1;
+        assert(page != SARP_SAMPLER_INVALID_TAG);
+
+        sampler->perfctr.sampler_block_found += 1;
         break;
       }
     }
-  }
 
-  if (way == sampler->ways)
-  {
-    /* No invalid entry. Replace only if stream occupancy in the sampler is 
-     * still below minimum occupancy threshold
-     **/
-
-    if (sampler->stream_occupancy[strm] < STREAM_OCC_THRESHOLD)
-    {
-      way = (ub4)(random() % sampler->ways);
-
-      sampler->blocks[index][way].page = SARP_SAMPLER_INVALID_TAG;
-
-      for (ub1 off = 0; off < sampler->entry_size; off++)
+    /* Find an invalid entry in sampler cache */
+    if (way == sampler->ways)
+    { 
+      /* Walk through entire sampler set */
+      for (way = 0; way < sampler->ways; way++)
       {
-        sampler->blocks[index][way].valid[off]          = 0;
-        sampler->blocks[index][way].dynamic_color[off]  = 0;
-        sampler->blocks[index][way].dynamic_depth[off]  = 0;
-        sampler->blocks[index][way].dynamic_blit[off]   = 0;
-        sampler->blocks[index][way].dynamic_proc[off]   = 0;
-      }
-
-      sampler->perfctr.sampler_replace += 1;
-    }
-  }
-  
-  /* Sampler is updated on hit or on miss and an old entry is replaced */
-  if (way < sampler->ways)
-  {
-    if (sampler->blocks[index][way].page == SARP_SAMPLER_INVALID_TAG ||
-        sampler->blocks[index][way].valid[offset] == 0)
-    {
-
-      if (sampler->blocks[index][way].page == SARP_SAMPLER_INVALID_TAG)
-      {
-        sampler->stream_occupancy[info->stream] += 1;
-
-        if (strm == OS)
+        if (sampler->blocks[index][way].page == SARP_SAMPLER_INVALID_TAG)
         {
-          sampler->stream_occupancy[strm] += 1;
+          sampler->perfctr.sampler_invalid_block_found += 1;
+          break;
         }
       }
-
-      /* If sampler access was a miss and an entry has been replaced */
-      sampler_cache_fill_block(sampler, index, way, policy_data, info, 
-          FALSE);    
     }
-    else
+
+    if (way == sampler->ways)
     {
-      /* If sampler access was a hit */
-      sampler_cache_access_block(sampler, index, way, policy_data, info, 
-          TRUE);
+      /* No invalid entry. Replace only if stream occupancy in the sampler is 
+       * still below minimum occupancy threshold
+       **/
+
+      if (sampler->stream_occupancy[strm] < STREAM_OCC_THRESHOLD)
+      {
+        way = (ub4)(random() % sampler->ways);
+
+        sampler->blocks[index][way].page = SARP_SAMPLER_INVALID_TAG;
+
+        for (ub1 off = 0; off < sampler->entry_size; off++)
+        {
+          sampler->blocks[index][way].valid[off]          = 0;
+          sampler->blocks[index][way].dynamic_color[off]  = 0;
+          sampler->blocks[index][way].dynamic_depth[off]  = 0;
+          sampler->blocks[index][way].dynamic_blit[off]   = 0;
+          sampler->blocks[index][way].dynamic_proc[off]   = 0;
+        }
+
+        sampler->perfctr.sampler_replace += 1;
+      }
+    }
+
+    /* Sampler is updated on hit or on miss and an old entry is replaced */
+    if (way < sampler->ways)
+    {
+      if (sampler->blocks[index][way].page == SARP_SAMPLER_INVALID_TAG ||
+          sampler->blocks[index][way].valid[offset] == 0)
+      {
+
+        if (sampler->blocks[index][way].page == SARP_SAMPLER_INVALID_TAG)
+        {
+          sampler->stream_occupancy[info->stream] += 1;
+
+          if (strm == OS)
+          {
+            sampler->stream_occupancy[strm] += 1;
+          }
+        }
+
+        /* If sampler access was a miss and an entry has been replaced */
+        sampler_cache_fill_block(sampler, index, way, policy_data, info, 
+            FALSE);    
+      }
+      else
+      {
+        /* If sampler access was a hit */
+        sampler_cache_access_block(sampler, index, way, policy_data, info, 
+            TRUE);
+      }
     }
   }
 }
@@ -3237,14 +3652,18 @@ sampler_entry* sampler_cache_get_block(sampler_cache *sampler, memory_trace *inf
 #undef PCSRRIPGBRRIP
 #undef PCBRRIPGSRRIP
 #undef PCBRRIPGBRRIP
+#undef GFILL_VAL
 #undef PCBRRIP
 #undef PCSRRIP
 #undef DPSARP
+#undef DGFILL
+#undef CHGFILL
 #undef SPSARP
 #undef FANDH
 #undef FANDM
 #undef SPEEDUP
 #undef CURRENT_POLICY
+#undef GFENBL
 #undef FOLLOW_POLICY
 #undef SAMPLER_INDX
 #undef SAMPLER_TAG
@@ -3261,3 +3680,13 @@ sampler_entry* sampler_cache_get_block(sampler_cache *sampler, memory_trace *inf
 #undef BTC_CNT
 #undef IS_INTERS
 #undef INSTRS_CRTCL
+#undef SIGNSIZE
+#undef SHCTSIZE
+#undef COREBTS
+#undef SIGMAX_VAL
+#undef SIGNMASK
+#undef SIGNP
+#undef SIGNM
+#undef SIGNCORE
+#undef GET_SSIGN
+#undef SHIPSIGN

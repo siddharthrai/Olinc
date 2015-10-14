@@ -1410,7 +1410,7 @@ int cache_replace_block(struct cache_t *cache, int set, memory_trace *info)
           CACHE_SRRIPSAGE_GDATA(cache), info);
 
     case cache_policy_brrip:
-      return cache_replace_block_brrip(CACHE_SET_DATA_BRRIP(CACHE_SET(cache, set)));
+      return cache_replace_block_brrip(CACHE_SET_DATA_BRRIP(CACHE_SET(cache, set)), info);
 
     case cache_policy_drrip:
       DRRIPGetReplacementCandidate(&(cache->drrip_policy), set, &verified_way);

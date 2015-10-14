@@ -32,16 +32,40 @@
 
 /* For the time being only 5 cores are supported. */
 #define MAX_SARP_CORES (5)
-#define REPOCH_CNT     (3)
+#define REPOCH_CNT     (1)
 
-#define SARP_CSRRIP_GSRRIP_SET  (0)
-#define SARP_CBRRIP_GSRRIP_SET  (1)
-#define SARP_CSRRIP_GBRRIP_SET  (2)
-#define SARP_CBRRIP_GBRRIP_SET  (3)
-#define SARP_FOLLOWER_SET       (4)
-#define SARP_FOLLOWER_CPU_SET   (5)
-#define SARP_FOLLOWER_GPU_SET   (6)
-#define SARP_SAMPLE_COUNT       (7)
+#define SARP_CSRRIP_GSRRIP_SET        (0)
+#define SARP_CBRRIP_GSRRIP_SET        (1)
+#define SARP_CSRRIP_GBRRIP_SET        (2)
+#define SARP_CBRRIP_GBRRIP_SET        (3)
+#define SARP_FOLLOWER_SET             (4)
+#define SARP_FOLLOWER_CPU_SET         (5)
+#define SARP_FOLLOWER_GPU_SET         (6)
+
+#define SARP_SHIP_SAMPLE              (7)
+#define SARP_GPU_SRRIP_SAMPLE         (8)
+#define SARP_GPU_BRRIP_SAMPLE         (9)
+#define SARP_ZS_BYPASS_SAMPLE         (10)
+#define SARP_ZS_NO_BYPASS_SAMPLE      (11)
+#define SARP_CORE1_NOT_PIN_SAMPLE     (12)
+#define SARP_CORE1_PIN_SAMPLE         (13)
+#define SARP_CORE2_NOT_PIN_SAMPLE     (14)
+#define SARP_CORE2_PIN_SAMPLE         (15)
+#define SARP_CORE3_NOT_PIN_SAMPLE     (16)
+#define SARP_CORE3_PIN_SAMPLE         (17)
+#define SARP_CORE4_NOT_PIN_SAMPLE     (18)
+#define SARP_CORE4_PIN_SAMPLE         (19)
+#define SARP_CS_NOT_PIN_SAMPLE        (20)
+#define SARP_CS_PIN_SAMPLE            (21)
+#define SARP_ZS_NOT_PIN_SAMPLE        (22)
+#define SARP_ZS_PIN_SAMPLE            (23)
+#define SARP_BS_NOT_PIN_SAMPLE        (24)
+#define SARP_BS_PIN_SAMPLE            (25)
+#define SARP_OS_NOT_PIN_SAMPLE        (26)
+#define SARP_OS_PIN_SAMPLE            (27)
+#define SARP_SPILL_HIT_PROMOTE_SAMPLE (28)
+#define SARP_SPILL_HIT_PIN_SAMPLE     (29)
+#define SARP_SAMPLE_COUNT             (30)
 
 /* 
  *  Sampler entry:
@@ -213,6 +237,7 @@ typedef struct cache_policy_sarp_data_t
 {
   /* SARP specific data */
   ub4         set_type;               /* SDPSIMPLE set type */
+  ub1         is_ship_sampler;        /* True, if set is used for ship */
   ub4         max_rrpv;               /* Maximum RRPV supported */
   ub8         miss_count;             /* # misses seen by the set */
   ub8         hit_count;              /* # misses seen by the set */
@@ -270,6 +295,22 @@ typedef struct cache_policy_sarp_gdata_t
   ub8  fmiss_count[TST + 1];    /* Per-stream miss count */
   ub8  smiss_count[TST + 1];    /* Per-stream miss count */
   sctr baccess[SAMPLES];        /* Separate BRRIP counter to decide epsilon for each BRRIP sampled set */
+
+  sctr gpu_srrip_brrip_psel;    /* CPU FILL selection counter */
+  sctr zs_bypass_psel;          /* Depth bypass selection counter */
+  sctr core1_pin_psel;          /* CPU core1 pin selection counter */
+  sctr core2_pin_psel;          /* CPU core2 pin selection counter */
+  sctr core3_pin_psel;          /* CPU core3 pin selection counter */
+  sctr core4_pin_psel;          /* CPU core4 pin selection counter */
+  sctr cs_pin_psel;             /* CS pin selection counter */
+  sctr zs_pin_psel;             /* ZS pin selection counter */
+  sctr bs_pin_psel;             /* BS pin selection counter */
+  sctr os_pin_psel;             /* OS pin selection counter */
+  sctr spill_hit_psel;          /* spill pin selection counter */
+  
+  ub1  cpu_fill_enable;         /* CPU fill component is enabled */
+  ub1  gpu_fill_enable;         /* CPU fill component is enabled */
+
   ub8  bypass_count;            /* # bypass */
   sctr sarp_hint[TST + 1];      /* Accumulation counter for per-stream speedup */
   ub8  speedup_count[TST + 1];  /* Per-stream speedup count */
@@ -283,6 +324,13 @@ typedef struct cache_policy_sarp_gdata_t
   ub8  stream_pfill[TST + 1];   /* # accesses filled at low RRPV */
   ub8  stream_phit[TST + 1];    /* # accesses moved to low RRPV */
   ub8  speedup_interval;        /* # accesses for speedup interval */
+  ub4  sign_size;               /* # Ship signature size */
+  ub4  shct_size;               /* # Counter table entries */
+  ub4  core_size;               /* # Core count */
+  ub8  ship_access;             /* # Access to ship sampler */
+  ub8  ship_inc;                /* # Access to ship sampler */
+  ub8  ship_dec;                /* # Access to ship sampler */
+  ub1 *ship_shct;               /* SHiP signature counter table */
   sampler_cache *sampler;       /* Sampler cache used for tracking reuses */
 }sarp_gdata;
 

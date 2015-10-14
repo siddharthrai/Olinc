@@ -373,6 +373,12 @@ bool ConfigLoader::parseLCSectionParameter(LChParameters *lcP)
     if (!parseBooleanParameter("UsePc", id, lcP->usePc))
         return FALSE;
 
+    if (!parseBooleanParameter("CpuFillEnable", id, lcP->cpuFillEnable))
+        return FALSE;
+
+    if (!parseBooleanParameter("GpuFillEnable", id, lcP->gpuFillEnable))
+        return FALSE;
+
     if ( !paramsTracker.wasAnyParamSectionDefined() ) {
         stringstream ss;
         ss << "Parameter '" << id << "' in section [LLC] is not supported";

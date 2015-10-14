@@ -70,6 +70,9 @@ struct cache_block_t
   /* Flag set if block is produced by depth unit */
   unsigned char is_zt_block;
   
+  /* Flag set if block is produced by depth unit */
+  unsigned char is_proc_block;
+
   /* TRUE, if block is pinned */
   unsigned char is_block_pinned;
 
@@ -163,6 +166,7 @@ struct cache_block_t
   
   /* Ship policy specific signature */
   unsigned long long ship_sign;
+  unsigned int ship_sign_valid;
 };
 
 #endif

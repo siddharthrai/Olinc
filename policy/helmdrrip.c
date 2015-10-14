@@ -430,7 +430,7 @@ int cache_replace_block_helmdrrip(helmdrrip_data *policy_data,
 
     case cache_policy_brrip:
 
-      return cache_replace_block_brrip(&(policy_data->brrip));
+      return cache_replace_block_brrip(&(policy_data->brrip), info);
       break;
 
     case cache_policy_helmdrrip:
@@ -448,7 +448,7 @@ int cache_replace_block_helmdrrip(helmdrrip_data *policy_data,
       {
         /* Follow BRRIP */
         global_data->brrip_followed += 1;
-        return cache_replace_block_brrip(&(policy_data->brrip));
+        return cache_replace_block_brrip(&(policy_data->brrip), info);
       }
 
 #undef MID_VAL

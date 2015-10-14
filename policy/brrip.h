@@ -199,6 +199,7 @@ void cache_fill_block_brrip(brrip_data *policy_data, brrip_gdata *global_data,
  * PARAMETERS
  *
  *  policy_data (IN)  - Set of the block 
+ *  info        (IN)  - Access info
  *
  * RETURNS
  *  
@@ -206,7 +207,7 @@ void cache_fill_block_brrip(brrip_data *policy_data, brrip_gdata *global_data,
  *
  */
 
-int  cache_replace_block_brrip(brrip_data *policy_data);
+int  cache_replace_block_brrip(brrip_data *policy_data, memory_trace *info);
 
 /*
  *

@@ -93,6 +93,8 @@ struct LChParameters
   ub4   entrySize;
   bool  useMem;
   bool  usePc;
+  bool  cpuFillEnable;
+  bool  gpuFillEnable;
   enum  cache_policy_t policy;  /* Cache policy */
 };
 
