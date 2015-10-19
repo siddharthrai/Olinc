@@ -48,6 +48,7 @@
 #define SHTH_NUMR                 (1)
 #define SHTH_DENM                 (16)
 #define BYPASS_ACCESS_TH          (128 * 1024)
+
 #define EPOCH_SIZE                (1 << 19)
 #define CPS(i)                    (i == PS)
 #define CPS1(i)                   (i == PS1)
@@ -1382,16 +1383,16 @@ int cache_get_fill_rrpv_sarp(sarp_data *policy_data, sarp_gdata *global_data,
   {
     assert(block->ship_sign_valid == TRUE);
 
-#define CTR_VAL(g)    (SAT_CTR_VAL((g)->baccess[SARP_SHIP_SAMPLE]))
-#define THRESHOLD(g)  ((g)->threshold)
+#define CTR_VAL(g, i)     ((g)->ship_fill[(i)->core])
+#define THRESHOLD(g)      ((g)->threshold)
     
     if (global_data->cpu_fill_enable)
     {
       /* Use ship for CPU fill */
-      if (CTR_VAL(global_data) == THRESHOLD(global_data) - 1)
+      if (CTR_VAL(global_data, info) == THRESHOLD(global_data) - 1)
       {
         ret_rrpv = 2;
-        SAT_CTR_RST(global_data->baccess[SARP_SHIP_SAMPLE]);
+        CTR_VAL(global_data, info) = 0;
       }
       else
       {
@@ -1405,7 +1406,7 @@ int cache_get_fill_rrpv_sarp(sarp_data *policy_data, sarp_gdata *global_data,
         }
       }
 
-      SAT_CTR_INC(global_data->baccess[SARP_SHIP_SAMPLE]);
+      CTR_VAL(global_data, info) += 1;
     }
     else
     {
@@ -1767,6 +1768,11 @@ void cache_init_sarp(long long int set_indx, struct cache_params *params,
 #undef SHCT_ENTRY_SIZE
 #undef CTR_MIN_VAL
 #undef CTR_MAX_VAL
+
+    for (ub4 i = 0; i < MAX_SARP_CORES; i++)
+    {
+      global_data->ship_fill[i] = 0;
+    }
   }
   
   /* Allocate and initialize per set data */
@@ -1847,7 +1853,14 @@ void cache_init_sarp(long long int set_indx, struct cache_params *params,
       case SARP_GPU_BRRIP_SAMPLE:
         if (GPU_STREAM(stream))
         {
-          SARP_DATA_PSPOLICY(policy_data)[stream] = cache_policy_brrip; 
+          if (global_data->gpu_fill_enable)
+          {
+            SARP_DATA_PSPOLICY(policy_data)[stream] = cache_policy_brrip; 
+          }
+          else
+          {
+            SARP_DATA_PSPOLICY(policy_data)[stream] = cache_policy_srrip; 
+          }
         }
         else
         {
@@ -2402,7 +2415,7 @@ void cache_fill_block_sarp(sarp_data *policy_data,
         panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
     }
   }
-  
+
   sampler_cache_lookup(global_data->sampler, policy_data, info, TRUE);
 
   if (info)

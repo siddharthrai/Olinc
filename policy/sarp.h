@@ -331,6 +331,7 @@ typedef struct cache_policy_sarp_gdata_t
   ub8  ship_inc;                /* # Access to ship sampler */
   ub8  ship_dec;                /* # Access to ship sampler */
   ub1 *ship_shct;               /* SHiP signature counter table */
+  ub1  ship_fill[MAX_SARP_CORES]; /* #  SHiP fills */
   sampler_cache *sampler;       /* Sampler cache used for tracking reuses */
 }sarp_gdata;
 
