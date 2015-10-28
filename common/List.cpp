@@ -9,6 +9,103 @@ void cs_qinit(cs_qnode *head)
   head->prev = head;
 }
 
+/* Initializes a fixed size queue */
+cs_fqueue* cs_fqinit(ub4 size)
+{
+  cs_fqueue *queue;
+
+  assert(size);
+
+  queue = (cs_fqueue *)calloc(1, sizeof(cs_fqueue));
+  assert(queue);
+
+  queue->queue = (cs_qnode *)calloc(size, sizeof(cs_qnode));
+  assert(queue->queue);
+
+  queue->size = size;
+  queue->head = -1;
+  queue->tail = -1;
+  queue->ele  = 0;
+
+  for (ub4 i = 0; i < size; i++)
+  {
+    queue->queue[i].data = (ub1*)queue;
+  }
+
+  return queue;
+}
+
+void cs_fqinsert(cs_fqueue *queue, ub1 *data)
+{
+  assert(queue);
+  assert(queue->ele < queue->size);
+
+  queue->tail = (queue->tail + 1) % queue->size;
+  
+  if (queue->ele == 0)
+  {
+    queue->head = queue->tail;
+  }
+
+  queue->queue[queue->tail].data = data;
+  queue->ele  += 1;
+  
+  if (queue->ele > 1)
+  {
+    assert(queue->head != queue->tail);
+  }
+  else
+  {
+    assert(queue->head == queue->tail);
+  }
+}
+
+void cs_fqdelete(cs_fqueue *queue)
+{
+  assert(queue);
+  assert(queue->ele > 0);
+
+  if (queue->ele > 1)
+  {
+    assert(queue->head != queue->tail);
+  }
+
+  /* Delete from the head of the queue */     
+  queue->head = (queue->head + 1) % queue->size;
+  queue->ele -= 1;
+
+  if (queue->ele <= 1)
+  {
+    if (queue->ele == 0)
+    {
+      queue->tail = -1;
+      queue->head = -1;
+    }
+
+    assert(queue->head == queue->tail);
+  }
+}
+
+ub1 cs_fqfull(cs_fqueue *queue)
+{
+  if (queue->ele == queue->size)
+  {
+    assert((queue->tail + 1) % queue->size == queue->head);
+  }
+
+  return (queue->ele == queue->size);
+}
+
+ub1 cs_fqempty(cs_fqueue *queue)
+{
+  if (queue->ele == 0) 
+  {
+    assert(queue->head == queue->tail);
+  }
+
+  return (queue->ele == 0);
+}
+
 /* Returns true if list is empty */
 ub1 cs_qempty(cs_qnode *head)
 {

@@ -40,7 +40,7 @@ ub1 attilaStreamName[TU][40] =
   };
 
 /* Unit names */
-sb1 *stream_names[TST + 1] = {"U", "I", "C", "Z", "T", "N", "H", "B", "D", "X", "P"};
+sb1 *stream_names[TST + 1] = {"U", "I", "C", "Z", "T", "N", "H", "B", "D", "X", "P0", "P1", "P2", "P3"};
 
 int gcd_ab(int a,int b)
 {

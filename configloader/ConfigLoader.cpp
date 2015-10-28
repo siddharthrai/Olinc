@@ -379,6 +379,12 @@ bool ConfigLoader::parseLCSectionParameter(LChParameters *lcP)
     if (!parseBooleanParameter("GpuFillEnable", id, lcP->gpuFillEnable))
         return FALSE;
 
+    if (!parseBooleanParameter("DRAMSimEnable", id, lcP->dramSimEnable))
+        return FALSE;
+
+    if (!parseStringParameter("DRAMConfigFile", id, lcP->dramSimConfigFile))
+        return FALSE;
+
     if ( !paramsTracker.wasAnyParamSectionDefined() ) {
         stringstream ss;
         ss << "Parameter '" << id << "' in section [LLC] is not supported";

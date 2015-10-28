@@ -650,6 +650,7 @@ typedef struct memory_trace
 #define CACHE_ACCESS_HIT  (1)
 #define CACHE_ACCESS_MISS (2)
 #define CACHE_ACCESS_RPLC (3)
+#define CACHE_ACCESS_NACK (4)
 
 /* This structure is used for cache access */
 typedef struct cache_access_status
@@ -689,6 +690,17 @@ typedef struct cache_access_info
   ub1 ctuse;        /* TRUE if block is sampled by texture */
   ub1 rrpv_trans;   /* TRUE if block is spilled by blitter */
 }cache_access_info;
+
+/* Speedup hints */
+typedef enum speedup_stream_type
+{
+  speedup_stream_u = 0,
+  speedup_stream_x,
+  speedup_stream_y,
+  speedup_stream_p,
+  speedup_stream_q,
+  speedup_stream_r
+}speedup_stream_type;
 
 int gcd_ab(int a, int b);
 

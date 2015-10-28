@@ -87,14 +87,16 @@ struct LChParameters
   bool  speedupEnabled;         /* True, if speedup hints are used */
   bool  useStep;                /* True, if step function is to be used in sappridepri policy */
   bool  pinBlocks;              /* True, SARP blocks are pinned */
-  ub4   shctSize;
-  ub4   signSize;
-  ub4   coreSize;
-  ub4   entrySize;
-  bool  useMem;
-  bool  usePc;
-  bool  cpuFillEnable;
-  bool  gpuFillEnable;
+  ub4   shctSize;               /* Ship counter table size */
+  ub4   signSize;               /* Ship sign size */
+  ub4   coreSize;               /* Log of core count */
+  ub4   entrySize;              /* Ship signature entry size */
+  bool  useMem;                 /* If true, shipmem is used */
+  bool  usePc;                  /* If true, shippc is used */
+  bool  cpuFillEnable;          /* If true, CPU fill is enable in SARP */
+  bool  gpuFillEnable;          /* If true, GPU fill is enable in SARP */
+  bool  dramSimEnable;          /* If true, DRAMSim is enable */
+  sb1  *dramSimConfigFile;      /* DRAMSim config file */
   enum  cache_policy_t policy;  /* Cache policy */
 };
 

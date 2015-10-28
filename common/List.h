@@ -16,11 +16,21 @@ struct cs_qnode;
 
 typedef struct cs_qnode
 {
-  ub1      *data; /* Node data */
-  struct cs_qnode *next; /* Next node */
-  struct cs_qnode *prev; /* Previous node */
+  ub1      *data;         /* Node data */
+  struct cs_qnode *next;  /* Next node */
+  struct cs_qnode *prev;  /* Previous node */
 }cs_qnode;
   
+/* Fixed size queue */
+typedef struct cs_fixed_queue
+{
+  ub4       size;         /* Queue size */
+  sb4       head;         /* Head node */
+  sb4       tail;         /* Tail node */
+  ub4       ele;          /* Elements */
+  cs_qnode *queue;        /* Queue head */
+}cs_fqueue;
+
 /* Node used in key based data structures */
 typedef struct cs_knode
 {
@@ -39,6 +49,22 @@ EXPORT_C ub1*      cs_qdequeue(cs_qnode *head);
 EXPORT_C void      attila_map_insert(cs_qnode *htbl, ub8 key, ub8 skey, ub1* data);
 EXPORT_C ub1*      attila_map_lookup(cs_qnode *htbl, ub8 key, ub8 skey);
 EXPORT_C void      attila_map_delete(cs_qnode *htbl, ub8 key, ub8 skey);
+
+
+/* Initialize a fixed size queue */
+EXPORT_C cs_fqueue* cs_fqinit(ub4 size);
+
+/* Insert a new element in the queue */
+EXPORT_C void cs_fqinsert(cs_fqueue *queue, ub1 *data);
+
+/* Delete an element from the queue */
+EXPORT_C void cs_fqdelete(cs_fqueue *queue);
+
+/* Check if queue is full */
+EXPORT_C ub1 cs_fqfull(cs_fqueue *queue);
+
+/* Check if queue is empty */
+EXPORT_C ub1 cs_fqempty(cs_fqueue *queue);
 
 #undef EXPORT_C
 

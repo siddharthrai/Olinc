@@ -58,6 +58,7 @@ struct cache_params
   ub1     sarp_pin_blocks;        /* If true, blocks are pinned */
   ub1     sarp_cpu_fill_enable;   /* If true, blocks are pinned */
   ub1     sarp_gpu_fill_enable;   /* If true, blocks are pinned */
+  ub1     dramsim_enable;         /* If true, DRAM is modelled */
   ub1     speedup_enabled;        /* If true, speedup hints are used */
 };
 

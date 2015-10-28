@@ -995,10 +995,10 @@ void cache_fill_block( struct cache_t *cache, int set, int way,
       cache_fill_block_drrip(CACHE_SET_DATA_DRRIP(CACHE_SET(cache, set)), 
           CACHE_DRRIP_GDATA(cache), way, tag, state, stream, info);
 
+#if 0
       /* For verification */
       DRRIPUpdateOnMiss(&(cache->drrip_policy), set);
       DRRIPUpdateOnFill(&(cache->drrip_policy), set, way);
-#if 0
       assert(SAT_CTR_VAL(CACHE_DRRIP_GDATA(cache)->psel) == cache->drrip_policy._DIPchooser);
       assert(SAT_CTR_VAL(CACHE_DRRIP_GDATA(cache)->brrip.access_ctr) == cache->drrip_policy._BIPcounter);
 #endif
@@ -1218,9 +1218,10 @@ void cache_access_block(struct cache_t *cache, int set, int way, int stream,
     case cache_policy_drrip:
       cache_access_block_drrip(CACHE_SET_DATA_DRRIP(CACHE_SET(cache, set)), 
         CACHE_DRRIP_GDATA(cache), way, stream, info);
-
+#if 0
       /* For verification */
       DRRIPUpdateOnHit(&(cache->drrip_policy), set, way);
+#endif
       break;
 
     case cache_policy_sapsimple:
@@ -1413,7 +1414,9 @@ int cache_replace_block(struct cache_t *cache, int set, memory_trace *info)
       return cache_replace_block_brrip(CACHE_SET_DATA_BRRIP(CACHE_SET(cache, set)), info);
 
     case cache_policy_drrip:
+#if 0
       DRRIPGetReplacementCandidate(&(cache->drrip_policy), set, &verified_way);
+#endif
       new_way = cache_replace_block_drrip(CACHE_SET_DATA_DRRIP(CACHE_SET(cache, set)),
         CACHE_DRRIP_GDATA(cache), info);
 #if 0
