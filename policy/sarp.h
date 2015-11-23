@@ -150,10 +150,10 @@ typedef struct sampler_entry
   ub1 *stream;        /* Id of the last stream to access this block */
   ub1 *valid;         /* Valid or invalid */
   ub1 *hit_count;     /* Current reuse epoch id */
-  ub1 *dynamic_color; /* True, if dynamic cs */
-  ub1 *dynamic_depth; /* True, if dynamic zs */
-  ub1 *dynamic_blit;  /* True, if dynamic bs */
-  ub1 *dynamic_proc;  /* True, if dynamic ps */
+  ub1 *dynamic_color; /* True, if dynamic CS */
+  ub1 *dynamic_depth; /* True, if dynamic ZS */
+  ub1 *dynamic_blit;  /* True, if dynamic BS */
+  ub1 *dynamic_proc;  /* True, if dynamic PS */
 }sampler_entry;
 
 /*
@@ -170,8 +170,8 @@ typedef struct sampler_cache
   ub1             log_block_size;           /* Log of sampler entry size */
   ub8             epoch_length;             /* Length of sampler epoch */
   ub8             epoch_count;              /* Total epochs seen by the sampler */
-  ub4             stream_occupancy[TST + 1];/* Block arrary */
-  sampler_entry **blocks;                   /* Block arrary */
+  ub4             stream_occupancy[TST + 1];/* Block array */
+  sampler_entry **blocks;                   /* Block array */
   sampler_perfctr perfctr;                  /* Performance counter used in sampler */
 }sampler_cache;
 

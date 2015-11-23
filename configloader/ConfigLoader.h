@@ -96,7 +96,9 @@ struct LChParameters
   bool  cpuFillEnable;          /* If true, CPU fill is enable in SARP */
   bool  gpuFillEnable;          /* If true, GPU fill is enable in SARP */
   bool  dramSimEnable;          /* If true, DRAMSim is enable */
+  bool  dramSimTrace;          /* If true, DRAMSim is enable */
   sb1  *dramSimConfigFile;      /* DRAMSim config file */
+  sb1  *dramPriorityStream;     /* DRAMSim priority stream */
   enum  cache_policy_t policy;  /* Cache policy */
 };
 

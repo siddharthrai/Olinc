@@ -98,14 +98,15 @@ void Rank::receiveFromBus(BusPacket *packet) {
         switch (packet->busPacketType)
         {
                 case READ:
+
                         //make sure a read is allowed
                         if (bankStates[packet->bank].currentBankState != RowActive ||
                             currentClockCycle < bankStates[packet->bank].nextRead ||
                             packet->row != bankStates[packet->bank].openRowAddress)
                         {
-                                packet->print();
-                                ERROR("== Error - Rank " << id << " received a READ when not allowed");
-                                exit(0);
+                          packet->print();
+                          ERROR("== Error - Rank " << id << " received a READ when not allowed");
+                          exit(0);
                         }
 
                         //update state table
@@ -240,6 +241,7 @@ void Rank::receiveFromBus(BusPacket *packet) {
                                         bankStates[i].nextActivate = max(bankStates[i].nextActivate, currentClockCycle + tRRD);
                                 }
                         }
+
                         delete(packet);
                         break;
                 case PRECHARGE:

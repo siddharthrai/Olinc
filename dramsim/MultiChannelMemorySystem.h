@@ -45,10 +45,11 @@ namespace DRAMSim
 
                 MultiChannelMemorySystem(const string &dev, const string &sys, const string &pwd, const string &trc, unsigned megsOfMemory, string *visFilename = NULL, const IniReader::OverrideMap *paramOverrides = NULL);
                 virtual ~MultiChannelMemorySystem();
+                void setPriorityStream(ub1 stream);
                 bool addTransaction(Transaction *trans);
                 bool addTransaction(bool isWrite, uint64_t addr, char stream, speedup_stream_type stream_type);
-                bool willAcceptTransaction(uint64_t addr);
-                bool willAcceptTransaction(unsigned chan);
+                bool willAcceptTransaction(uint64_t addr, bool isWrite, char stream);
+                bool willAcceptTransaction(unsigned chan, bool isWrite, char stream);
                 void update();
                 void printStats(bool finalStats = false, char *file_name = NULL);
                 ostream &getLogFile();
@@ -58,7 +59,7 @@ namespace DRAMSim
                                        void (*reportPower)(double bgpower, double burstpower, double refreshpower, double actprepower));
 
                 void InitOutputFiles(string tracefilename);
-                unsigned findChannelNumber(uint64_t addr);
+                unsigned findChannelNumber(uint64_t addr, char stream);
 
                 //output file
                 std::ofstream visDataOut;

@@ -282,7 +282,10 @@ typedef enum cache_policy_t
         cache_policy_sarp,
 
         /* SRRIPBYPASS policy */
-        cache_policy_srripbypass
+        cache_policy_srripbypass,
+
+        /* SRRIPBYPASS policy */
+        cache_policy_srriphint
 }cache_policy_t;
 
 typedef struct list_head_t

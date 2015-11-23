@@ -1330,6 +1330,7 @@ int cache_get_fill_rrpv_sarp(sarp_data *policy_data, sarp_gdata *global_data,
   if (GPU_STREAM(info->stream))
   {
 #define CHK_SCRTCL(g, i) ((g)->speedup_enabled ? CRITICAL_STREAM(g, i) : TRUE)
+
     if (CHK_SCRTCL(global_data, info))
     {
       if (RRPV1(perfctr, strm) || RRPV2(perfctr, strm))
@@ -2483,6 +2484,7 @@ void cache_fill_block_sarp(sarp_data *policy_data,
 
         /* Reset sampler cache and epoch length */
         sampler_cache_reset(global_data, global_data->sampler);
+
         (global_data->sampler)->epoch_length = 0;
 
         printf("\nPriority hints : speedup stream %d\n", global_data->speedup_stream);

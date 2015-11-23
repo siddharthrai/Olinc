@@ -476,34 +476,7 @@ int cache_get_fill_rrpv_brrip(brrip_data *policy_data,
        * value is 0. */
       if (CTR_VAL(global_data) == 0)
       {
-#if 0
-        /* If epoch counter are valid use them to decide fill RRPV */
-        if (policy_data->use_epoch && VALID_EPOCH(global_data, info))
-        {
-          assert(global_data->epoch_fctr[info->stream]);
-          assert(global_data->epoch_hctr[info->stream]);
-
-#define FILL_VAL(g, i, e)  (SAT_CTR_VAL((g)->epoch_fctr[(i)->stream][e]))
-#define HIT_VAL(g, i, e)   (SAT_CTR_VAL((g)->epoch_hctr[(i)->stream][e]))
-
-          if (FILL_VAL(global_data, info, epoch) >  32 * HIT_VAL(global_data, info, epoch))
-          {
-            new_rrpv = BRRIP_DATA_MAX_RRPV(policy_data);
-          }
-          else
-          {
-            new_rrpv = BRRIP_DATA_MAX_RRPV(policy_data) - 1;
-          }
-
-#undef FILL_VAL
-#undef FIT_VAL
-
-        }
-        else
-#endif
-        {
-          new_rrpv = BRRIP_DATA_MAX_RRPV(policy_data) - 1;
-        }
+        new_rrpv = BRRIP_DATA_MAX_RRPV(policy_data) - 1;
       }
       else
       {

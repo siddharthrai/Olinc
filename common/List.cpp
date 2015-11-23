@@ -173,7 +173,7 @@ ub8 cs_qsize(cs_qnode *head)
    
   assert(head);
 
-  for (i = head->next; i != NULL; i = i->next)
+  for (i = head->next; i != head; i = i->next)
   {
     ncnt++;
   }

@@ -63,11 +63,12 @@ namespace DRAMSim
                 void update();
                 bool addTransaction(Transaction *trans);
                 bool addTransaction(bool isWrite, uint64_t addr, char stream, speedup_stream_type stream_type);
+                void setPriorityStream(ub1 stream);
                 void printStats(bool finalStats);
                 void printShortStats(char *file_name);
                 void printShortOverallStats(char *file_name);
                 void printShortOverallStatsPerStream(char *file_name);
-                bool WillAcceptTransaction();
+                bool WillAcceptTransaction(bool isWrite, char stream);
                 void RegisterCallbacks(
                                        Callback_t *readDone,
                                        Callback_t *writeDone,

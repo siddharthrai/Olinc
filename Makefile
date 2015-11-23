@@ -1,16 +1,20 @@
 CXX      =g++
 CXXFLAGS =-O0 -funroll-all-loops -funroll-loops -Wall -g
 
+ifdef PROF
+  CXXFLAGS += -pg
+endif
+
 CC      = gcc
 CCFLAGS = -O0 -funroll-all-loops -funroll-loops -std=c99 -Wall -g
 
 DEPDIR = .deps
 BINDIR = bin
-ALLCXXSOURCES  = $(wildcard *.cpp statisticsmanager/*.cpp configloader/*.cpp support/*.cpp common/*.cpp)
+ALLCXXSOURCES  = $(wildcard *.cpp statisticsmanager/*.cpp configloader/*.cpp support/*.cpp common/*.cpp dramsim/*.cpp)
 CXXSOURCES  = $(filter-out cache-sim.cpp optimal.cpp, $(ALLCXXSOURCES))
 CSOURCES = $(wildcard *.c libmhandle/*.c cache/*.c policy/*.c)
-C_INC_DIR     = . common libmhandle policy cache
-CXX_INC_DIR   = . common statisticsmanager configloader support
+C_INC_DIR     = . common libmhandle policy cache dramsim
+CXX_INC_DIR   = . common statisticsmanager configloader support dramsim
 
 PROGRAM_TARGET = cache-sim
 
@@ -19,8 +23,9 @@ CXXINCLUDES = $(CXX_INC_DIR:%=-I %)
 
 CXXOBJECTS  = $(CXXSOURCES:%.cpp=%.o)
 COBJECTS    = $(CSOURCES:%.c=%.o)
+LIBS_DIR    = ./lib/
 
-LIBS=-lz -lm
+LIBS=-lz -lm -ldram
 
 .PHONY: all clean
 
@@ -42,10 +47,10 @@ all : $(DEPDIR) $(COBJECTS) $(CXXOBJECTS) $(PROGRAM_TARGET)
 	mv $*.d $(DEPDIR)
 
 optimal: $(DEPS) optimal.o $(CXXOBJECTS) $(COBJECTS) $(PROGRAM_DEPS)
-	$(CXX) -o $(BINDIR)/$@ $(COBJECTS) $(CXXOBJECTS) optimal.o $(CXXFLAGS) $(LIBS)
+	$(CXX) -o $(BINDIR)/$@ $(COBJECTS) $(CXXOBJECTS) optimal.o $(CXXFLAGS) -L$(LIBS_DIR) $(LIBS)
 
 cache-sim: $(DEPS) cache-sim.o $(CXXOBJECTS) $(COBJECTS) $(PROGRAM_DEPS)
-	$(CXX) -o $(BINDIR)/$@ $(COBJECTS) $(CXXOBJECTS) cache-sim.o $(CXXFLAGS) $(LIBS)
+	$(CXX) -o $(BINDIR)/$@ $(COBJECTS) $(CXXOBJECTS) cache-sim.o $(CXXFLAGS) -L$(LIBS_DIR) $(LIBS)
 
 -include $(SRCS:%.cpp=$(DEPDIR)/%.d)
 

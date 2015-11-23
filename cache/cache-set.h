@@ -40,6 +40,7 @@
 #include "sappriority.h"
 #include "sappridepri.h"
 #include "srripbypass.h"
+#include "srriphint.h"
 #include "ship.h"
 #include "sarp.h"
 #include "cache-block.h"
@@ -85,6 +86,7 @@
 #define CACHE_SET_DATA_SHIP(cache_set)        (&(((cache_set)->policy_data).ship))
 #define CACHE_SET_DATA_SARP(cache_set)        (&(((cache_set)->policy_data).sarp))
 #define CACHE_SET_DATA_SRRIPBYPASS(cache_set) (&(((cache_set)->policy_data).srripbypass))
+#define CACHE_SET_DATA_SRRIPHINT(cache_set)   (&(((cache_set)->policy_data).srriphint))
 
 struct cache_set_t
 {
@@ -131,6 +133,7 @@ struct cache_set_t
     ship_data         ship;
     sarp_data         sarp;
     srripbypass_data  srripbypass;
+    srriphint_data    srriphint;
   }policy_data;
 };
 

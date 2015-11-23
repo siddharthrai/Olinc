@@ -169,8 +169,8 @@ namespace DRAMSim
         }
 
 
-        bool MemorySystem::WillAcceptTransaction() {
-                return memoryController->WillAcceptTransaction();
+        bool MemorySystem::WillAcceptTransaction(bool isWrite, char stream) {
+                return memoryController->WillAcceptTransaction(isWrite, stream);
         }
 
 
@@ -190,7 +190,11 @@ namespace DRAMSim
         }
 
         //prints statistics
-
+        
+        void MemorySystem::setPriorityStream(ub1 stream)
+        {
+          memoryController->setPriorityStream(stream);
+        }
 
         void MemorySystem::printShortStats(char *file_name) 
         {

@@ -169,7 +169,7 @@ int dramsim_init(const char *deviceIniFilename, unsigned int megsOfMemory, unsig
 
         /* ADDRESS_MAPPING_SCHEME : valid schemes 1-8; For multiple independent 
          * channels, use scheme7 since it has the most parallelism  */
-        (kv_map)[string("ADDRESS_MAPPING_SCHEME")] = string("scheme8");
+        //(kv_map)[string("ADDRESS_MAPPING_SCHEME")] = string("scheme8");
 
         /* SCHEDULING_POLICY : bank_then_rank_round_robin or rank_then_bank_round_robin */
         (kv_map)[string("SCHEDULING_POLICY")] = string("bank_then_rank_round_robin");
@@ -327,14 +327,14 @@ void dramsim_stats(char *file_name) {
 
 
 extern "C"
-unsigned int dramsim_controller(uint64_t addr) {
-        return memSystem->findChannelNumber(addr);
+unsigned int dramsim_controller(uint64_t addr, char stream) {
+        return memSystem->findChannelNumber(addr, stream);
 }
 
 
 extern "C"
-int dramsim_will_accept_request(uint64_t addr) {
-        return memSystem->willAcceptTransaction(addr) ? 1 : 0;
+int dramsim_will_accept_request(uint64_t addr, bool isWrite, char stream) {
+        return memSystem->willAcceptTransaction(addr, isWrite, stream) ? 1 : 0;
 }
 
 #if 0
@@ -359,14 +359,30 @@ void dramsim_request_wait(uint64_t addr, int event, void *stack) {
 extern "C"
 void dramsim_request(int isWrite, uint64_t addr, char stream, memory_trace *info) {
         bool result;
-
+#if 0
+        if (info->stream != PS)
+#endif
+        {
         result = memSystem->addTransaction(isWrite ? true : false, addr, stream, (speedup_stream_type)(info->sap_stream));
-        assert(result);
+       assert(result);
 
-        receiver->add_pending(isWrite, addr, info);
+       receiver->add_pending(isWrite, addr, info);
+        }
+#if 0
+        else
+        {
+          receiver->requestCompleted(info);
+        }
+#endif
 }
 
 extern "C" memory_trace* dram_response()
 {
         return receiver->getNextCompleted();
+}
+
+extern "C"
+void dramsim_set_priority_stream(ub1 stream)
+{
+  memSystem->setPriorityStream(stream);
 }

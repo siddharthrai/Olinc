@@ -71,7 +71,13 @@ refreshRank(0) {
         currentClockCycle = 0;
 
         //reserve memory for vectors
-        transactionQueue.reserve(TRANS_QUEUE_DEPTH);
+        read_transactionQueue.reserve(TRANS_QUEUE_DEPTH);
+        write_transactionQueue.reserve(TRANS_QUEUE_DEPTH);
+        priority_transactionQueue.reserve(TRANS_QUEUE_DEPTH);
+
+        write_drain = false;
+        priority_stream = NN;
+
         powerDown = vector<bool>(NUM_RANKS, false);
         grandTotalBankAccesses = vector<uint64_t > (NUM_RANKS*NUM_BANKS, 0);
         totalReadsPerBank = vector<uint64_t > (NUM_RANKS*NUM_BANKS, 0);
@@ -370,6 +376,7 @@ void MemoryController::update() {
                                         bankStates[rank][bank].nextRead = bankStates[rank][bank].nextActivate;
                                         bankStates[rank][bank].nextWrite = bankStates[rank][bank].nextActivate;
                                 }
+                                
 
                                 break;
                         case WRITE_P:
@@ -443,6 +450,7 @@ void MemoryController::update() {
                                 }
                                 actpreEnergy[rank] += ((IDD0 * tRC) - ((IDD3N * tRAS) + (IDD2N * (tRC - tRAS)))) * NUM_DEVICES;
 
+
                                 bankStates[rank][bank].currentBankState = RowActive;
                                 bankStates[rank][bank].lastCommand = ACTIVATE;
                                 bankStates[rank][bank].openRowAddress = poppedBusPacket->row;
@@ -509,20 +517,57 @@ void MemoryController::update() {
                 cmdCyclesLeft = tCMD;
 
         }
+        
+        vector <Transaction *> *transactionQueue;
+        
+#define HIGH_WM (2 * TRANS_QUEUE_DEPTH / 3)
+#define LOW_WM  (TRANS_QUEUE_DEPTH / 3)
 
-        for (size_t i = 0; i < transactionQueue.size(); i++)
+        /* Select a queue to dequeue a request */
+        if (write_transactionQueue.size() >= HIGH_WM || 
+            (!read_transactionQueue.size() && !priority_transactionQueue.size()))
+        {
+           write_drain = true;
+        }
+        else
+        {
+          if (write_transactionQueue.size() < LOW_WM && 
+              (read_transactionQueue.size() || priority_transactionQueue.size()))
+          {
+            write_drain = false;
+          }
+        }
+
+#undef HIGH_WM
+#undef LOW_WM
+
+        transactionQueue = &read_transactionQueue;
+
+        if (write_drain)
+        {
+          transactionQueue = &write_transactionQueue;   
+        }
+        else
+        {
+          if (priority_transactionQueue.size())
+          {
+            transactionQueue = &priority_transactionQueue;   
+          }
+        }
+
+        for (size_t i = 0; i < transactionQueue->size(); i++)
         {
                 //pop off top transaction from queue
                 //
                 //	assuming simple scheduling at the moment
                 //	will eventually add policies here
-                Transaction *transaction = transactionQueue[i];
+                Transaction *transaction = (*transactionQueue)[i];
 
                 //map address to rank,bank,row,col
                 unsigned newTransactionChan, newTransactionRank, newTransactionBank, newTransactionRow, newTransactionColumn;
 
                 // pass these in as references so they get set by the addressMapping function
-                addressMapping(transaction->address, newTransactionChan, newTransactionRank, newTransactionBank, newTransactionRow, newTransactionColumn);
+                addressMapping(transaction->address, newTransactionChan, newTransactionRank, newTransactionBank, newTransactionRow, newTransactionColumn, transaction->stream);
 
                 //if we have room, break up the transaction into the appropriate commands
                 //and add them to the command queue
@@ -548,7 +593,7 @@ void MemoryController::update() {
 
 
                         //now that we know there is room in the command queue, we can remove from the transaction queue
-                        transactionQueue.erase(transactionQueue.begin() + i);
+                        transactionQueue->erase(transactionQueue->begin() + i);
 
                         //create activate command to the row we just translated
                         BusPacket *ACTcommand = new BusPacket(ACTIVATE, transaction->address, transaction->stream,
@@ -721,7 +766,7 @@ void MemoryController::update() {
                                 //		exit(0);
                                 //	}
                                 unsigned chan, rank, bank, row, col;
-                                addressMapping(returnTransaction[0]->address, chan, rank, bank, row, col);
+                                addressMapping(returnTransaction[0]->address, chan, rank, bank, row, col, pendingReadTransactions[i]->stream);
                                 insertHistogram(currentClockCycle - pendingReadTransactions[i]->timeAdded, returnTransaction[0]->stream, rank, bank);
                                 //return latency
                                 returnReadData(pendingReadTransactions[i]);
@@ -753,9 +798,9 @@ void MemoryController::update() {
         if (DEBUG_TRANS_Q)
         {
                 PRINT("== Printing transaction queue");
-                for (size_t i = 0; i < transactionQueue.size(); i++)
+                for (size_t i = 0; i < transactionQueue->size(); i++)
                 {
-                        PRINTN("  " << i << "] " << *transactionQueue[i]);
+                        PRINTN("  " << i << "] " << *((*transactionQueue)[i]));
                 }
         }
 
@@ -802,18 +847,58 @@ void MemoryController::update() {
 }
 
 
-bool MemoryController::WillAcceptTransaction() {
+bool MemoryController::WillAcceptTransaction(bool isWrite, char stream) {
+
+#if 0
+        return read_transactionQueue.size() < TRANS_QUEUE_DEPTH;
+
         return transactionQueue.size() < TRANS_QUEUE_DEPTH;
+#endif
+
+        if (isWrite)
+        {
+          return (write_transactionQueue.size() < TRANS_QUEUE_DEPTH);
+        }
+        else
+        {
+          if (stream == priority_stream)
+          {
+            return (priority_transactionQueue.size() < TRANS_QUEUE_DEPTH);
+          }
+          else
+          {
+            return (read_transactionQueue.size() < TRANS_QUEUE_DEPTH);
+          }
+        }
 }
 
 //allows outside source to make request of memory system
 
 
 bool MemoryController::addTransaction(Transaction *trans) {
-        if (WillAcceptTransaction())
+        if (WillAcceptTransaction(trans->transactionType == DATA_WRITE, trans->stream))
         {
                 trans->timeAdded = currentClockCycle;
-                transactionQueue.push_back(trans);
+
+                if (trans->transactionType == DATA_WRITE)
+                {
+                  write_transactionQueue.push_back(trans);
+                }
+                else
+                {
+                  if (trans->stream == priority_stream)
+                  {
+                    priority_transactionQueue.push_back(trans);
+                  }
+                  else
+                  {
+                    read_transactionQueue.push_back(trans);
+                  }
+                }
+#if 0
+                read_transactionQueue.push_back(trans);
+#endif
+
                 return true;
         }
         else
@@ -822,6 +907,10 @@ bool MemoryController::addTransaction(Transaction *trans) {
         }
 }
 
+void MemoryController::setPriorityStream(ub1 stream)
+{
+  priority_stream = stream;
+}
 
 void MemoryController::resetStats() {
         for (size_t i = 0; i < NUM_RANKS; i++)
@@ -908,15 +997,21 @@ void MemoryController::printShortOverallStats(char *file_name_in)
   {
       for (size_t r = 0; r < NUM_RANKS; r++)
       {
-
           for (size_t b = 0; b < NUM_BANKS; b++)
           {
             read    += (*(totalReadsPerBankPerStream[s]))[SEQUENTIAL(r, b)];
             write   += (*(totalWritesPerBankPerStream[s]))[SEQUENTIAL(r, b)];
-            hit     += (*(totalRowHitsPerBankPerStream[s]))[SEQUENTIAL(r, b)];
-            latency += ((float) totalEpochLatency[SEQUENTIAL(r, b)] / (float) (totalReadsPerBank[SEQUENTIAL(r, b)])) * tCK;
+            hit     += (*(totalReadRowHitsPerBankPerStream[s]))[SEQUENTIAL(r, b)];
           }
       }
+  }
+
+  for (size_t r = 0; r < NUM_RANKS; r++)
+  {
+    for (size_t b = 0; b < NUM_BANKS; b++)
+    {
+      latency += ((float) totalEpochLatency[SEQUENTIAL(r, b)] / (float) (totalReadsPerBank[SEQUENTIAL(r, b)])) * tCK;
+    }
   }
 
   f << "Ranks = " << NUM_RANKS << "\n";
@@ -924,7 +1019,7 @@ void MemoryController::printShortOverallStats(char *file_name_in)
   f << "Read = " << read / (NUM_RANKS * NUM_BANKS * totalReadsPerBankPerStream.size())<< "\n";
   f << "Write = " << write / (NUM_RANKS * NUM_BANKS * totalReadsPerBankPerStream.size())<< "\n";
   f << "Hit = " << hit / (NUM_RANKS * NUM_BANKS * totalReadsPerBankPerStream.size()) << "\n";
-  f << "AvgLatency = " << latency / (NUM_RANKS * NUM_BANKS * totalReadsPerBankPerStream.size()) << "\n\n";
+  f << "AvgLatency = " << latency / (NUM_RANKS * NUM_BANKS) << "\n\n";
 
   f.close();
 }

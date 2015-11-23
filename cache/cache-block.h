@@ -128,6 +128,7 @@ struct cache_block_t
   long long    s_stream_use;    /* X stream use of block */ 
   int          last_rrpv;       /* Keeps track of last assigned RRPV */
   int          fill_rrpv;       /* Keeps track of fill RRPV */
+  long long    fill_bucket;     /* Bucket in which block is filled */
 
   /* Cache block busy flag. When set this flag instructs the cache
    * replacement policy to not evict the block as there is a request

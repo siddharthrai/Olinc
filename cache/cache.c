@@ -48,7 +48,7 @@ do                                                            \
  */
 
 struct str_map_t cache_policy_map = {
-        34,
+        35,
         {
                 { "BYPASS", cache_policy_bypass},
                 { "LRU", cache_policy_lru},
@@ -84,7 +84,8 @@ struct str_map_t cache_policy_map = {
                 { "CUSOMSRRIP", cache_policy_customsrrip},
                 { "SHIP", cache_policy_ship},
                 { "SARP", cache_policy_sarp},
-                { "SRRIPBYPASS", cache_policy_srripbypass}
+                { "SRRIPBYPASS", cache_policy_srripbypass},
+                { "SRRIPHINT", cache_policy_srriphint}
         }
 };
 
@@ -224,6 +225,11 @@ struct cache_t* cache_init(struct cache_params *params)
       case cache_policy_srrip:
         cache_init_srrip(set, params, CACHE_SET_DATA_SRRIP(cache_set), 
             CACHE_SRRIP_GDATA(cache));
+        break;
+
+      case cache_policy_srriphint:
+        cache_init_srriphint(set, params, CACHE_SET_DATA_SRRIPHINT(cache_set), 
+            CACHE_SRRIPHINT_GDATA(cache));
         break;
 
       case cache_policy_srripbypass:
@@ -519,6 +525,10 @@ void cache_free(struct cache_t *cache)
         cache_free_srrip(CACHE_SET_DATA_SRRIP(cache_set));
         break;
 
+      case cache_policy_srriphint:
+        cache_free_srriphint(CACHE_SET_DATA_SRRIPHINT(cache_set));
+        break;
+
       case cache_policy_srripbypass:
         cache_free_srripbypass(CACHE_SET_DATA_SRRIPBYPASS(cache_set));
         break;
@@ -726,6 +736,11 @@ struct cache_block_t * cache_find_block(struct cache_t *cache, int set,
       return cache_find_block_srrip(CACHE_SET_DATA_SRRIP(CACHE_SET(cache, set)), tag);
       break;
 
+    case cache_policy_srriphint:
+      return cache_find_block_srriphint(CACHE_SET_DATA_SRRIPHINT(CACHE_SET(cache, set)), 
+          CACHE_SRRIPHINT_GDATA(cache), tag);
+      break;
+
     case cache_policy_srripbypass:
       return cache_find_block_srripbypass(CACHE_SET_DATA_SRRIPBYPASS(CACHE_SET(cache, set)),
           CACHE_SRRIPBYPASS_GDATA(cache), info, tag);
@@ -924,6 +939,11 @@ void cache_fill_block( struct cache_t *cache, int set, int way,
     case cache_policy_srrip:
       cache_fill_block_srrip(CACHE_SET_DATA_SRRIP(CACHE_SET(cache, set)), 
           CACHE_SRRIP_GDATA(cache), way, tag, state, stream, info);
+      break;
+
+    case cache_policy_srriphint:
+      cache_fill_block_srriphint(CACHE_SET_DATA_SRRIPHINT(CACHE_SET(cache, set)), 
+          CACHE_SRRIPHINT_GDATA(cache), way, tag, state, stream, info);
       break;
 
     case cache_policy_srripbypass:
@@ -1150,6 +1170,11 @@ void cache_access_block(struct cache_t *cache, int set, int way, int stream,
           CACHE_SRRIP_GDATA(cache), way, stream, info);
       break;
 
+    case cache_policy_srriphint:
+      cache_access_block_srriphint(CACHE_SET_DATA_SRRIPHINT(CACHE_SET(cache, set)), 
+          CACHE_SRRIPHINT_GDATA(cache), way, stream, info);
+      break;
+
     case cache_policy_srripbypass:
       cache_access_block_srripbypass(CACHE_SET_DATA_SRRIPBYPASS(CACHE_SET(cache, set)), 
           CACHE_SRRIPBYPASS_GDATA(cache), way, stream, info);
@@ -1359,6 +1384,11 @@ int cache_replace_block(struct cache_t *cache, int set, memory_trace *info)
           CACHE_SRRIP_GDATA(cache), info);
       return new_way;
 
+    case cache_policy_srriphint:
+      new_way = cache_replace_block_srriphint(CACHE_SET_DATA_SRRIPHINT(CACHE_SET(cache, set)), 
+          CACHE_SRRIPHINT_GDATA(cache), info);
+      return new_way;
+
     case cache_policy_srripbypass:
       return cache_replace_block_srripbypass(CACHE_SET_DATA_SRRIPBYPASS(CACHE_SET(cache, set)), 
           CACHE_SRRIPBYPASS_GDATA(cache));
@@ -1551,6 +1581,10 @@ void cache_set_block(struct cache_t *cache, int set, int way, long long tag,
       return cache_set_block_srrip(CACHE_SET_DATA_SRRIP(CACHE_SET(cache, set)),
               way, tag, state, stream, info);
 
+    case cache_policy_srriphint:
+      return cache_set_block_srriphint(CACHE_SET_DATA_SRRIPHINT(CACHE_SET(cache, set)),
+              way, tag, state, stream, info);
+
     case cache_policy_srripbypass:
       return cache_set_block_srripbypass(CACHE_SET_DATA_SRRIPBYPASS(CACHE_SET(cache, set)),
               way, tag, state, stream, info);
@@ -1727,6 +1761,10 @@ struct cache_block_t cache_get_block(struct cache_t *cache, int set, int way,
 
     case cache_policy_srrip:
       return cache_get_block_srrip(CACHE_SET_DATA_SRRIP(CACHE_SET(cache, set)),
+        way, tag_ptr, state_ptr, stream_ptr);
+
+    case cache_policy_srriphint:
+      return cache_get_block_srriphint(CACHE_SET_DATA_SRRIPHINT(CACHE_SET(cache, set)),
         way, tag_ptr, state_ptr, stream_ptr);
 
     case cache_policy_srripbypass:

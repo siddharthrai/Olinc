@@ -674,7 +674,7 @@ bool CommandQueue::isIssuable(BusPacket *busPacket) {
                         }
                         else
                         {
-                          return false;
+                                return false;
                         }
                         break;
                 case PRECHARGE:

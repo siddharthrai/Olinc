@@ -32,7 +32,7 @@
 namespace DRAMSim
 {
         extern unsigned llcTagLowBitWidth;
-        void addressMapping(uint64_t physicalAddress, unsigned &channel, unsigned &rank, unsigned &bank, unsigned &row, unsigned &col);
+        void addressMapping(uint64_t physicalAddress, unsigned &channel, unsigned &rank, unsigned &bank, unsigned &row, unsigned &col, char stream);
 }
 
 #endif

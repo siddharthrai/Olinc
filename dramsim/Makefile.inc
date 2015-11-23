@@ -1,4 +1,4 @@
-FLAGS           = -msse2 -Wall -O0 -g
+FLAGS           = -msse2 -Wall
 
 ifeq ($(ENABLE_DEBUG),1)
         FLAGS = -Wall -Werror -Wno-unknown-pragmas -g -O0

@@ -63,11 +63,12 @@ namespace DRAMSim
                 virtual ~MemoryController();
 
                 bool addTransaction(Transaction *trans);
-                bool WillAcceptTransaction();
+                bool WillAcceptTransaction(bool isWrite, char stream);
                 void returnReadData(const Transaction *trans);
                 void receiveFromBus(BusPacket *bpacket);
                 void attachRanks(vector<Rank *> *ranks);
                 void update();
+                void setPriorityStream(ub1 stream);
                 void printStats(bool finalStats = false);
                 void printShortStats(char *file_name);
                 void printShortOverallStats(char *file_name);
@@ -76,7 +77,14 @@ namespace DRAMSim
 
 
                 //fields
-                vector<Transaction *> transactionQueue;
+                vector<Transaction *> read_transactionQueue;
+                vector<Transaction *> write_transactionQueue;
+                vector<Transaction *> priority_transactionQueue;
+                
+                // If true, writes are drained 
+                bool write_drain;
+                ub1  priority_stream;
+
         private:
                 ostream &dramsim_log;
                 vector< vector <BankState> > bankStates;

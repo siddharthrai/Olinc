@@ -36,12 +36,12 @@ void dramsim_stats(char *file_name);
 #ifdef __cplusplus
 extern "C"
 #endif
-unsigned int dramsim_controller(uint64_t addr);
+unsigned int dramsim_controller(uint64_t addr, char stream);
 
 #ifdef __cplusplus
 extern "C"
 #endif
-int dramsim_will_accept_request(uint64_t addr);
+int dramsim_will_accept_request(uint64_t addr, bool isWrite, char stream);
 
 #ifdef __cplusplus
 extern "C"
@@ -57,5 +57,10 @@ void dramsim_request(int isWrite, uint64_t addr, char stream, memory_trace *info
 extern "C"
 #endif
 memory_trace* dram_response();
+
+#ifdef __cplusplus
+extern "C"
+#endif
+void dramsim_set_priority_stream(ub1 stream);
 
 #endif

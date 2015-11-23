@@ -382,7 +382,13 @@ bool ConfigLoader::parseLCSectionParameter(LChParameters *lcP)
     if (!parseBooleanParameter("DRAMSimEnable", id, lcP->dramSimEnable))
         return FALSE;
 
+    if (!parseBooleanParameter("DRAMSimTrace", id, lcP->dramSimTrace))
+        return FALSE;
+
     if (!parseStringParameter("DRAMConfigFile", id, lcP->dramSimConfigFile))
+        return FALSE;
+
+    if (!parseStringParameter("PriorityStream", id, lcP->dramPriorityStream))
         return FALSE;
 
     if ( !paramsTracker.wasAnyParamSectionDefined() ) {
@@ -601,6 +607,14 @@ bool ConfigLoader::parseCachePolicy(char *paramName, char *id, enum cache_policy
         if (!strcmp(auxStr, "SRRIPBYPASS"))
         {
           val = cache_policy_srripbypass;
+
+          goto end;
+        }
+        
+        /*  Return boolean parameter.  */
+        if (!strcmp(auxStr, "SRRIPHINT"))
+        {
+          val = cache_policy_srriphint;
 
           goto end;
         }

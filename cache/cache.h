@@ -68,6 +68,7 @@ extern struct str_map_t cache_block_state_map;
 #define CACHE_SHIP_GDATA(cache)         (&(cache->policy_data.ship))
 #define CACHE_SARP_GDATA(cache)         (&(cache->policy_data.sarp))
 #define CACHE_SRRIPBYPASS_GDATA(cache)  (&(cache->policy_data.srripbypass))
+#define CACHE_SRRIPHINT_GDATA(cache)    (&(cache->policy_data.srriphint))
 
 struct cache_t
 {
@@ -111,6 +112,7 @@ struct cache_t
     ship_gdata        ship;
     sarp_gdata        sarp;
     srripbypass_gdata srripbypass;
+    srriphint_gdata   srriphint;
   }policy_data;
 
   struct cache_set_t *sets; /* Cache sets */

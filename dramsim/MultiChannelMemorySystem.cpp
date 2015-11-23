@@ -393,7 +393,7 @@ void MultiChannelMemorySystem::update() {
 }
 
 
-unsigned MultiChannelMemorySystem::findChannelNumber(uint64_t addr) {
+unsigned MultiChannelMemorySystem::findChannelNumber(uint64_t addr, char stream) {
         // Single channel case is a trivial shortcut case 
         if (NUM_CHANS == 1)
         {
@@ -409,7 +409,7 @@ unsigned MultiChannelMemorySystem::findChannelNumber(uint64_t addr) {
 
         // only chan is used from this set 
         unsigned channelNumber, rank, bank, row, col;
-        addressMapping(addr, channelNumber, rank, bank, row, col);
+        addressMapping(addr, channelNumber, rank, bank, row, col, stream);
         if (channelNumber >= NUM_CHANS)
         {
                 ERROR("Got channel index " << channelNumber << " but only " << NUM_CHANS << " exist");
@@ -428,16 +428,23 @@ ostream &MultiChannelMemorySystem::getLogFile() {
 
 
 bool MultiChannelMemorySystem::addTransaction(Transaction *trans) {
-        unsigned channelNumber = findChannelNumber(trans->address);
+        unsigned channelNumber = findChannelNumber(trans->address, trans->stream);
         return channels[channelNumber]->addTransaction(trans);
 }
 
 
 bool MultiChannelMemorySystem::addTransaction(bool isWrite, uint64_t addr, char stream, speedup_stream_type stream_type) {
-        unsigned channelNumber = findChannelNumber(addr);
+        unsigned channelNumber = findChannelNumber(addr, stream);
         return channels[channelNumber]->addTransaction(isWrite, addr, stream, stream_type);
 }
 
+void MultiChannelMemorySystem::setPriorityStream(ub1 stream)
+{
+        for (size_t i = 0; i < NUM_CHANS; i++)
+        {
+          channels[i]->setPriorityStream(stream);
+        }
+}
 
 /*
         This function has two flavors: one with and without the address. 
@@ -447,15 +454,15 @@ bool MultiChannelMemorySystem::addTransaction(bool isWrite, uint64_t addr, char 
         However, if the address is given, we can just map the channel and check just
         that memory controller
  */
-bool MultiChannelMemorySystem::willAcceptTransaction(uint64_t addr) {
+bool MultiChannelMemorySystem::willAcceptTransaction(uint64_t addr, bool isWrite, char stream) {
         unsigned chan, rank, bank, row, col;
-        addressMapping(addr, chan, rank, bank, row, col);
-        return channels[chan]->WillAcceptTransaction();
+        addressMapping(addr, chan, rank, bank, row, col, stream);
+        return channels[chan]->WillAcceptTransaction(isWrite, stream);
 }
 
 
-bool MultiChannelMemorySystem::willAcceptTransaction(unsigned chan) {
-        return channels[chan]->WillAcceptTransaction();
+bool MultiChannelMemorySystem::willAcceptTransaction(unsigned chan, bool isWrite, char stream) {
+        return channels[chan]->WillAcceptTransaction(isWrite, stream);
 }
 
 
