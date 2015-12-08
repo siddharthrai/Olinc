@@ -40,6 +40,7 @@
 #include "AddressMapping.h"
 #include <assert.h>
 #include <fstream>
+#include "../common/intermod-common.h"
 
 #define SEQUENTIAL(rank,bank)   (rank*NUM_BANKS)+bank
 #define PST_RANK_BANK           (NUM_RANKS * NUM_BANKS)
@@ -76,7 +77,7 @@ refreshRank(0) {
         priority_transactionQueue.reserve(TRANS_QUEUE_DEPTH);
 
         write_drain = false;
-        priority_stream = NN;
+        priorityStream = NN;
 
         powerDown = vector<bool>(NUM_RANKS, false);
         grandTotalBankAccesses = vector<uint64_t > (NUM_RANKS*NUM_BANKS, 0);
@@ -133,7 +134,8 @@ void MemoryController::receiveFromBus(BusPacket *bpacket) {
         }
 
         //add to return read data queue
-        returnTransaction.push_back(new Transaction(RETURN_DATA, bpacket->physicalAddress, bpacket->stream, bpacket->stream_type, bpacket->data));
+        returnTransaction.push_back(new Transaction(RETURN_DATA, bpacket->physicalAddress, bpacket->rowHit, 
+              bpacket->stream, bpacket->stream_type, bpacket->data));
         totalReadsPerBank[SEQUENTIAL(bpacket->rank, bpacket->bank)]++;
         (*(totalReadsPerBankPerStream[bpacket->stream]))[SEQUENTIAL(bpacket->rank, bpacket->bank)]++;
 
@@ -147,7 +149,7 @@ void MemoryController::receiveFromBus(BusPacket *bpacket) {
 void MemoryController::returnReadData(const Transaction *trans) {
         if (parentMemorySystem->ReturnReadData != NULL)
         {
-                (*parentMemorySystem->ReturnReadData)(parentMemorySystem->systemID, trans->address, currentClockCycle);
+                (*parentMemorySystem->ReturnReadData)(parentMemorySystem->systemID, trans->address, trans->rowHit, currentClockCycle);
         }
 }
 
@@ -221,7 +223,7 @@ void MemoryController::update() {
                         //inform upper levels that a write is done
                         if (parentMemorySystem->WriteDataDone != NULL)
                         {
-                                (*parentMemorySystem->WriteDataDone)(parentMemorySystem->systemID, outgoingDataPacket->physicalAddress, currentClockCycle);
+                                (*parentMemorySystem->WriteDataDone)(parentMemorySystem->systemID, outgoingDataPacket->physicalAddress, outgoingDataPacket->rowHit, currentClockCycle);
                         }
 
                         (*ranks)[outgoingDataPacket->rank]->receiveFromBus(outgoingDataPacket);
@@ -571,7 +573,7 @@ void MemoryController::update() {
 
                 //if we have room, break up the transaction into the appropriate commands
                 //and add them to the command queue
-                if (commandQueue.hasRoomFor(2, newTransactionRank, newTransactionBank))
+                if (commandQueue.hasRoomFor(2, newTransactionRank, newTransactionBank, transaction->stream_type == speedup_stream_x))
                 {
                         if (DEBUG_ADDR_MAP)
                         {
@@ -769,6 +771,7 @@ void MemoryController::update() {
                                 addressMapping(returnTransaction[0]->address, chan, rank, bank, row, col, pendingReadTransactions[i]->stream);
                                 insertHistogram(currentClockCycle - pendingReadTransactions[i]->timeAdded, returnTransaction[0]->stream, rank, bank);
                                 //return latency
+                                pendingReadTransactions[i]->rowHit = returnTransaction[0]->rowHit;
                                 returnReadData(pendingReadTransactions[i]);
 
                                 delete pendingReadTransactions[i];
@@ -849,27 +852,7 @@ void MemoryController::update() {
 
 bool MemoryController::WillAcceptTransaction(bool isWrite, char stream) {
 
-#if 0
         return read_transactionQueue.size() < TRANS_QUEUE_DEPTH;
-
-        return transactionQueue.size() < TRANS_QUEUE_DEPTH;
-#endif
-
-        if (isWrite)
-        {
-          return (write_transactionQueue.size() < TRANS_QUEUE_DEPTH);
-        }
-        else
-        {
-          if (stream == priority_stream)
-          {
-            return (priority_transactionQueue.size() < TRANS_QUEUE_DEPTH);
-          }
-          else
-          {
-            return (read_transactionQueue.size() < TRANS_QUEUE_DEPTH);
-          }
-        }
 }
 
 //allows outside source to make request of memory system
@@ -880,24 +863,7 @@ bool MemoryController::addTransaction(Transaction *trans) {
         {
                 trans->timeAdded = currentClockCycle;
 
-                if (trans->transactionType == DATA_WRITE)
-                {
-                  write_transactionQueue.push_back(trans);
-                }
-                else
-                {
-                  if (trans->stream == priority_stream)
-                  {
-                    priority_transactionQueue.push_back(trans);
-                  }
-                  else
-                  {
-                    read_transactionQueue.push_back(trans);
-                  }
-                }
-#if 0
                 read_transactionQueue.push_back(trans);
-#endif
 
                 return true;
         }
@@ -909,7 +875,9 @@ bool MemoryController::addTransaction(Transaction *trans) {
 
 void MemoryController::setPriorityStream(ub1 stream)
 {
-  priority_stream = stream;
+  priorityStream = stream;
+
+  commandQueue.setPriorityStream(stream);
 }
 
 void MemoryController::resetStats() {
@@ -1350,6 +1318,11 @@ void MemoryController::insertHistogram(unsigned latencyValue, char stream, unsig
         totalEpochLatencyPerStream[SEQUENTIAL_PST(stream, rank, bank)] += latencyValue;
         //poor man's way to bin things.
         latencies[(latencyValue / HISTOGRAM_BIN_SIZE) * HISTOGRAM_BIN_SIZE]++;
+}
+
+ub8 MemoryController::getOpenRow(unsigned rank, unsigned bank)
+{
+  return (ub8) bankStates[rank][bank].openRowAddress;
 }
 
 #undef SEQUENTIAL_PST

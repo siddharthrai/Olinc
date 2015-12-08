@@ -60,6 +60,7 @@ namespace DRAMSim
                 //fields
                 TransactionType transactionType;
                 uint64_t address;
+                bool     rowHit;
                 char     stream;
                 speedup_stream_type stream_type;
                 void *data;
@@ -69,7 +70,7 @@ namespace DRAMSim
 
                 friend ostream &operator<<(ostream &os, const Transaction &t);
                 //functions
-                Transaction(TransactionType transType, uint64_t addr, char stream, speedup_stream_type streamType, void *data);
+                Transaction(TransactionType transType, uint64_t addr, bool rowHit, char stream, speedup_stream_type streamType, void *data);
                 Transaction(const Transaction &t);
 
 

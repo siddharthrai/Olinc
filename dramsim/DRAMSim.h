@@ -63,4 +63,9 @@ extern "C"
 #endif
 void dramsim_set_priority_stream(ub1 stream);
 
+#ifdef __cplusplus
+extern "C"
+#endif
+ub8 dramsim_get_open_row(memory_trace *info);
+
 #endif

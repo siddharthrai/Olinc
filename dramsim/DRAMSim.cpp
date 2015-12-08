@@ -83,7 +83,7 @@ public:
           num_pending++;
         }
 
-        void read_complete(unsigned id, uint64_t address, uint64_t done_cycle) 
+        void read_complete(unsigned id, uint64_t address, bool rowHit, uint64_t done_cycle) 
         {
           memory_trace *info;
           Requests::iterator it;
@@ -93,6 +93,8 @@ public:
             fatal("DRAMSim : Cant find a pending read");
 
           info = pendingReadRequests[address].front();
+          
+          info->prefetch = rowHit;
 
           pendingReadRequests[address].pop_front();
 
@@ -102,7 +104,7 @@ public:
         }
 
 
-        void write_complete(unsigned id, uint64_t address, uint64_t done_cycle) 
+        void write_complete(unsigned id, uint64_t address, bool rowHit, uint64_t done_cycle) 
         {
           memory_trace *info;
           Requests::iterator it;
@@ -135,7 +137,7 @@ static unsigned numControllers;
 extern "C"
 int dramsim_init(const char *deviceIniFilename, unsigned int megsOfMemory, unsigned int num_controllers,
                  int trans_queue_depth, int _llcTagLowBitWidth) {
-        typedef Callback<Receiver, void, unsigned, uint64_t, uint64_t> ReceiverCallback;
+        typedef Callback<Receiver, void, unsigned, uint64_t, bool, uint64_t> ReceiverCallback;
         char buf[200];
 
         /* SystemIniFile variables are passed through OverrideMap.
@@ -359,21 +361,11 @@ void dramsim_request_wait(uint64_t addr, int event, void *stack) {
 extern "C"
 void dramsim_request(int isWrite, uint64_t addr, char stream, memory_trace *info) {
         bool result;
-#if 0
-        if (info->stream != PS)
-#endif
-        {
+        
         result = memSystem->addTransaction(isWrite ? true : false, addr, stream, (speedup_stream_type)(info->sap_stream));
-       assert(result);
+        assert(result);
 
-       receiver->add_pending(isWrite, addr, info);
-        }
-#if 0
-        else
-        {
-          receiver->requestCompleted(info);
-        }
-#endif
+        receiver->add_pending(isWrite, addr, info);
 }
 
 extern "C" memory_trace* dram_response()
@@ -385,4 +377,10 @@ extern "C"
 void dramsim_set_priority_stream(ub1 stream)
 {
   memSystem->setPriorityStream(stream);
+}
+
+extern "C"
+ub8 dramsim_get_open_row(memory_trace *info)
+{
+  return memSystem->getOpenRow(info->address);
 }

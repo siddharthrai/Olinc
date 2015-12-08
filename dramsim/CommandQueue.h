@@ -69,18 +69,25 @@ namespace DRAMSim
 
                 void enqueue(BusPacket *newBusPacket);
                 bool pop(BusPacket **busPacket);
-                bool hasRoomFor(unsigned numberToEnqueue, unsigned rank, unsigned bank);
+                bool hasRoomFor(unsigned numberToEnqueue, unsigned rank, unsigned bank, bool speedup);
                 bool isIssuable(BusPacket *busPacket);
                 bool isEmpty(unsigned rank);
                 void needRefresh(unsigned rank);
                 void print();
                 void update(); //SimulatorObject requirement
-                vector<BusPacket *> &getCommandQueue(unsigned rank, unsigned bank);
+                vector<BusPacket *> &getCommandQueue(unsigned rank, unsigned bank, bool speedup);
 
                 //fields
+                ub1 priorityStream;
 
                 BusPacket3D queues; // 3D array of BusPacket pointers
+                BusPacket3D speedup_queues; // 3D array of BusPacket pointers
                 vector< vector<BankState> > &bankStates;
+
+                void setPriorityStream(ub1 stream)
+                {
+                  priorityStream = stream;
+                }
         private:
                 void nextRankAndBank(unsigned &rank, unsigned &bank);
                 //fields

@@ -355,6 +355,9 @@ bool ConfigLoader::parseLCSectionParameter(LChParameters *lcP)
     if (!parseBooleanParameter("SpeedupEnabled", id, lcP->speedupEnabled))
         return FALSE;
 
+    if (!parseBooleanParameter("RemapCritical", id, lcP->remapCrtcl))
+        return FALSE;
+
     if (!parseDecimalParameter("ShctSize", id, lcP->shctSize))
         return FALSE;
 

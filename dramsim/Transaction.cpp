@@ -45,9 +45,10 @@ namespace DRAMSim
 {
 
 
-        Transaction::Transaction(TransactionType transType, uint64_t addr, char streamIn, speedup_stream_type streamType, void *dat) :
+        Transaction::Transaction(TransactionType transType, uint64_t addr, bool rowHit, char streamIn, speedup_stream_type streamType, void *dat) :
         transactionType(transType),
         address(addr),
+        rowHit(rowHit),
         stream(streamIn),
         stream_type(streamType),
         data(dat) {
@@ -57,6 +58,7 @@ namespace DRAMSim
         Transaction::Transaction(const Transaction &t)
         : transactionType(t.transactionType)
         , address(t.address)
+        , rowHit (t.rowHit)
         , stream (t.stream)
         , data(NULL)
         , timeAdded(t.timeAdded)

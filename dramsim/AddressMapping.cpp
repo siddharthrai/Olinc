@@ -468,7 +468,6 @@ namespace DRAMSim
                               << " Bank=" << newTransactionBank << " Row=" << newTransactionRow
                               << " Col=" << newTransactionColumn << "\n");
                 }
-
         }
 };
 

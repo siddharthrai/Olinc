@@ -61,6 +61,7 @@ struct cache_params
   ub1     dramsim_enable;         /* If true, DRAM is modelled */
   ub1     dramsim_trace;          /* If true, DRAM trace is used */
   ub1     speedup_enabled;        /* If true, speedup hints are used */
+  ub1     remap_crtcl;            /* If true, pages are remapped to critical rows */
 };
 
 #endif	/* MEM_SYSTEM_CACHE_H */

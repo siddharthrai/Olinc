@@ -85,6 +85,7 @@ struct LChParameters
   bool  useVa;                  /* True, if va is to be used */
   bool  useBs;                  /* True, if baseline samples are used */
   bool  speedupEnabled;         /* True, if speedup hints are used */
+  bool  remapCrtcl;             /* True, if pages are remapped to critical rows */
   bool  useStep;                /* True, if step function is to be used in sappridepri policy */
   bool  pinBlocks;              /* True, SARP blocks are pinned */
   ub4   shctSize;               /* Ship counter table size */

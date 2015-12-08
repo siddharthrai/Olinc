@@ -476,10 +476,11 @@ void MultiChannelMemorySystem::printStats(bool finalStats, char *file_name) {
                 channels[i]->printShortStats(file_name);
                 channels[i]->printShortOverallStats(file_name);
                 channels[i]->printShortOverallStatsPerStream(file_name);
-
+#if 0
                 PRINT("==== Channel [" << i << "] ====");
                 channels[i]->printStats(finalStats);
                 PRINT("//// Channel [" << i << "] ////");
+#endif
         }
         
         csvOut->finalize();
@@ -495,3 +496,12 @@ void MultiChannelMemorySystem::RegisterCallbacks(
                 channels[i]->RegisterCallbacks(readDone, writeDone, reportPower);
         }
 }
+
+ub8 MultiChannelMemorySystem::getOpenRow(ub8 address)
+{
+        unsigned chan, rank, bank, row, col;
+        addressMapping(address, chan, rank, bank, row, col, NN);
+
+        return channels[chan]->getOpenRow(rank, bank);
+}
+

@@ -3,6 +3,9 @@
 #include "inter-stream-reuse.h"
 #include "DRAMSim.h"
 
+#define INTERVAL_SIZE             (1 << 19)
+#define CYCLE_INTERVAL            (5000000)
+#define ROW_SET_SIZE              (6)
 #define USE_INTER_STREAM_CALLBACK (FALSE)
 #define MAX_CORES                 (128)
 #define MAX_RRPV                  (3)
@@ -19,7 +22,10 @@
 #define CS_MSHR_ALLOC             (1)
 #define CS_MSHR_WAIT              (2)
 #define CS_MSHR_FAIL              (3)
-
+#define ECTR_WIDTH                (20)
+#define ECTR_MIN_VAL              (0x00)  
+#define ECTR_MAX_VAL              (0xfffff)  
+#define ECTR_MID_VAL              (0x3ff)
 
 char *dram_config_file_name = NULL;
 ub8   pending_requests;
@@ -28,6 +34,7 @@ long long dram_size     = 1LL << 32; /* 4GB default dram size. */
 ub8 read_stall;
 ub8 write_stall;
 ub8 mshr_stall;
+ub8 dram_request_cycle[TST + 1];
 
 extern  sb1 *stream_names[TST + 1];  
 
@@ -155,7 +162,7 @@ extern  sb1 *stream_names[TST + 1];
   NumericStatistic <ub8> *t_xzevct;    /* X stream evict by T */
   NumericStatistic <ub8> *t_xpevct;    /* X stream evict by P */
   NumericStatistic <ub8> *t_xrevct;    /* X stream evict by other streams */
-  NumericStatistic <ub8> *t_xhit;      /* Text intet stream hit */
+  NumericStatistic <ub8> *t_xhit;      /* Text inter stream hit */
   NumericStatistic <ub8> *t_cthit;     /* Text C stream hit */
   NumericStatistic <ub8> *t_zthit;     /* Text Z stream hit */
   NumericStatistic <ub8> *t_bthit;     /* Text B stream hit */
@@ -300,6 +307,211 @@ extern  sb1 *stream_names[TST + 1];
   ub8 reuse_hist[TST + 1][MAX_REUSE + 1]; /* Reuse distance histogram */
   
   ub8 invalid_hits;
+
+/* Returns SARP stream corresponding to access stream based on stream 
+ * classification algoritm. */
+speedup_stream_type get_srriphint_stream(cachesim_cache *cache, memory_trace *info)
+{
+  return (speedup_stream_type)(info->sap_stream);
+}
+
+#define SPEEDUP(n) (n == srriphint_stream_x)
+
+static void cachesim_update_hint_count(cachesim_cache *cache, memory_trace *info)
+{
+  assert(info->stream <= TST);
+
+  if (SPEEDUP(get_srriphint_stream(cache, info)))
+  {
+    SAT_CTR_INC(cache->sarp_hint[info->stream]);
+  }
+}
+
+#undef SPEEDUP
+
+void cachesim_update_cycle_interval_end(cachesim_cache *cache, cachesim_cache *shadow_tags)
+{
+  dram_channel *current_channel;
+  dram_rank    *current_rank;
+  dram_bank    *current_bank;
+  dram_row     *current_row;
+
+  dram_channel *shadow_channel;
+  dram_rank    *shadow_rank;
+  dram_bank    *shadow_bank;
+  dram_row     *shadow_row;
+
+  map<ub8, ub8>::iterator channel_itr;
+  map<ub8, ub8>::iterator rank_itr;
+  map<ub8, ub8>::iterator bnk_itr;
+  map<ub8, ub8>::iterator rw_itr;
+
+  map<ub8, ub8>::iterator schannel_itr;
+  map<ub8, ub8>::iterator srank_itr;
+  map<ub8, ub8>::iterator sbnk_itr;
+  map<ub8, ub8>::iterator srw_itr;
+
+  ub1 row_count;
+
+  row_count = 0;
+
+  printf("\n Per Bank stats \n");
+
+  for (channel_itr = cache->dramsim_channels.begin(); channel_itr != cache->dramsim_channels.end(); channel_itr++)
+  {
+    current_channel = (dram_channel *)(channel_itr->second);
+    assert(current_channel);
+    
+    schannel_itr = shadow_tags->dramsim_channels.find(channel_itr->first);
+    assert(schannel_itr != shadow_tags->dramsim_channels.end());
+
+    shadow_channel = (dram_channel *)(schannel_itr->second);
+
+    for (rank_itr = current_channel->ranks.begin(); rank_itr != current_channel->ranks.end(); rank_itr++)
+    {
+      current_rank = (dram_rank *)(rank_itr->second);
+      assert(current_rank); 
+
+      srank_itr = shadow_channel->ranks.find(rank_itr->first);
+      assert(srank_itr != shadow_channel->ranks.end());
+
+      shadow_rank = (dram_rank *)(srank_itr->second);
+
+      for (bnk_itr = current_rank->banks.begin(); bnk_itr != current_rank->banks.end(); bnk_itr++)
+      {
+        current_bank = (dram_bank *)(bnk_itr->second);
+        assert(current_bank);
+
+        sbnk_itr = shadow_rank->banks.find(bnk_itr->first);
+        assert(sbnk_itr != shadow_rank->banks.end());
+
+        shadow_bank = (dram_bank *)(sbnk_itr->second);
+
+        printf ("\n Bank %ld\n", bnk_itr->first);
+        row_count = 0;
+
+        for (rw_itr = current_bank->bank_rows.begin(); rw_itr != current_bank->bank_rows.end(); rw_itr++)
+        {
+          current_row = (dram_row *)(rw_itr->second);
+          assert(current_row);
+
+          srw_itr = shadow_bank->bank_rows.find(rw_itr->first);
+          assert(srw_itr != shadow_bank->bank_rows.end());
+
+          shadow_row = (dram_row *)(srw_itr->second);
+          
+          if (current_row->row_access)
+          {
+            printf("R:%5ld || A: %5ld O:%3ld B2B:%3ld D:%3ld| ", rw_itr->first, current_row->row_access, 
+                current_row->row_open, current_row->btob_hits, shadow_row->btob_hits - current_row->btob_hits);
+
+            if (++row_count == 5)
+            {
+              row_count = 0;
+              printf("\n");
+            }
+          }
+#if 0
+          printf("R:%5ld || A: %5ld B2B:%3ld| ", srw_itr->first, shadow_row->row_access, 
+              shadow_row->btob_hits);
+#endif
+
+          current_row->row_access     = 0;
+          current_row->row_open       = 0;
+          current_row->btob_hits      = 0;
+          current_row->max_btob_hits  = 0;
+
+          current_row->row_blocks.clear();
+
+          shadow_row->row_access     = 0;
+          shadow_row->row_open       = 0;
+          shadow_row->btob_hits      = 0;
+          shadow_row->max_btob_hits  = 0;
+
+          shadow_row->row_blocks.clear();
+
+#if 0          
+          if (current_row->request_queue.empty())
+          {
+            delete current_row;
+            current_bank->bank_rows.erase(rw_itr->first);
+          }
+#endif
+        }
+      }
+
+      printf("\n");
+    }
+  }
+}
+
+#define MAX_RANK (2)
+
+static void cachesim_update_interval_end(cachesim_cache *cache)
+{
+  /* Obtain stream to be spedup */
+  ub1 i;
+  ub4 val;
+  ub1 new_stream;
+  ub1 stream_rank[MAX_RANK];
+
+  val         = 0;
+  new_stream  = NN;
+
+  for (i = 0; i < MAX_RANK; i++)
+  {
+    stream_rank[i] = NN;
+  }
+
+  /* Select stream to be spedup */
+  for (i = 0; i < TST + 1; i++)
+  {
+    cache->speedup_stream[i] = FALSE;
+
+    if (SAT_CTR_VAL(cache->sarp_hint[i]) > val)
+    {
+      val = SAT_CTR_VAL(cache->sarp_hint[i]);
+      new_stream = i;
+    }
+  }
+
+  for (i = 0; i < TST + 1; i++)
+  {
+    SAT_CTR_RST(cache->sarp_hint[i]);
+  }
+  
+  if (new_stream != NN)
+  {
+    cache->speedup_stream[new_stream] = TRUE;
+  }
+
+  if (cache->speedup_enabled)
+  {
+    dramsim_set_priority_stream(new_stream);
+  }
+
+#if 0
+#define INTER_REUSE_TH (128)
+
+  if (cache->ct_reuse > INTER_REUSE_TH && 
+      new_stream == TS)
+  {
+    cache->speedup_stream[CS] = TRUE;
+  }
+
+  if (->bt_reuse > INTER_REUSE_TH && 
+      new_stream == TS)
+  {
+    global_data->speedup_stream[BS] = TRUE;
+  }
+
+#undef INTER_REUSE_TH
+#endif
+
+}
+
+#undef MAX_RANK
+
 
 void dump_hist_for_stream(ub1 stream)
 {
@@ -534,7 +746,7 @@ ub8 get_row_id(ub8 address)
   tmpPhysicalAddress  = address;
   physicalAddress     = address >> byteOffsetWidth;
   colLowBitWidth      = log2(transactionSize) - byteOffsetWidth;
-  physicalAddress     = address >> colLowBitWidth;
+  physicalAddress     = physicalAddress >> colLowBitWidth;
   colHighBitWidth     = colBitWidth - colLowBitWidth;
 
   //row:rank:bank:col:chan
@@ -570,6 +782,64 @@ ub8 get_row_id(ub8 address)
   newTransactionRow = tempA ^ tempB;
   
   return newTransactionRow;
+}
+
+ub8 change_row_id(ub8 address, ub8 new_row)
+{
+  ub8 physicalAddress;
+  ub8 tmpPhysicalAddress;
+  ub8 newTransactionChan;
+  ub8 newTransactionColumn;
+  ub8 newTransactionBank;
+  ub8 newTransactionRank;
+  ub8 newTransactionRow;
+  ub8 tempA;
+  ub8 tempB;
+  ub8 transactionMask;
+
+  ub4 byteOffsetWidth;
+  ub4 transactionSize;
+  ub4 channelBitWidth;
+  ub4 rankBitWidth;
+  ub4 bankBitWidth;
+  ub4 rowBitWidth;
+  ub4 colBitWidth;
+  ub4 colHighBitWidth;
+  ub4 colLowBitWidth;
+  ub4 llcTagLowBitWidth;
+  ub8 address_mask;
+  ub8 value_mask;
+
+  llcTagLowBitWidth = LOG_BLOCK_SIZE;
+  transactionSize   = (JEDEC_DATA_BUS_BITS / 8) * BL;
+  transactionMask   = transactionSize - 1;
+  channelBitWidth   = log2(NUM_CHANS);
+  rankBitWidth      = log2(NUM_RANKS);
+  bankBitWidth      = log2(NUM_BANKS);
+  rowBitWidth       = log2(NUM_ROWS);
+  colBitWidth       = log2(NUM_COLS);
+
+  byteOffsetWidth = log2((JEDEC_DATA_BUS_BITS / 8)); 
+  
+  tmpPhysicalAddress  = address;
+  physicalAddress     = address >> byteOffsetWidth;
+  colLowBitWidth      = log2(transactionSize) - byteOffsetWidth;
+  physicalAddress     = physicalAddress >> colLowBitWidth;
+  
+  address_mask = 1;
+
+  for (ub1 i = 1; i < rowBitWidth; i++)
+  {
+    address_mask <<= 1;
+    address_mask  |= 1;
+  }
+  
+  value_mask = address_mask & new_row;
+  
+  address_mask  <<= (channelBitWidth + rankBitWidth + bankBitWidth + colBitWidth);
+  value_mask    <<= (channelBitWidth + rankBitWidth + bankBitWidth + colBitWidth);
+
+  return ((address & ~address_mask) | value_mask);
 }
 
 void exec_frfcfs(dram_config *dram_info, dram_bank *bank)
@@ -674,10 +944,10 @@ void get_address_map(cachesim_cache *cache, ub1 stream, memory_trace *info, dram
 
   byteOffsetWidth = log2((JEDEC_DATA_BUS_BITS / 8)); 
 
-  tmpPhysicalAddress  = info->address;
 #if 0
-  tmpPhysicalAddress  = mmu_translate(cache, info);
+  tmpPhysicalAddress  = info->address;
 #endif
+  tmpPhysicalAddress  = mmu_translate(cache, info);
   physicalAddress     = tmpPhysicalAddress >> byteOffsetWidth;
   colLowBitWidth      = log2(transactionSize) - byteOffsetWidth;
   colHighBitWidth     = colBitWidth - colLowBitWidth;
@@ -753,6 +1023,12 @@ void get_address_map(cachesim_cache *cache, ub1 stream, memory_trace *info, dram
   if (info->fill)
   {
     bank->rows[ROW(dram_info)] += 1;
+    cache->per_stream_fill[info->stream] += 1;
+    
+    if (cache->per_stream_fill[info->stream] > cache->per_stream_max_fill)
+    {
+      cache->per_stream_max_fill = cache->per_stream_fill[info->stream];
+    }
 
     /* Update per-stream access count */
     dram_bank_info_itr = dram_info->bank_list.find(info->stream);
@@ -809,7 +1085,7 @@ void get_address_map(cachesim_cache *cache, ub1 stream, memory_trace *info, dram
         }
         else
         {
-          per_row_stats = (row_stats *)dram_row_info_itr->second;
+          per_row_stats = (row_stats *)(dram_row_info_itr->second);
           assert(bank->rows[ROW_ID(dram_info)] > 1);
           per_row_stats->access += 1; 
 
@@ -935,10 +1211,17 @@ ub8 cs_init(cachesim_cache *cache, cache_params params, sb1 *trc_file_name)
 
   cache->total_mshr = MAX_MSHR;
   cache->free_mshr  = MAX_MSHR;
-
+    
   /* Open trace file stream */
-  cache->trc_file = gzopen(trc_file_name, "rb9");
-  assert(cache->trc_file);
+  if (trc_file_name)
+  {
+    cache->trc_file = gzopen(trc_file_name, "rb9");
+    assert(cache->trc_file);
+  }
+  else
+  {
+    cache->trc_file = NULL;
+  }
 
   /* Initialize policy specific part of cache */
   cache->cache = cache_init(&params);
@@ -952,7 +1235,77 @@ ub8 cs_init(cachesim_cache *cache, cache_params params, sb1 *trc_file_name)
   for (ub1 s = NN; s <= TST; s++)
   {
     (cache->i_page_table).stream_cluster[s] = 0;
+    cache->speedup_stream[s]              = FALSE;
+    cache->speedup_stream_count[s]        = 0;
+    cache->speedup_clstr[s]               = 0;
+    cache->speedup_page[s]                = 0;
+    cache->speedup_block[s]               = 0;
+    cache->speedup_access[s]              = 0;
+    cache->speedup_min_access[s]          = 0xffffffff;
+    cache->speedup_max_access[s]          = 0;
+    cache->speedup_page_z_access[s]       = 0;
+    cache->per_stream_page_access[s]      = 0;
+    cache->per_stream_clstr_access[s]     = 0;
+    cache->i_page_table.stream_alloc[s]   = 0;
+    cache->per_stream_fill[s]             = 0;
+    cache->src_remap_page_count[s]        = 0;
+    cache->remap_page_count[s]            = 0;
+    cache->remap_src_page_count[s]        = 0;
+    cache->remap_access_count[s]          = 0;
+    cache->remap_src_access_count[s]      = 0;
+    cache->remap_tgt_access_count[s]      = 0;
+    cache->remap_src_access_count_exp[s]  = 0;
+    cache->remap_tgt_access_count_exp[s]  = 0;
+    cache->remap_pages[s]                 = 0;
+    cache->tgt_remap_pages[s]             = 0;
+    cache->zero_reuse_page[s]             = 0;
+
+    SAT_CTR_INI(cache->sarp_hint[s], ECTR_WIDTH, ECTR_MIN_VAL, ECTR_MAX_VAL);
+    SAT_CTR_SET(cache->sarp_hint[s], ECTR_MIN_VAL);
+
+    if (s < PS)
+    {
+      cache->access_thr[s] = 8;
+
+      if (s == TS)
+      {
+        cache->entry_thr[s] = 4;
+      }
+      else
+      {
+        cache->entry_thr[s] = 4;
+      }
+    }
+    else
+    {
+      cache->access_thr[s] = 32;
+      cache->entry_thr[s] = 4;
+    }
   }
+  
+  /* Allocate and initialize sampler cache */
+  cache->cache_access_count   = 0;
+  cache->per_stream_max_fill  = 0;
+  cache->max_clstr_access     = 0;
+  cache->next_remap_clstr     = 0;
+  cache->remap_crtcl          = params.remap_crtcl;
+  cache->remap_src_access     = 0;
+  cache->remap_tgt_access     = 0;
+  cache->agg_remap_src_access = 0;
+  cache->agg_remap_tgt_access = 0;
+  cache->remap_requested      = 0;
+  cache->remap_done           = 0;
+  cache->cachecycle           = 0;
+  cache->cachecycle_interval  = 0;
+  cache->dramcycle            = 0;
+  cache->speedup_enabled      = params.speedup_enabled;
+  cache->shuffle_row          = TRUE;
+  cache->src_page_count       = 0;
+  cache->tgt_page_count       = 0;
+  cache->src_added            = 0;
+  cache->tgt_added            = 0;
+  cache->min_remap_tgt_access = 0xffffff;
+  cache->max_remap_src_access = 0;
 
   return CACHE_CTIME;
 }
@@ -964,7 +1317,10 @@ void cs_fini(cachesim_cache *cache)
   cache_free(cache->cache);
 
   /* Close statistics stream */
-  gzclose(cache->trc_file);
+  if (cache->trc_file)
+  {
+    gzclose(cache->trc_file);
+  }
 }
 
 #define MC_COUNT (2)
@@ -1003,7 +1359,6 @@ long int dram_init(SimParameters *simP, cache_params params)
     exit(-1);
   }
 
-#define LOG_BLOCK_SIZE  (6)
 #define LLC_BANK        (8)
 
   max_llc_bank_sets = params.num_sets / LLC_BANK;
@@ -1023,7 +1378,6 @@ long int dram_init(SimParameters *simP, cache_params params)
   llcTagLowBitWidth += log2(max_llc_bank_sets);
   llcTagLowBitWidth += log2(num_llc_banks_pow_of_2);
 
-#undef LOG_BLOCK_SIZE
 #undef LLC_BANK
 
   /* Initialize dram device */
@@ -1034,7 +1388,8 @@ long int dram_init(SimParameters *simP, cache_params params)
 
   dram_tck = dramsim_init(simP->lcP.dramSimConfigFile, (unsigned long long) (dram_size >> 20),
       MC_COUNT, trans_queue_size, llcTagLowBitWidth);
-   
+
+#if 0   
   if (!strncmp(simP->lcP.dramPriorityStream, "TS", 2))
   {
     dramsim_set_priority_stream(TS);
@@ -1060,8 +1415,9 @@ long int dram_init(SimParameters *simP, cache_params params)
       }
     }
   }
+#endif
 
-  /* Calculate the tick for cpu and dram clocks */
+  /* Calculate the tick for CPU and DRAM clocks */
   return dram_tck;
 }
 
@@ -1072,6 +1428,667 @@ void dram_fini()
   dramsim_done();
 }
 
+static void update_dramsim_shadow_tag_row_hit(cachesim_cache *cache, memory_trace *info)
+{
+  ub8 physicalAddress;
+  ub8 tmpPhysicalAddress;
+  ub8 newTransactionChan;
+  ub8 newTransactionColumn;
+  ub8 newTransactionBank;
+  ub8 newTransactionRank;
+  ub8 newTransactionRow;
+  ub8 tempA;
+  ub8 tempB;
+  ub8 transactionMask;
+
+  ub4 byteOffsetWidth;
+  ub4 transactionSize;
+  ub4 channelBitWidth;
+  ub4 rankBitWidth;
+  ub4 bankBitWidth;
+  ub4 rowBitWidth;
+  ub4 colBitWidth;
+  ub4 colHighBitWidth;
+  ub4 colLowBitWidth;
+  ub4 llcTagLowBitWidth;
+
+  llcTagLowBitWidth = LOG_BLOCK_SIZE;
+  transactionSize   = (JEDEC_DATA_BUS_BITS / 8) * BL;
+  transactionMask   = transactionSize - 1;
+  channelBitWidth   = log2(NUM_CHANS);
+  rankBitWidth      = log2(NUM_RANKS);
+  bankBitWidth      = log2(NUM_BANKS);
+  rowBitWidth       = log2(NUM_ROWS);
+  colBitWidth       = log2(NUM_COLS);
+
+  byteOffsetWidth = log2((JEDEC_DATA_BUS_BITS / 8)); 
+
+  tmpPhysicalAddress  = info->address;
+  physicalAddress     = info->address >> byteOffsetWidth;
+  colLowBitWidth      = log2(transactionSize) - byteOffsetWidth;
+  physicalAddress     = physicalAddress >> colLowBitWidth;
+  colHighBitWidth     = colBitWidth - colLowBitWidth;
+
+  //row:rank:bank:col:chan
+  tempA = physicalAddress;
+  physicalAddress = physicalAddress >> channelBitWidth;
+  tempB = physicalAddress << channelBitWidth;
+  newTransactionChan = tempA ^ tempB;
+
+  tempA = physicalAddress;
+  physicalAddress = physicalAddress >> colHighBitWidth;
+  tempB = physicalAddress << colHighBitWidth;
+  newTransactionColumn = tempA ^ tempB;
+
+  // bank id
+  tempA = physicalAddress;
+  physicalAddress = physicalAddress >> bankBitWidth;
+  tempB = physicalAddress << bankBitWidth;
+  newTransactionBank = tempA ^ tempB;
+
+  /* XOR with lower LLC tag bits */
+  tempA = tmpPhysicalAddress >> llcTagLowBitWidth;
+  tempB = (tempA >> bankBitWidth) << bankBitWidth;
+  newTransactionBank = newTransactionBank ^ (tempA ^ tempB);
+
+  tempA = physicalAddress;
+  physicalAddress = physicalAddress >> rankBitWidth;
+  tempB = physicalAddress << rankBitWidth;
+  newTransactionRank = tempA ^ tempB;
+
+  tempA = physicalAddress;
+  physicalAddress = physicalAddress >> rowBitWidth;
+  tempB = physicalAddress << rowBitWidth;
+  newTransactionRow = tempA ^ tempB;
+
+  map<ub8, ub8>::iterator map_itr;
+  dram_channel  *current_channel;
+  dram_rank     *current_rank;
+  dram_bank     *current_bank;
+  dram_row      *current_row;
+
+  current_channel = NULL;
+  current_rank    = NULL;
+  current_bank    = NULL;
+  current_row     = NULL;
+
+  /* Find channel, rank , bank , row  and update count */
+  map_itr = cache->dramsim_channels.find(newTransactionChan);  
+
+  if (map_itr != cache->dramsim_channels.end())
+  {
+    current_channel = (dram_channel *)(map_itr->second);
+    assert(current_channel);
+
+    map_itr = current_channel->ranks.find(newTransactionRank);
+
+    if (map_itr != current_channel->ranks.end())
+    {
+      current_rank = (dram_rank *)(map_itr->second);
+      assert(current_rank);
+
+      map_itr = current_rank->banks.find(newTransactionBank);
+      if (map_itr != current_rank->banks.end())
+      {
+        current_bank = (dram_bank *)(map_itr->second);
+
+        map_itr = current_bank->bank_rows.find(newTransactionRow);
+
+        if (map_itr != current_bank->bank_rows.end())
+        {
+          current_row = (dram_row *)(map_itr->second);
+
+          /* Update per-bank row stats */
+          current_row->btob_hits += current_row->request_queue.size();
+
+          current_row->request_queue.clear();
+        }
+      }
+    }
+  }
+}
+
+static void update_dramsim_open_row_stats(cachesim_cache *cache, cachesim_cache *shadow_tags, 
+    memory_trace *info)
+{
+  ub8 physicalAddress;
+  ub8 tmpPhysicalAddress;
+  ub8 newTransactionChan;
+  ub8 newTransactionColumn;
+  ub8 newTransactionBank;
+  ub8 newTransactionRank;
+  ub8 newTransactionRow;
+  ub8 tempA;
+  ub8 tempB;
+  ub8 transactionMask;
+
+  ub4 byteOffsetWidth;
+  ub4 transactionSize;
+  ub4 channelBitWidth;
+  ub4 rankBitWidth;
+  ub4 bankBitWidth;
+  ub4 rowBitWidth;
+  ub4 colBitWidth;
+  ub4 colHighBitWidth;
+  ub4 colLowBitWidth;
+  ub4 llcTagLowBitWidth;
+
+  llcTagLowBitWidth = LOG_BLOCK_SIZE;
+  transactionSize   = (JEDEC_DATA_BUS_BITS / 8) * BL;
+  transactionMask   = transactionSize - 1;
+  channelBitWidth   = log2(NUM_CHANS);
+  rankBitWidth      = log2(NUM_RANKS);
+  bankBitWidth      = log2(NUM_BANKS);
+  rowBitWidth       = log2(NUM_ROWS);
+  colBitWidth       = log2(NUM_COLS);
+
+  byteOffsetWidth = log2((JEDEC_DATA_BUS_BITS / 8)); 
+
+  tmpPhysicalAddress  = info->address;
+  physicalAddress     = info->address >> byteOffsetWidth;
+  colLowBitWidth      = log2(transactionSize) - byteOffsetWidth;
+  physicalAddress     = physicalAddress >> colLowBitWidth;
+  colHighBitWidth     = colBitWidth - colLowBitWidth;
+
+  //row:rank:bank:col:chan
+  tempA = physicalAddress;
+  physicalAddress = physicalAddress >> channelBitWidth;
+  tempB = physicalAddress << channelBitWidth;
+  newTransactionChan = tempA ^ tempB;
+
+  tempA = physicalAddress;
+  physicalAddress = physicalAddress >> colHighBitWidth;
+  tempB = physicalAddress << colHighBitWidth;
+  newTransactionColumn = tempA ^ tempB;
+
+  // bank id
+  tempA = physicalAddress;
+  physicalAddress = physicalAddress >> bankBitWidth;
+  tempB = physicalAddress << bankBitWidth;
+  newTransactionBank = tempA ^ tempB;
+
+  /* XOR with lower LLC tag bits */
+  tempA = tmpPhysicalAddress >> llcTagLowBitWidth;
+  tempB = (tempA >> bankBitWidth) << bankBitWidth;
+  newTransactionBank = newTransactionBank ^ (tempA ^ tempB);
+
+  tempA = physicalAddress;
+  physicalAddress = physicalAddress >> rankBitWidth;
+  tempB = physicalAddress << rankBitWidth;
+  newTransactionRank = tempA ^ tempB;
+
+  tempA = physicalAddress;
+  physicalAddress = physicalAddress >> rowBitWidth;
+  tempB = physicalAddress << rowBitWidth;
+  newTransactionRow = tempA ^ tempB;
+
+  map<ub8, ub8>::iterator map_itr;
+  dram_channel  *current_channel;
+  dram_rank     *current_rank;
+  dram_bank     *current_bank;
+  dram_row      *current_row;
+  
+  current_channel = NULL;
+  current_rank    = NULL;
+  current_bank    = NULL;
+  current_row     = NULL;
+  
+  /* Find channel, rank , bank , row  and update count */
+  map_itr = cache->dramsim_channels.find(newTransactionChan);  
+  if (map_itr == cache->dramsim_channels.end())
+  {
+    current_channel = new dram_channel();
+    assert(current_channel);
+
+    current_rank = new dram_rank();
+    assert(current_rank);
+
+    current_bank = new dram_bank();
+    assert(current_bank);
+
+    current_row = new dram_row();
+    assert(current_row);
+    
+    current_row->row_access     = 0;
+    current_row->btob_hits      = 0;
+    current_row->max_btob_hits  = 0;
+    current_row->periodic_row_access = 0;
+    current_row->row_open = 0;
+
+    current_bank->bank_rows.insert(pair<ub8, ub8>(newTransactionRow, (ub8)current_row));
+
+    current_rank->banks.insert(pair<ub8, ub8>(newTransactionBank, (ub8)current_bank));
+
+    current_channel->ranks.insert(pair<ub8, ub8>(newTransactionRank, (ub8)current_rank));
+
+    /* Find Rank */  
+    cache->dramsim_channels.insert(pair<ub8, ub8>(newTransactionChan , (ub8)current_channel));
+  }
+  else
+  {
+    current_channel = (dram_channel *)(map_itr->second);
+    assert(current_channel);
+
+    map_itr = current_channel->ranks.find(newTransactionRank);
+    if (map_itr != current_channel->ranks.end())
+    {
+      current_rank = (dram_rank *)(map_itr->second);
+      assert(current_rank);
+
+      map_itr = current_rank->banks.find(newTransactionBank);
+      if (map_itr == current_rank->banks.end())
+      {
+        current_bank = new dram_bank();
+        assert(current_bank);
+
+        current_rank->banks.insert(pair<ub8, ub8>(newTransactionBank, (ub8)current_bank));
+      }
+      else
+      {
+        current_bank = (dram_bank *)(map_itr->second);
+      }
+      
+      map_itr = current_bank->bank_rows.find(newTransactionRow);
+      if (map_itr == current_bank->bank_rows.end())
+      {
+        current_row = new dram_row();
+        assert(current_row);
+        
+        current_row->row_access     = 0;
+        current_row->btob_hits      = 0;
+        current_row->max_btob_hits  = 0;
+        current_row->periodic_row_access = 0;
+        current_row->row_open = 0;
+
+        current_bank->bank_rows.insert(pair<ub8, ub8>(newTransactionRow, (ub8)current_row));      
+      }
+      else
+      {
+        current_row = (dram_row *)(map_itr->second);
+      }
+    }
+    else
+    {
+      current_rank = new dram_rank();
+      assert(current_rank);
+
+      current_bank = new dram_bank();
+      assert(current_bank);
+
+      current_row = new dram_row();
+      assert(current_row);
+        
+      current_row->row_access     = 0;
+      current_row->btob_hits      = 0;
+      current_row->max_btob_hits  = 0;
+      current_row->row_open       = 0;
+      current_row->periodic_row_access = 0;
+
+      current_bank->bank_rows.insert(pair<ub8, ub8>(newTransactionRow, (ub8)current_row));
+      current_rank->banks.insert(pair<ub8, ub8>(newTransactionBank, (ub8)current_bank));
+      current_channel->ranks.insert(pair<ub8, ub8>(newTransactionRank, (ub8)current_rank));
+    }
+  }
+  
+  current_row->row_access += 1;
+  current_row->periodic_row_access += 1;
+
+  current_bank->open_row_id = dramsim_get_open_row(info);
+
+  /* Update per-bank row stats */
+  map_itr = current_row->request_queue.find(info->address);
+  assert(map_itr ==  current_row->request_queue.end());
+
+  current_row->request_queue.insert(pair<ub8, ub8>(info->address, 1));
+
+  map_itr = current_row->row_blocks.find(info->address);
+  if (map_itr == current_row->row_blocks.end())
+  {
+    current_row->row_blocks.insert(pair<ub8, ub8>(info->address, 1));
+  }
+
+  if (newTransactionRow == current_bank->open_row_id)
+  {
+    current_row->btob_hits += current_row->request_queue.size();
+    current_row->request_queue.clear();
+    update_dramsim_shadow_tag_row_hit(shadow_tags, info);
+
+    current_row->row_open += 1;
+  }
+  else
+  {
+    if (current_row->btob_hits > current_row->max_btob_hits)
+    {
+      current_row->max_btob_hits = current_row->btob_hits;
+    }
+#if 0
+    current_row->btob_hits = 0;
+#endif
+  }
+
+}
+
+static void update_dramsim_shadow_tag_open_row_stats(cachesim_cache *cache, memory_trace *info)
+{
+  ub8 physicalAddress;
+  ub8 tmpPhysicalAddress;
+  ub8 newTransactionChan;
+  ub8 newTransactionColumn;
+  ub8 newTransactionBank;
+  ub8 newTransactionRank;
+  ub8 newTransactionRow;
+  ub8 tempA;
+  ub8 tempB;
+  ub8 transactionMask;
+
+  ub4 byteOffsetWidth;
+  ub4 transactionSize;
+  ub4 channelBitWidth;
+  ub4 rankBitWidth;
+  ub4 bankBitWidth;
+  ub4 rowBitWidth;
+  ub4 colBitWidth;
+  ub4 colHighBitWidth;
+  ub4 colLowBitWidth;
+  ub4 llcTagLowBitWidth;
+
+  llcTagLowBitWidth = LOG_BLOCK_SIZE;
+  transactionSize   = (JEDEC_DATA_BUS_BITS / 8) * BL;
+  transactionMask   = transactionSize - 1;
+  channelBitWidth   = log2(NUM_CHANS);
+  rankBitWidth      = log2(NUM_RANKS);
+  bankBitWidth      = log2(NUM_BANKS);
+  rowBitWidth       = log2(NUM_ROWS);
+  colBitWidth       = log2(NUM_COLS);
+
+  byteOffsetWidth = log2((JEDEC_DATA_BUS_BITS / 8)); 
+
+  tmpPhysicalAddress  = info->address;
+  physicalAddress     = info->address >> byteOffsetWidth;
+  colLowBitWidth      = log2(transactionSize) - byteOffsetWidth;
+  physicalAddress     = physicalAddress >> colLowBitWidth;
+  colHighBitWidth     = colBitWidth - colLowBitWidth;
+
+  //row:rank:bank:col:chan
+  tempA = physicalAddress;
+  physicalAddress = physicalAddress >> channelBitWidth;
+  tempB = physicalAddress << channelBitWidth;
+  newTransactionChan = tempA ^ tempB;
+
+  tempA = physicalAddress;
+  physicalAddress = physicalAddress >> colHighBitWidth;
+  tempB = physicalAddress << colHighBitWidth;
+  newTransactionColumn = tempA ^ tempB;
+
+  // bank id
+  tempA = physicalAddress;
+  physicalAddress = physicalAddress >> bankBitWidth;
+  tempB = physicalAddress << bankBitWidth;
+  newTransactionBank = tempA ^ tempB;
+
+  /* XOR with lower LLC tag bits */
+  tempA = tmpPhysicalAddress >> llcTagLowBitWidth;
+  tempB = (tempA >> bankBitWidth) << bankBitWidth;
+  newTransactionBank = newTransactionBank ^ (tempA ^ tempB);
+
+  tempA = physicalAddress;
+  physicalAddress = physicalAddress >> rankBitWidth;
+  tempB = physicalAddress << rankBitWidth;
+  newTransactionRank = tempA ^ tempB;
+
+  tempA = physicalAddress;
+  physicalAddress = physicalAddress >> rowBitWidth;
+  tempB = physicalAddress << rowBitWidth;
+  newTransactionRow = tempA ^ tempB;
+
+  map<ub8, ub8>::iterator map_itr;
+  dram_channel  *current_channel;
+  dram_rank     *current_rank;
+  dram_bank     *current_bank;
+  dram_row      *current_row;
+  
+  current_channel = NULL;
+  current_rank    = NULL;
+  current_bank    = NULL;
+  current_row     = NULL;
+  
+  /* Find channel, rank , bank , row  and update count */
+  map_itr = cache->dramsim_channels.find(newTransactionChan);  
+  if (map_itr == cache->dramsim_channels.end())
+  {
+    current_channel = new dram_channel();
+    assert(current_channel);
+
+    current_rank = new dram_rank();
+    assert(current_rank);
+
+    current_bank = new dram_bank();
+    assert(current_bank);
+
+    current_row = new dram_row();
+    assert(current_row);
+    
+    current_row->row_access     = 0;
+    current_row->btob_hits      = 0;
+    current_row->max_btob_hits  = 0;
+    current_row->periodic_row_access = 0;
+    current_row->row_open = 0;
+
+    current_bank->bank_rows.insert(pair<ub8, ub8>(newTransactionRow, (ub8)current_row));
+
+    current_rank->banks.insert(pair<ub8, ub8>(newTransactionBank, (ub8)current_bank));
+
+    current_channel->ranks.insert(pair<ub8, ub8>(newTransactionRank, (ub8)current_rank));
+
+    /* Find Rank */  
+    cache->dramsim_channels.insert(pair<ub8, ub8>(newTransactionChan , (ub8)current_channel));
+  }
+  else
+  {
+    current_channel = (dram_channel *)(map_itr->second);
+    assert(current_channel);
+
+    map_itr = current_channel->ranks.find(newTransactionRank);
+    if (map_itr != current_channel->ranks.end())
+    {
+      current_rank = (dram_rank *)(map_itr->second);
+      assert(current_rank);
+
+      map_itr = current_rank->banks.find(newTransactionBank);
+      if (map_itr == current_rank->banks.end())
+      {
+        current_bank = new dram_bank();
+        assert(current_bank);
+
+        current_rank->banks.insert(pair<ub8, ub8>(newTransactionBank, (ub8)current_bank));
+      }
+      else
+      {
+        current_bank = (dram_bank *)(map_itr->second);
+      }
+      
+      map_itr = current_bank->bank_rows.find(newTransactionRow);
+      if (map_itr == current_bank->bank_rows.end())
+      {
+        current_row = new dram_row();
+        assert(current_row);
+        
+        current_row->row_access     = 0;
+        current_row->btob_hits      = 0;
+        current_row->max_btob_hits  = 0;
+        current_row->periodic_row_access = 0;
+        current_row->row_open = 0;
+
+        current_bank->bank_rows.insert(pair<ub8, ub8>(newTransactionRow, (ub8)current_row));      
+      }
+      else
+      {
+        current_row = (dram_row *)(map_itr->second);
+      }
+    }
+    else
+    {
+      current_rank = new dram_rank();
+      assert(current_rank);
+
+      current_bank = new dram_bank();
+      assert(current_bank);
+
+      current_row = new dram_row();
+      assert(current_row);
+        
+      current_row->row_access     = 0;
+      current_row->btob_hits      = 0;
+      current_row->max_btob_hits  = 0;
+      current_row->row_open       = 0;
+      current_row->periodic_row_access = 0;
+
+      current_bank->bank_rows.insert(pair<ub8, ub8>(newTransactionRow, (ub8)current_row));
+      current_rank->banks.insert(pair<ub8, ub8>(newTransactionBank, (ub8)current_bank));
+      current_channel->ranks.insert(pair<ub8, ub8>(newTransactionRank, (ub8)current_rank));
+    }
+  }
+  
+  current_row->row_access += 1;
+  current_row->periodic_row_access += 1;
+
+  /* Update per-bank row stats */
+  map_itr = current_row->request_queue.find(info->address);
+  if (map_itr ==  current_row->request_queue.end())
+  {
+    current_row->request_queue.insert(pair<ub8, ub8>(info->address, 1));
+  }
+
+  map_itr = current_row->row_blocks.find(info->address);
+  if (map_itr == current_row->row_blocks.end())
+  {
+    current_row->row_blocks.insert(pair<ub8, ub8>(info->address, 1));
+  }
+
+  current_bank->open_row_id = dramsim_get_open_row(info);
+
+  map_itr = current_bank->bank_rows.find(current_bank->open_row_id);
+  if (map_itr != current_bank->bank_rows.end())
+  {
+    current_row = (dram_row *)(map_itr->second);
+    assert(current_row);
+
+    current_row->row_open += 1;
+  }
+}
+
+static void update_dramsim_open_row_response_stats(cachesim_cache *cache, memory_trace *info)
+{
+  ub8 physicalAddress;
+  ub8 tmpPhysicalAddress;
+  ub8 newTransactionChan;
+  ub8 newTransactionColumn;
+  ub8 newTransactionBank;
+  ub8 newTransactionRank;
+  ub8 newTransactionRow;
+  ub8 tempA;
+  ub8 tempB;
+  ub8 transactionMask;
+
+  ub4 byteOffsetWidth;
+  ub4 transactionSize;
+  ub4 channelBitWidth;
+  ub4 rankBitWidth;
+  ub4 bankBitWidth;
+  ub4 rowBitWidth;
+  ub4 colBitWidth;
+  ub4 colHighBitWidth;
+  ub4 colLowBitWidth;
+  ub4 llcTagLowBitWidth;
+
+  llcTagLowBitWidth = LOG_BLOCK_SIZE;
+  transactionSize   = (JEDEC_DATA_BUS_BITS / 8) * BL;
+  transactionMask   = transactionSize - 1;
+  channelBitWidth   = log2(NUM_CHANS);
+  rankBitWidth      = log2(NUM_RANKS);
+  bankBitWidth      = log2(NUM_BANKS);
+  rowBitWidth       = log2(NUM_ROWS);
+  colBitWidth       = log2(NUM_COLS);
+
+  byteOffsetWidth = log2((JEDEC_DATA_BUS_BITS / 8)); 
+  
+  tmpPhysicalAddress  = info->address;
+  physicalAddress     = info->address >> byteOffsetWidth;
+  colLowBitWidth      = log2(transactionSize) - byteOffsetWidth;
+  physicalAddress     = physicalAddress >> colLowBitWidth;
+  colHighBitWidth     = colBitWidth - colLowBitWidth;
+
+  //row:rank:bank:col:chan
+  tempA = physicalAddress;
+  physicalAddress = physicalAddress >> channelBitWidth;
+  tempB = physicalAddress << channelBitWidth;
+  newTransactionChan = tempA ^ tempB;
+
+  tempA = physicalAddress;
+  physicalAddress = physicalAddress >> colHighBitWidth;
+  tempB = physicalAddress << colHighBitWidth;
+  newTransactionColumn = tempA ^ tempB;
+
+  // bank id
+  tempA = physicalAddress;
+  physicalAddress = physicalAddress >> bankBitWidth;
+  tempB = physicalAddress << bankBitWidth;
+  newTransactionBank = tempA ^ tempB;
+
+  /* XOR with lower LLC tag bits */
+  tempA = tmpPhysicalAddress >> llcTagLowBitWidth;
+  tempB = (tempA >> bankBitWidth) << bankBitWidth;
+  newTransactionBank = newTransactionBank ^ (tempA ^ tempB);
+
+  tempA = physicalAddress;
+  physicalAddress = physicalAddress >> rankBitWidth;
+  tempB = physicalAddress << rankBitWidth;
+  newTransactionRank = tempA ^ tempB;
+
+  tempA = physicalAddress;
+  physicalAddress = physicalAddress >> rowBitWidth;
+  tempB = physicalAddress << rowBitWidth;
+  newTransactionRow = tempA ^ tempB;
+  
+  map<ub8, ub8>::iterator map_itr;
+  dram_channel  *current_channel;
+  dram_rank     *current_rank;
+  dram_bank     *current_bank;
+  dram_row      *current_row;
+
+  /* Find channel, rank , bank , row  and update count */
+  map_itr = cache->dramsim_channels.find(newTransactionChan);  
+  assert(map_itr != cache->dramsim_channels.end());
+
+  current_channel = (dram_channel *)(map_itr->second);
+  assert(current_channel);
+
+  map_itr = current_channel->ranks.find(newTransactionRank);
+  assert(map_itr != current_channel->ranks.end());
+
+  current_rank = (dram_rank *)(map_itr->second);
+  assert(current_rank);
+
+  map_itr = current_rank->banks.find(newTransactionBank);
+  assert (map_itr != current_rank->banks.end());
+
+  current_bank = (dram_bank *)(map_itr->second);
+  assert(current_bank);
+  
+  map_itr = current_bank->bank_rows.find(newTransactionRow);
+
+  assert(map_itr != current_bank->bank_rows.end());
+  
+  current_row = (dram_row *)(map_itr->second);
+  assert(current_row);
+
+  map_itr = current_row->request_queue.find(info->address);
+  if (map_itr != current_row->request_queue.end())
+  {
+    current_row->request_queue.erase(info->address);
+  }
+}
+
 #define LOG_PG_SIZE         (12)
 #define PG_SIZE             (1 << LOG_PG_SIZE)
 #define LOG_PHY_ADDR_SIZE   (32)
@@ -1079,6 +2096,56 @@ void dram_fini()
 #define MAX_CLUSTER         ((1 << (LOG_PHY_ADDR_SIZE - LOG_PG_SIZE)) / PG_CLSTR_SIZE)
 #define NEXT_CLUSTER(c)     (((c).next_cluster + 1) % MAX_CLUSTER)
 #define NEXT_SCLUSTER(c, i) (((c).stream_cluster[(i)->stream] + 1) % MAX_CLUSTER)
+
+static page_entry* remap_to_critical_stream(cachesim_cache *cache, 
+    page_entry *old_pte, memory_trace *info)
+{
+  page_cluster  *cluster;
+  page_entry    *new_pte;
+  ub1            i;
+  ub1            pg_stream;
+  ub8            cluster_id; 
+  ub8            tgt_cluster_id;
+  map<ub8, ub8>::iterator cluster_itr;
+  map<ub8, ub8>::iterator page_itr;
+
+  new_pte = old_pte;
+  cluster = NULL;
+
+  /* If request stream has accesses within a threshold, swap its page with the one
+   * not used frequently. */
+#if 0
+  if (cache->per_stream_fill[info->stream] > cache->per_stream_max_fill / 4)  
+  {
+    /* Choose next cluster */
+    if (cache->remap_clstr.size()) 
+    {
+      tgt_cluster_id = random() % cache->remap_clstr.size();
+      cluster_id = cache->remap_clstr[tgt_cluster_id];
+      
+      cluster_itr = cache->i_page_table.cluster.find(cluster_id);
+      assert(cluster_itr != cache->i_page_table.cluster.end());
+
+      cluster = (page_cluster *)(cluster_itr->second);
+      assert(cluster);
+      
+      /* Reset next cluster to the beginning if all elements have been used */
+      if (++(cache->next_remap_clstr) == cache->remap_clstr.size())
+      {
+        cache->next_remap_clstr = 0;
+      }
+    }
+  }
+  
+#endif
+
+  /* Find a page that doesn't belong to critical stream and which has been 
+   * used below a threshold */
+  
+  assert(new_pte);
+
+  return new_pte;
+}
 
 static void cluster_page_allocate(page_cluster *cluster)
 {
@@ -1157,14 +2224,18 @@ static page_cluster* get_cluster(cachesim_cache *cache, memory_trace *info)
 #if 0
     cluster->id         = cache->i_page_table.stream_cluster[info->stream];
 #endif
-    cluster->id         = cluster_id;
-    cluster->free       = PG_CLSTR_SIZE;
-    cluster->allocated  = 0;
+    cluster->id           = cluster_id;
+    cluster->free         = PG_CLSTR_SIZE;
+    cluster->allocated    = 0;
+    cluster->access_count = 0;
 
     for (ub1 i = 0; i < PG_CLSTR_SIZE; i++)
     {
-      cluster->page_no[i] = 0;
-      cluster->valid[i]   = FALSE;
+      cluster->page_no[i]           = 0;
+      cluster->page_stream[i]       = NN;
+      cluster->valid[i]             = FALSE;
+      cluster->page_access[i]       = 0;
+      cluster->page_remap_access[i] = 0;
     }
 
     for (ub1 i = NN; i <= TST; i++)
@@ -1200,13 +2271,15 @@ static page_cluster* get_cluster(cachesim_cache *cache, memory_trace *info)
 #if 0
       cluster->id         = cache->i_page_table.stream_cluster[info->stream];
 #endif
-      cluster->id         = cache->i_page_table.next_cluster;
-      cluster->free       = PG_CLSTR_SIZE;
-      cluster->allocated  = 0;
+      cluster->id           = cache->i_page_table.next_cluster;
+      cluster->free         = PG_CLSTR_SIZE;
+      cluster->allocated    = 0;
+      cluster->access_count = 0;
 
       for (ub1 i = 0; i < PG_CLSTR_SIZE; i++)
       {
         cluster->page_no[i] = 0;
+        cluster->page_stream[i] = NN;
         cluster->valid[i]   = FALSE;
       }
 
@@ -1289,9 +2362,11 @@ static page_entry* allocate_pte(cachesim_cache *cache, page_cluster *cluster, me
 
   assert(off != PG_CLSTR_SIZE);
   assert(cluster->valid[off] == FALSE); 
+  assert(info->stream > NN && info->stream <= TST);
 
-  cluster->valid[off]     = TRUE;
-  cluster->page_no[off]   = info->address >> LOG_PG_SIZE;
+  cluster->valid[off]        = TRUE;
+  cluster->page_stream[off]  = info->stream;
+  cluster->page_no[off]      = info->address >> LOG_PG_SIZE;
   
   if (cluster->id != PG_CLSTR_GEN)
   {
@@ -1317,12 +2392,37 @@ static page_entry* allocate_pte(cachesim_cache *cache, page_cluster *cluster, me
   return pte;
 }
 
+#define PG_ACCESS_CNT(i) (((i)->cluster)->page_access[(i)->cluster_off])
+#define PG_ACCESS(i)     (PG_ACCESS_CNT(i))
+
+static bool compare_frame_info(pair<ub8, ub8> info1, pair <ub8, ub8> info2)
+{
+  return (PG_ACCESS((page_info *)(info1.second)) < PG_ACCESS((page_info *)(info2.second)));
+}
+
+static bool compare_frame_info_rev(pair<ub8, ub8>info1, pair<ub8, ub8> info2)
+{
+  return (PG_ACCESS((page_info *)(info1.second)) > PG_ACCESS((page_info *)(info2.second)));
+}
+
+#undef PG_ACCESS_CNT
+#undef PG_ACCESS
+
+/*
+ *
+ * Dynamic page mapping:
+ *
+ *  An access that belongs to an non-critical stream and is above a threshold is mapped
+ *  onto a unused page of a critical cluster.
+ *
+ * */
 ub8 mmu_translate(cachesim_cache *cache, memory_trace *info)
 {
   map <ub8, ub8>::iterator pg_itr;
   ub8 phy_address;
   ub8 page_frame;
   page_cluster *cluster; 
+  page_entry   *org_pte;
   page_entry   *pte;
 
   page_frame = info->address >> LOG_PG_SIZE;
@@ -1332,15 +2432,15 @@ ub8 mmu_translate(cachesim_cache *cache, memory_trace *info)
 
   if (pg_itr != cache->page_table.end())
   {
-    pte = (page_entry *)(pg_itr->second);
-    assert(pte);
+    org_pte = (page_entry *)(pg_itr->second);
+    assert(org_pte);
     
-    if (pte->stream != info->stream)
+    if (org_pte->stream != info->stream)
     {
-      pte->xstream = TRUE;
+      org_pte->xstream = TRUE;
     }
 
-    pg_itr = cache->i_page_table.cluster.find(pte->cluster_id);
+    pg_itr = cache->i_page_table.cluster.find(org_pte->cluster_id);
     assert (pg_itr != cache->i_page_table.cluster.end());
 
     cluster = (page_cluster *)(pg_itr->second);
@@ -1351,21 +2451,520 @@ ub8 mmu_translate(cachesim_cache *cache, memory_trace *info)
   cluster = get_cluster(cache, info);
   assert(cluster);
   
-  pte = allocate_pte(cache, cluster, info);   
-  assert(pte);
+  org_pte = allocate_pte(cache, cluster, info);   
+  assert(org_pte);
   
   cache->i_page_table.stream_alloc[info->stream] += 1;
 
-  cache->page_table.insert(pair<ub8, ub8>(page_frame, (ub8)pte));
+  cache->page_table.insert(pair<ub8, ub8>(page_frame, (ub8)org_pte));
   
 end:
   
   cluster->stream_access[info->stream] += 1;
+  cluster->access_count += 1;
+  cluster->page_access[org_pte->cluster_off] += 1;
+ 
+  /* Update max cluster access */
+  if (cluster->access_count > cache->max_clstr_access)
+  {
+    cache->max_clstr_access = cluster->access_count;
+  }
+
+  if (cache->per_stream_pages[info->stream].find(org_pte->frame_no) == cache->per_stream_pages[info->stream].end())
+  {
+    cache->per_stream_pages[info->stream].insert(pair<ub8, ub8>(org_pte->frame_no, 1));
+  }
+
+  pg_itr = cache->src_frames.find(org_pte->frame_no);
+  if (pg_itr != cache->src_frames.end())
+  {
+    if (((page_info*)(pg_itr->second))->valid == FALSE && ((page_info*)(pg_itr->second))->unused == FALSE)
+    {
+      cache->remap_src_access_count_exp[info->stream] += 1;
+    }
+    else
+    {
+      if (cluster->page_access[org_pte->cluster_off] > cache->max_remap_src_access)
+      {
+        cache->max_remap_src_access = cluster->page_access[org_pte->cluster_off];
+      }
+    }
+  }
+  
+  pg_itr = cache->tgt_frames.find(org_pte->frame_no);
+  if (pg_itr != cache->tgt_frames.end())
+  {
+    if (((page_info*)(pg_itr->second))->valid == FALSE && ((page_info*)(pg_itr->second))->unused == FALSE)
+    {
+      cache->remap_tgt_access_count_exp[info->stream] += 1;
+    }
+    else
+    {
+      if (cluster->page_access[org_pte->cluster_off] < cache->min_remap_tgt_access)
+      {
+        cache->min_remap_tgt_access = cluster->page_access[org_pte->cluster_off];
+      }
+    }
+  }
+  
+  ub8 frame_idx;
+  ub8 frame_no;
+  page_info *pg_info;
+  page_info *tgt_pg_info;
+
+  map <ub8, ub8> *per_clstr_page;
+  map <ub8, ub8> *per_page_block;
+  map <ub8, ub8> :: iterator clstr_itr;
+  map <ub8, ub8> :: iterator page_itr;
+  map <ub8, ub8> :: iterator frame_itr;
+  map <ub8, ub8> :: iterator frame_itr1;
+  list <pair<ub8, ub8> > :: iterator frame_list_itr;
+  list <pair<ub8, ub8> > :: iterator frame_list_itr1;
+  map <ub8, ub8> :: iterator block_itr;
+  
+  page_cluster *src_cluster;
+  page_cluster *tgt_cluster;
+  ub8 src_frame_no;
+  ub8 tgt_frame_no;
+  ub8 src_page_access;
+  ub8 tgt_page_access;
+  ub8 new_pages;
+
+#if 0  
+  clstr_itr = cache->per_stream_clstr[info->stream].find(org_pte->cluster_id);
+  if (clstr_itr == cache->per_stream_clstr[info->stream].end())
+  {
+    per_clstr_page = new map <ub8, ub8>();
+    assert(per_clstr_page);
+    
+    per_page_block = new map <ub8, ub8>();
+    assert(per_page_block);
+    
+    per_page_block->insert(pair<ub8, ub8>(info->address, 1));
+
+    per_clstr_page->insert(pair<ub8 , ub8>(org_pte->frame_no, (ub8)per_page_block));
+    cache->per_stream_clstr[info->stream].insert(pair<ub8, ub8>(org_pte->cluster_id, (ub8)per_clstr_page));
+  }
+  else
+  {
+    per_clstr_page = (map <ub8, ub8> *)(clstr_itr->second);
+
+    page_itr = per_clstr_page->find(org_pte->frame_no);
+
+    if (page_itr == per_clstr_page->end())
+    {
+      per_page_block = new map<ub8, ub8>();
+      assert(per_page_block);
+
+      per_page_block->insert(pair<ub8, ub8>(info->address, 1));
+      per_clstr_page->insert(pair<ub8, ub8>(org_pte->frame_no, (ub8)per_page_block));
+    }
+    else
+    {
+      per_page_block = (map<ub8, ub8> *)(page_itr->second);
+      assert(per_page_block);
+
+      block_itr = per_page_block->find(info->address);
+      
+      if (block_itr == per_page_block->end())
+      {
+        per_page_block->insert(pair<ub8, ub8>(info->address, 1)); 
+      }
+      else
+      {
+        block_itr->second += 1;
+      }
+    }
+  }
+#endif  
+
+  /* If remapping to critical stream page is enabled. Try to find new mapping */
+  if (cache->remap_crtcl)
+  {
+    cache->remap_requested += 1;
+    pte = remap_to_critical_stream(cache, org_pte, info);
+  }
+  else
+  {
+    pte = org_pte;
+  }
+  
+  /* Update re-mappable page access */
+#if 0
+  if (info->sap_stream != speedup_stream_x)
+#endif
+  if (info->stream < PS)
+  {
+    frame_itr = cache->src_frames.find(pte->frame_no);
+
+    if (frame_itr != cache->src_frames.end())
+    {
+      cache->remap_src_access++;
+    }
+#if 0
+    if (cluster->page_access[org_pte->cluster_off] > cache->max_remap_src_access)
+    {
+      cache->max_remap_src_access = cluster->page_access[org_pte->cluster_off];
+    }
+#endif
+  }
+  else
+  {
+    frame_itr = cache->tgt_frames.find(pte->frame_no);
+
+    if (frame_itr != cache->tgt_frames.end())
+    {
+      cache->remap_tgt_access++;
+    }
+#if 0
+    if (cluster->page_access[org_pte->cluster_off] > cache->max_remap_tgt_access)
+    {
+      cache->max_remap_tgt_access = cluster->page_access[org_pte->cluster_off];
+    }
+#endif
+  }
+
+  /* If frame as usage above a threshold and has not been added in the 
+   * source frame list do that. */
+  frame_itr = cache->src_frames.find(pte->frame_no);
+
+#if 0
+  if (frame_itr == cache->src_frames.end() && info->sap_stream != speedup_stream_x)
+#endif
+  if (frame_itr == cache->src_frames.end() && info->stream >= PS)
+  {
+    if ((info->stream == ZS && cluster->page_access[pte->cluster_off] < 4) || info->stream != ZS)
+    {
+      pg_info = new page_info();
+      assert(pg_info);
+
+      pg_info->cluster      = cluster;
+      pg_info->cluster_id   = cluster->id;
+      pg_info->cluster_off  = pte->cluster_off;
+      pg_info->valid        = TRUE;
+      pg_info->unused       = FALSE;
+
+      cache->src_frames.insert(pair<ub8, ub8>(pte->frame_no, (ub8)pg_info));
+      cache->src_frame_list.push_back(pair<ub8, ub8>(pte->frame_no, (ub8)pg_info));
+
+      cache->src_added += 1;
+    }
+  }
+  else
+  {
+    if (frame_itr != cache->src_frames.end())
+    {
+      pg_info = (page_info *)(frame_itr->second);
+      assert(pg_info);
+
+#define ACCESS_THR(c, cl, p)  ((c)->access_thr[(cl)->page_stream[(p)->cluster_off]])
+
+      if (cluster->page_access[pg_info->cluster_off] > ACCESS_THR(cache, cluster, pg_info)  &&
+          pg_info->valid)
+      {
+        pg_info->valid  = FALSE;
+        pg_info->unused = TRUE;
+      }
+
+#undef ACCESS_THR
+
+    }
+  }
+ 
+  frame_itr = cache->tgt_frames.find(pte->frame_no);
+  
+#if 0
+  if (frame_itr == cache->tgt_frames.end() && info->sap_stream == speedup_stream_x && 
+      cluster->page_access[pte->cluster_off] > 64)
+#endif
+
+  if (frame_itr == cache->tgt_frames.end() && info->sap_stream == speedup_stream_x)
+  {
+    pg_info = new page_info();
+    assert(pg_info);
+
+    pg_info->cluster      = cluster;
+    pg_info->cluster_id   = cluster->id;
+    pg_info->cluster_off  = pte->cluster_off;
+    
+#define ENTRY_THR(c, cl, p)  ((c)->entry_thr[(cl)->page_stream[(p)->cluster_off]])
+
+    if (cluster->page_access[pg_info->cluster_off] > ENTRY_THR(cache, cluster, pg_info))
+    {
+      pg_info->valid  = TRUE;
+      pg_info->unused = FALSE;
+    }
+    else
+    {
+      pg_info->valid  = FALSE;
+      pg_info->unused = TRUE;
+    }
+
+#undef ENTRY_THR
+
+    cache->tgt_frames.insert(pair<ub8, ub8>(pte->frame_no, (ub8)pg_info));
+    cache->tgt_frame_list.push_back(pair<ub8, ub8>(pte->frame_no, (ub8)pg_info));
+
+    cache->tgt_added += 1;
+  }
+  else
+  {
+    if (frame_itr != cache->tgt_frames.end())
+    {
+      pg_info = (page_info *)(frame_itr->second);
+
+      if (cluster->page_access[pg_info->cluster_off] > 32 && 
+          pg_info->valid == FALSE && pg_info->unused == TRUE)
+      {
+        pg_info->valid  = TRUE;
+        pg_info->unused = FALSE;
+      }
+    }
+  }
+
+#define AVG_SRC(c)  ((c)->remap_src_access / (c)->src_frames.size())
+#define AVG_TGT(c)  ((c)->remap_tgt_access / (c)->tgt_frames.size())
+#define SRC_VLD(c)  ((c)->src_frames.size() > 0)
+#define TGT_VLD(c)  ((c)->tgt_frames.size() > 0)
+#define AVG_SACC(c) (SRC_VLD(c) ? AVG_SRC(c) : 0)
+#define AVG_TACC(c) (TGT_VLD(c) ? AVG_TGT(c) : 0)
+#define MIN_TACC(c) (cache->min_remap_tgt_access)
+#define MAX_SACC(c) (cache->max_remap_src_access)
+#define SRC_CNT(c)  ((c)->src_added)
+#define TGT_CNT(c)  ((c)->tgt_added)
+#define NEW_PGS(c)  (SRC_CNT(c) || TGT_CNT(c))
+#define SRCMTGT(c)  (SRC_CNT(c) - TGT_CNT(c))
+#define TGTMSRC(c)  (TGT_CNT(c) - SRC_CNT(c))
+#define NEW_CNT(c)  (NEW_PGS(c) ? (SRC_CNT(c) > TGT_CNT(c) ? SRCMTGT(c) : TGTMSRC(c)) : 0)
+#define REMAP_TH    (4)
+
+#if 0
+  if (AVG_SACC(cache) > AVG_TACC(cache) && (AVG_SACC(cache) - AVG_TACC(cache)) >= REMAP_TH)
+  if (NEW_CNT(cache) > 2 && (MAX_SACC(cache) > MIN_TACC(cache)))
+#endif
+
+  if (NEW_CNT(cache) > 2 && (MAX_SACC(cache) > MIN_TACC(cache)))
+  {
+
+    cache->src_added = 0;
+    cache->tgt_added = 0;
+
+    /* Sort src and target frames */
+    cache->src_frame_list.sort(compare_frame_info);     
+    cache->tgt_frame_list.sort(compare_frame_info_rev);     
+
+    for (frame_list_itr = cache->src_frame_list.begin(); frame_list_itr != cache->src_frame_list.end(); frame_list_itr++)
+    {
+      pg_info = (page_info *)(frame_list_itr->second);
+      assert(pg_info);
+
+      clstr_itr = cache->i_page_table.cluster.find(pg_info->cluster_id); 
+      assert(clstr_itr != cache->i_page_table.cluster.end());
+
+      src_cluster = (page_cluster *)(clstr_itr->second); 
+      assert(src_cluster);
+
+      src_frame_no = src_cluster->page_no[pg_info->cluster_off];
+      src_page_access = src_cluster->page_access[pg_info->cluster_off];
+      
+      if (pg_info->valid)
+      {
+        for (frame_list_itr1 = cache->tgt_frame_list.begin(); frame_list_itr1 != cache->tgt_frame_list.end(); frame_list_itr1++)
+        {
+          tgt_pg_info = (page_info *)(frame_list_itr1->second);
+          assert(tgt_pg_info);
+
+          if (tgt_pg_info->valid)
+          {
+            tgt_cluster = (page_cluster *)(cache->i_page_table.cluster.find(tgt_pg_info->cluster_id)->second);
+            assert(tgt_cluster);
+
+            tgt_frame_no = tgt_cluster->page_no[tgt_pg_info->cluster_off];
+            tgt_page_access = tgt_cluster->page_access[tgt_pg_info->cluster_off];
+
+#define CHK_MIG(ts, s, t) ((ts) == TS ? ((s) < (t)) : ((t) < (s)))
+
+#if 0
+            if (CHK_MIG(tgt_cluster->page_stream[tgt_pg_info->cluster_off], src_page_access, tgt_page_access))
+#endif
+            if (src_page_access < tgt_page_access)
+            {
+              cache->remap_page_count[tgt_cluster->page_stream[tgt_pg_info->cluster_off]]       += 1;
+              cache->remap_src_page_count[src_cluster->page_stream[pg_info->cluster_off]]       += 1;
+              cache->remap_access_count[tgt_cluster->page_stream[tgt_pg_info->cluster_off]]     += src_page_access - tgt_page_access;
+              cache->remap_src_access_count[src_cluster->page_stream[pg_info->cluster_off]]     += src_page_access;
+              cache->remap_tgt_access_count[tgt_cluster->page_stream[tgt_pg_info->cluster_off]] += tgt_page_access;
+
+              cache->remap_frames.push_back(tgt_frame_no);
+              
+              page_itr = cache->remap_page_table.find(src_frame_no);
+              if (page_itr != cache->remap_page_table.end())
+              {
+                cache->remap_page_table.erase(src_frame_no);
+              }
+
+              cache->remap_page_table.insert(pair<ub8, ub8>(src_frame_no, tgt_frame_no));
+
+              src_cluster->page_remap_access[pg_info->cluster_off] = src_cluster->page_access[pg_info->cluster_off];
+              src_cluster->page_access[pg_info->cluster_off] = 0;
+
+              tgt_cluster->page_remap_access[tgt_pg_info->cluster_off] = tgt_cluster->page_access[tgt_pg_info->cluster_off];
+              tgt_cluster->page_access[tgt_pg_info->cluster_off] = 0;
+#if 0
+              page_itr = cache->remap_page_table.find(tgt_frame_no);
+              if (page_itr != cache->remap_page_table.end())
+              {
+                cache->remap_page_table.erase(tgt_frame_no);
+              }
+
+              cache->remap_page_table.insert(pair<ub8, ub8>(tgt_frame_no, src_frame_no));
+#endif
+
+              tgt_pg_info->valid = FALSE;
+              pg_info->valid = FALSE;
+
+              /* Add rows to src and tgt frame set */
+              ub8 src_tag;
+              ub8 tgt_tag;
+              ub8 src_row;
+              ub8 tgt_row;
+
+              src_tag = src_frame_no << LOG_PG_SIZE;
+              src_row = get_row_id(src_tag);
+
+              tgt_tag = tgt_frame_no << LOG_PG_SIZE;
+              tgt_row = get_row_id(tgt_tag);
+
+              page_itr = cache->src_rows.find(src_row);
+              if (page_itr == cache->src_rows.end())
+              {
+                cache->src_rows.insert(pair<ub8, ub8>(src_row, 1));
+              }
+
+              page_itr = cache->tgt_rows.find(tgt_row);
+              if (page_itr == cache->tgt_rows.end())
+              {
+                cache->tgt_rows.insert(pair<ub8, ub8>(tgt_row, 1));
+              }
+#if 0              
+              delete tgt_pg_info;
+              delete pg_info;
+
+              cache->tgt_frames.erase(tgt_frame_no);
+              cache->src_frames.erase(src_frame_no);
+              assert(cache->src_added && cache->tgt_added);
+#endif
+
+              break;
+            }
+
+#undef CHK_MIG
+
+          }
+        }
+      }
+    }
+
+    cache->agg_remap_src_access += cache->remap_src_access;
+    cache->agg_remap_tgt_access += cache->remap_tgt_access;
+
+    cache->remap_src_access = 0;
+    cache->remap_tgt_access = 0;
+  }
+
+#undef AVG_SRC
+#undef AVG_TGT
+#undef SRC_VLD
+#undef TGT_VLD
+#undef AVG_SACC
+#undef AVG_TACC
+#undef MIN_TACC
+#undef MAX_SACC
+#undef SRC_CNT
+#undef TGT_CNT
+#undef NEW_PGS
+#undef SRCMTGT
+#undef TGTMSRC
+#undef NEW_CNT
+#undef REMAP_TH
+
+#if 0  
+  if (pte != org_pte)
+#endif
+  {
+    cache->page_table.insert(pair<ub8, ub8>(page_frame, (ub8)pte));
+  }
 
   assert(pte->frame_no <= MAX_PAGE);
-  phy_address = (pte->frame_no << LOG_PG_SIZE) | (info->address & (PG_SIZE - 1));
 
+
+#define FRAME_NO(p)         ((p)->cluster_id * PG_CLSTR_SIZE + (p)->cluster_off)
+#define PAGE_INFO(c, i)     ((page_info *)((c)->src_remap_clstr[i]))
+#define HIGH_FILL(c, i)     ((c)->per_stream_fill[info->stream] >= (c)->per_stream_max_fill / 4)
+#define REMAP_STREAM(c, i)  (!((c)->speedup_stream[i->stream]) && HIGH_FILL(c, i))
+
+#if 0  
+  page_itr = cache->remap_src_clstr.find(pte->frame_no);
+
+  if (REMAP_STREAM(cache, info) && page_itr == cache->remap_src_clstr.end() && cache->remap_frames.size())
+  {
+      frame_idx = random() % cache->remap_frames.size();
+#if 0
+      pg_info = PAGE_INFO(cache, frame_idx);
+
+      clstr_itr = cache->i_page_table.cluster.find(pg_info->cluster_id);
+      assert (clstr_itr != cache->i_page_table.cluster.end());
+
+      cluster = (page_cluster *)(clstr_itr->second);
+      assert(cluster);
+      frame_no = cluster->page_no[pg_info->cluster_off];
+#endif
+
+      frame_no = cache->remap_frames[frame_idx];
+      cache->remap_frames.erase(cache->remap_frames.begin() + frame_idx);
+      cache->remap_src_clstr.insert(pair<ub8, ub8>(pte->frame_no, frame_no));
+
+#if 0
+      phy_address = (FRAME_NO(PAGE_INFO(cache, frame_idx)) << LOG_PG_SIZE) | (info->address & (PG_SIZE - 1));
+#endif
+
+      phy_address = (frame_no << LOG_PG_SIZE) | (info->address & (PG_SIZE - 1));
+
+      /* Map page to old frame no */
+      page_itr = cache->page_table.find(frame_no);  
+      assert(page_itr != cache->page_table.end());
+  }
+  else
+  {
+    if (page_itr != cache->remap_src_clstr.end())
+    {
+      phy_address = (page_itr->second << LOG_PG_SIZE) | (info->address & (PG_SIZE - 1));
+    }
+    else
+    {
+      phy_address = (pte->frame_no << LOG_PG_SIZE) | (info->address & (PG_SIZE - 1));
+    }
+  }
+#endif
+
+#undef FRAME_NO
+#undef PAGE_INFO
+#undef HIGH_FILL
+#undef REMAP_STREAM
+
+  pg_itr = cache->remap_page_table.find(pte->frame_no);
+  if (pg_itr != cache->remap_page_table.end())
+  {
+    phy_address = (pg_itr->second << LOG_PG_SIZE) | (info->address & (PG_SIZE - 1));
+    cache->remap_done += 1;
+  }
+  else
+  {
+    phy_address = (pte->frame_no << LOG_PG_SIZE) | (info->address & (PG_SIZE - 1));
+  }
+#if 0
   printf("Cluster %ld allocated to stream %s\n", info->address >> (LOG_PG_SIZE + 5), stream_names[info->stream]);
+#endif
 
   return phy_address;
 }
@@ -1522,7 +3121,7 @@ cache_access_status cachesim_fill_block(cachesim_cache *cache, memory_trace *inf
       ret.last_rrpv = vctm_block.last_rrpv;
       ret.fill_rrpv = vctm_block.fill_rrpv;
 
-      if (vctm_block.dirty && cache->dramsim_enable)
+      if (vctm_block.dirty && cache->dramsim_enable && !cache->shadow_tag)
       {
         info_out = (memory_trace *)calloc(1, sizeof(memory_trace));
         assert(info_out);
@@ -1531,10 +3130,23 @@ cache_access_status cachesim_fill_block(cachesim_cache *cache, memory_trace *inf
         info_out->stream      = vctm_stream;
         info_out->spill       = TRUE;
         info_out->sap_stream  = vctm_block.sap_stream;
+        info_out->vtl_addr    = info_out->address;
+        info_out->prefetch    = FALSE;
 
         /* As mshr have been freed for the completed fill. So, it must be available. */
         mshr_alloc = cs_alloc_mshr(cache, info_out);
         assert(mshr_alloc == CS_MSHR_ALLOC);
+#if 0      
+        if (cache->remap_crtcl)
+        {
+          info_out->address = mmu_translate(cache, info_out);
+        }
+
+        if (cache->shuffle_row)
+        {
+          update_dramsim_open_row_stats(cache, info_out);
+        }
+#endif
 
         dramsim_request(TRUE, BLCKALIGN(info_out->address), info_out->stream, info_out); 
 
@@ -1584,11 +3196,12 @@ cache_access_status cachesim_fill_block(cachesim_cache *cache, memory_trace *inf
   return ret;
 }
 
-cache_access_status cachesim_incl_cache(cachesim_cache *cache, ub8 addr, 
-  ub8 rdis, ub1 strm, memory_trace *info)
+cache_access_status cachesim_incl_cache(cachesim_cache *cache, cachesim_cache *shadow_tags, 
+    ub8 addr, ub8 rdis, ub1 strm, memory_trace *info)
 {
   struct    cache_block_t *block;
   ub8       indx;
+  ub8       old_tag;
   ub1       mshr_alloc;
   cache_access_status ret;
   memory_trace *info_out;
@@ -1632,8 +3245,144 @@ cache_access_status cachesim_incl_cache(cachesim_cache *cache, ub8 addr,
         info_out->stream      = info->stream;
         info_out->sap_stream  = info->sap_stream;
         info_out->fill        = TRUE;
+        info_out->cycle       = cache->dramcycle;
+        info_out->vtl_addr    = info_out->address;
+        info_out->prefetch    = FALSE;
 
         ret.fate = CACHE_ACCESS_MISS;
+        
+        ub8 speedup_row_id;
+        map<ub8, ub8>::iterator map_itr;
+        row_stats *row_info;
+
+        if (cache->remap_crtcl)
+        {
+          info_out->address = mmu_translate(cache, info_out);
+        }
+        else
+        {
+          /* Insert row into speedup_rows hash table */
+#if 0
+          if (info->sap_stream == speedup_stream_x) 
+#endif
+          if (info->stream == PS) 
+          {
+            speedup_row_id = get_row_id(info->address);
+            map_itr = cache->speedup_rows.find(speedup_row_id);
+
+            if (map_itr == cache->speedup_rows.end())  
+            {
+              row_info = new row_stats();
+              assert(row_info);
+
+              row_info->access    = 1;
+              row_info->row_hits  = 0;
+
+              for (ub1 s = NN; s <= TST; s++)
+              {
+                row_info->stream[s] = FALSE;
+              }
+
+              row_info->stream[info->stream]  = TRUE;
+
+              row_info->blocks.insert(pair<ub8, ub8>(info->address, 1));
+
+              cache->speedup_rows.insert(pair<ub8, ub8>(speedup_row_id, (ub8)row_info)); 
+            }
+            else
+            {
+              row_info = (row_stats *)map_itr->second;
+              row_info->access               += 1;
+              row_info->stream[info->stream]  = TRUE;
+              
+              map_itr = row_info->blocks.find(info->address);
+              if (map_itr == row_info->blocks.end())
+              {
+                row_info->blocks.insert(pair<ub8, ub8>(info->address, 1));
+              }
+            }
+          }
+        }
+        
+        dram_row_set *row_set;
+        dram_row     *set_row;
+        ub8           row_indx;
+        ub8           row_set_indx;
+        ub8           min_access_row;
+
+        if (cache->shuffle_row)
+        {
+          row_indx      = get_row_id(info->address);
+          row_set_indx  = row_indx % ROW_SET_SIZE;
+
+          /* Add to row_set */
+          map_itr = cache->dramsim_row_set.find(row_set_indx);
+          if (map_itr == cache->dramsim_row_set.end())
+          {
+            row_set = new dram_row_set();
+            assert(row_set);
+            
+            row_set->set_access = 0;
+
+            cache->dramsim_row_set.insert(pair<ub8, ub8>(row_set_indx, (ub8)row_set));
+          }
+          else
+          {
+            row_set = (dram_row_set *)(map_itr->second);
+            assert(row_set);
+          }
+          
+          row_set->set_access += 1;
+
+          map_itr = row_set->rows.find(row_indx);
+          if (map_itr == row_set->rows.end()) 
+          {
+            set_row = new dram_row();
+            assert(set_row);
+
+            row_set->rows.insert(pair<ub8, ub8>(row_indx, (ub8)set_row));
+          }
+          else
+          {
+            set_row = (dram_row *)(map_itr->second);
+            assert(set_row);
+          }
+
+          set_row->row_access += 1;
+          row_set->row_access += 1;
+
+          row_set->open_row_id = dramsim_get_open_row(info);
+
+          if (row_set->open_row_id == row_indx)
+          {
+            set_row->row_open   += 1;
+            set_row->btob_hits  += 1;
+          }
+          else
+          {
+            if (set_row->btob_hits > set_row->max_btob_hits)
+            {
+              set_row->max_btob_hits = set_row->btob_hits;
+            }
+
+#if 0
+            set_row->btob_hits = 0;
+
+            if (row_set->row_access >= 1024 && row_set->rows.size() > 64)
+            {
+              min_access_row = row_set->getMinRow();
+              printf("%ld\n", min_access_row);
+
+              if (min_access_row != row_indx)
+              {
+                info_out->address = change_row_id(info_out->address, min_access_row);
+              }
+            }
+#endif
+          }
+
+          update_dramsim_open_row_stats(cache, shadow_tags, info_out);
+        }
 
         dramsim_request(FALSE, BLCKALIGN(info_out->address), info_out->stream, info_out); 
 
@@ -1686,7 +3435,10 @@ cache_access_status cachesim_incl_cache(cachesim_cache *cache, ub8 addr,
       else
       {
         ret = cachesim_fill_block(cache, info);
-        get_address_map(cache, info->stream, info, &(cache->dram_info));
+        if (info->fill)
+        {
+          get_address_map(cache, info->stream, info, &(cache->dram_info));
+        }
       }
     }
   }
@@ -1705,7 +3457,990 @@ cache_access_status cachesim_incl_cache(cachesim_cache *cache, ub8 addr,
     cache_access_block(cache->cache, indx, block->way, strm, info);
   }
   
+  cachesim_update_hint_count(cache, info);
+  
+  if (++(cache->cache_access_count) >= INTERVAL_SIZE)
+  {
+    /* Dump dramsim bank info */
+    dram_config *dram_info;
+
+#define TOTAL_BANKS (NUM_CHANS * NUM_RANKS * NUM_BANKS)
+
+    map<ub1, ub8>::iterator bank_itr;
+    map<ub1, ub8>::iterator stream_itr;
+    map<ub8, ub8>::iterator row_itr;
+    ub1 stream_id;
+    ub1 bank_id;
+    map <ub1, ub8> *bank_list;
+    bank_stats     *per_bank_stats;
+    row_stats      *per_row_stats;
+    map <ub8, ub8> *per_stream_rows[TST + 1][TOTAL_BANKS + 1];
+    map <ub8, ub8> *per_stream_row_list;
+    map <ub8, ub8> *cs_row_list;
+    map <ub8, ub8> *zs_row_list;
+    map <ub8, ub8> *ts_row_list;
+    map <ub8, ub8> *ps_row_list;
+    map <ub8, ub8> *bs_row_list;
+
+    for (ub4 i = 0; i <= TST; i++)
+    {
+      for (ub4 j = 0; j <= TOTAL_BANKS; j++)
+      {
+        per_stream_rows[i][j] = NULL;
+      }
+    }
+
+    ub8 clstr_page;
+    ub8 clstr_block;
+    ub8 block_access;
+    ub8 min_access;
+    ub8 max_access;
+    map <ub8, ub8>::iterator  clstr_itr;
+    map <ub8, ub8>::iterator  clstr_itr1;
+    map <ub8, ub8>::iterator  page_itr;
+    map <ub8, ub8>::iterator  block_itr;
+    map <ub8, ub8> *per_clstr_pages;
+    map <ub8, ub8> *per_page_block;
+
+    for (ub1 stream = NN + 1; stream <= TST; stream++)
+    {
+      if (cache->speedup_stream[stream])
+      {
+        cache->speedup_stream_count[stream] += 1;
+
+        cache->speedup_clstr[stream]  += cache->per_stream_clstr[stream].size();
+
+        clstr_page    = 0;
+        clstr_block   = 0;
+        block_access  = 0;
+        min_access    = cache->speedup_min_access[stream];
+        max_access    = cache->speedup_max_access[stream];
+
+        for (clstr_itr = cache->per_stream_clstr[stream].begin(); clstr_itr != cache->per_stream_clstr[stream].end(); clstr_itr++)
+        {
+          per_clstr_pages = (map<ub8, ub8> *)(clstr_itr->second);
+          clstr_page += per_clstr_pages->size(); 
+
+          for (page_itr = per_clstr_pages->begin(); page_itr != per_clstr_pages->end(); page_itr++)
+          {
+            per_page_block = (map<ub8, ub8> *)(page_itr->second);
+            clstr_block += per_page_block->size();
+
+            for (block_itr = per_page_block->begin(); block_itr != per_page_block->end(); block_itr++)
+            {
+              block_access += block_itr->second;    
+
+              if (block_itr->second > max_access)
+              {
+                max_access = block_itr->second;
+              }
+
+              if (min_access && block_itr->second < min_access)
+              {
+                min_access = block_itr->second;;
+              }
+            }
+          }
+        }
+
+        cache->speedup_page[stream]           += clstr_page;
+        cache->speedup_block[stream]          += clstr_block;
+        cache->speedup_access[stream]         += block_access;
+        cache->speedup_min_access[stream]      = (min_access == 0xffffffff) ? 0 : min_access;
+        cache->speedup_max_access[stream]      = max_access;
+        cache->speedup_page_z_access[stream]  += (PG_CLSTR_SIZE * cache->per_stream_clstr[stream].size()) - clstr_page;
+      }
+
+      cache->per_stream_fill[stream] /= 2;
+      cache->per_stream_max_fill /= 2;
+    }
+
+    dram_info = &(cache->dram_info);
+
+    for (stream_itr = dram_info->bank_list.begin(); stream_itr != dram_info->bank_list.end(); stream_itr++)
+    {
+      stream_id =  stream_itr->first;
+      bank_list = (map<ub1, ub8> *)(stream_itr->second);
+
+      for (bank_itr = bank_list->begin(); bank_itr != bank_list->end(); bank_itr++)
+      {
+        bank_id         = bank_itr->first;
+        per_bank_stats  = (bank_stats *)(bank_itr->second);
+
+        per_stream_row_list = new map <ub8, ub8> ();
+
+        cache->stream_access[stream_id][bank_id] += per_bank_stats->access;
+        cache->bank_access[stream_id][bank_id]   += 1;
+        cache->row_access[stream_id][bank_id]    += per_bank_stats->rows.size();
+
+        for (row_itr = per_bank_stats->rows.begin(); row_itr != per_bank_stats->rows.end(); row_itr++)
+        {
+          per_row_stats = (row_stats *)(row_itr->second);
+
+          cache->row_coverage[stream_id][bank_id] += per_row_stats->blocks.size();
+
+          delete per_row_stats;
+
+          per_stream_row_list->insert(pair<ub8, ub8>(row_itr->first, 1));
+        }
+
+        per_stream_rows[stream_id][bank_id] = per_stream_row_list;
+
+        delete per_bank_stats;
+      }
+
+      /* If stream has accesses any bank */
+      if (bank_list->size())
+      {
+        cache->bank_access_itr[stream_id]  += 1;
+        cache->bank_hit[stream_id]         += bank_list->size();
+      }
+
+      delete bank_list;
+    }
+
+    dram_info->bank_list.clear();
+
+    /* Find overlapping rows */
+    for (ub1 bank = 0; bank <= TOTAL_BANKS; bank++)
+    {
+      cs_row_list = per_stream_rows[CS][bank];
+      zs_row_list = per_stream_rows[ZS][bank];
+      ts_row_list = per_stream_rows[TS][bank];
+      ps_row_list = per_stream_rows[PS][bank];
+      bs_row_list = per_stream_rows[BS][bank];
+
+      /* Find color overlap */
+      if (cs_row_list)
+      {
+        for (row_itr = cs_row_list->begin(); row_itr != cs_row_list->end(); row_itr++)
+        {
+          if (zs_row_list && zs_row_list->find(row_itr->first) != zs_row_list->end())
+          {
+            cache->cz_row_access[bank] += 1;
+          }
+
+          if (ts_row_list && ts_row_list->find(row_itr->first) != ts_row_list->end())
+          {
+            cache->ct_row_access[bank] += 1;
+          }
+
+          if (ps_row_list && ps_row_list->find(row_itr->first) != ps_row_list->end())
+          {
+            cache->cp_row_access[bank] += 1;
+          }
+
+          if (bs_row_list && bs_row_list->find(row_itr->first) != bs_row_list->end())
+          {
+            cache->cb_row_access[bank] += 1;
+          }
+        }
+      }
+
+      /* Find depth overlap */
+      if (zs_row_list)
+      {
+        for (row_itr = zs_row_list->begin(); row_itr != zs_row_list->end(); row_itr++)
+        {
+          if (ts_row_list && ts_row_list->find(row_itr->first) != ts_row_list->end())
+          {
+            cache->zt_row_access[bank] += 1;
+          }
+
+          if (ps_row_list && ps_row_list->find(row_itr->first) != ps_row_list->end())
+          {
+            cache->zp_row_access[bank] += 1;
+          }
+
+          if (bs_row_list && bs_row_list->find(row_itr->first) != bs_row_list->end())
+          {
+            cache->zb_row_access[bank] += 1;
+          }
+        }
+      }
+
+      /* Find texture overlap */
+      if (ts_row_list)
+      {
+        for (row_itr = ts_row_list->begin(); row_itr != ts_row_list->end(); row_itr++)
+        {
+          if (ps_row_list && ps_row_list->find(row_itr->first) != ps_row_list->end())
+          {
+            cache->tp_row_access[bank] += 1;
+          }
+
+          if (bs_row_list && bs_row_list->find(row_itr->first) != bs_row_list->end())
+          {
+            cache->tb_row_access[bank] += 1;
+          }
+        }
+      }
+
+      /* Find CPU overlap */
+      if (ps_row_list)
+      {
+        for (row_itr = ps_row_list->begin(); row_itr != ps_row_list->end(); row_itr++)
+        {
+          if (bs_row_list && bs_row_list->find(row_itr->first) != bs_row_list->end())
+          {
+            cache->pb_row_access[bank] += 1;
+          }
+        }
+      }
+    }
+
+    for (ub1 stream = NN; stream <= TST; stream++)
+    {
+      for (ub1 bank = 0; bank <= TOTAL_BANKS; bank++)
+      {
+        if (per_stream_rows[stream][bank])
+        {
+          delete per_stream_rows[stream][bank];
+        }
+      }
+    }
+
+#if 0
+    /* Reset global bank list and add values into accumulator counters */
+    for (bank_itr = dram_info->g_bank_list.begin(); bank_itr != dram_info->g_bank_list.end(); bank_itr++)
+    {
+      bank_id = bank_itr->first;
+      per_bank_stats = (bank_stats *)(bank_itr->second);
+
+      cache->g_bank_access[bank_id]   += 1;
+      cache->g_row_access[bank_id]    += per_bank_stats->rows.size();
+
+      for (row_itr = per_bank_stats->rows.begin(); row_itr != per_bank_stats->rows.end(); row_itr++)
+      {
+        per_row_stats = (row_stats *)(row_itr->second);
+
+        cache->g_row_coverage[bank_id] += per_row_stats->blocks.size();
+
+        delete per_row_stats;
+      }
+
+      delete per_bank_stats;
+    }
+#endif
+
+    /* If stream has accesses any bank */
+    if (dram_info->g_bank_list.size())
+    {
+      cache->g_bank_access_itr  += 1;
+    }
+
+    dram_info->g_bank_list.clear();
+
+#if 0
+    printf("Max access %ld\n", cache->max_clstr_access);
+    printf("Remap cluster size %ld\n", cache->remap_clstr.size());
+    printf("Remap requested %ld\n", cache->remap_requested);
+    printf("Remap done %ld\n", cache->remap_done);
+
+    printf("Speedup stream C:%ld Z:%ld T:%ld P:%ld\n", cache->speedup_stream_count[CS],
+        cache->speedup_stream_count[ZS], cache->speedup_stream_count[TS], 
+        cache->speedup_stream_count[PS]);
+
+    printf("Remap per stream C:%ld Z:%ld T:%ld P:%ld\n", cache->src_remap_page_count[CS],
+        cache->src_remap_page_count[ZS], cache->src_remap_page_count[TS], 
+        cache->src_remap_page_count[PS]);
+    cache->remap_requested  = 0;
+    cache->remap_done       = 0;
+#endif    
+
+    /* Add new values to total */
+    cache->itr_count += 1;
+
+    cache->remap_clstr_count      += cache->remap_clstr.size();
+    cache->remap_src_clstr_count  += cache->remap_src_clstr.size();
+    cache->next_remap_clstr        = 0;
+
+    cache->remap_clstr.clear();
+    cache->remap_src_clstr.clear();
+
+    page_cluster *cluster;
+
+#define CRTCL_PAGE      (0)
+#define NON_CRTCL_PAGE  (1)
+#define PAGE_TYPE       (2)
+
+    ub8 cluster_id;
+    ub1 free_page;
+    ub8 page_count[PAGE_TYPE]   = {0, 0};
+    ub8 page_access[PAGE_TYPE]  = {0, 0};
+    free_page = FALSE;
+#if 0    
+    /* Find the clusters that belong to critical stream */
+    for (ub1 stream = NN + 1; stream <= TST; stream++)
+    {
+      if (cache->speedup_stream[stream])
+      {
+        clstr_itr = cache->per_stream_clstr[stream].begin();
+        for (; clstr_itr != cache->per_stream_clstr[stream].end(); clstr_itr++)
+        {
+          cluster_id = clstr_itr->first;
+
+          clstr_itr1 = cache->i_page_table.cluster.find(cluster_id);
+
+          assert(clstr_itr1 != cache->i_page_table.cluster.end());
+
+          cluster = (page_cluster *)(clstr_itr1->second);
+          assert(cluster);
+
+          free_page = FALSE;  
+
+          for (ub1 clstr = 0; clstr < PG_CLSTR_SIZE; clstr++)
+          {
+            if (cluster->page_stream[clstr] == stream)
+            {
+              page_count[CRTCL_PAGE] += 1; 
+            }
+            else
+            {
+              page_count[NON_CRTCL_PAGE] += 1; 
+            }
+          }
+
+          if (page_count[CRTCL_PAGE] > page_count[NON_CRTCL_PAGE])
+          {
+            free_page = TRUE;
+          }
+
+          if (cache->max_clstr_access > 32 && cluster->access_count < cache->max_clstr_access / 8)
+          {
+            cache->remap_clstr.push_back(cluster->id);
+          }
+        }
+      }
+    }
+#endif
+
+
+    page_info *pg_info;
+    page_info *tgt_pg_info;
+    page_cluster *src_cluster;
+    page_cluster *tgt_cluster;
+    ub8 src_page_access;
+    ub8 tgt_page_access;
+    ub8 src_frame_no;
+    ub8 tgt_frame_no;
+
+    list<pair<ub8, ub8> >::iterator frame_list_itr;
+
+    for (frame_list_itr = cache->src_frame_list.begin(); frame_list_itr != cache->src_frame_list.end(); frame_list_itr++)
+    {
+      pg_info = (page_info *)(frame_list_itr->second);
+      assert(pg_info);
+
+      if (pg_info->unused == FALSE)
+      {
+        cache->src_page_count += 1;
+      }
+    }
+
+    for (frame_list_itr = cache->tgt_frame_list.begin(); frame_list_itr != cache->tgt_frame_list.end(); frame_list_itr++)
+    {
+      pg_info = (page_info *)(frame_list_itr->second);
+      assert(pg_info);
+
+      if (pg_info->unused == FALSE && pg_info->valid == FALSE)
+      {
+        cache->tgt_page_count += 1;
+      }
+    }
+
+    for (ub8 src_page = 0; src_page < cache->remap_clstr.size(); src_page++)
+    {
+      delete (page_info *)cache->remap_clstr[src_page];
+    }
+
+    for (ub8 src_page = 0; src_page < cache->src_remap_clstr.size(); src_page++)
+    {
+      delete (page_info *)cache->src_remap_clstr[src_page];
+    }
+
+    if (cache->src_frames.size())
+    {
+      printf("\n");
+    }
+
+    ub1 entries = 0;
+
+    for (page_itr = cache->src_frames.begin(); page_itr != cache->src_frames.end(); page_itr++)
+    {
+      pg_info = (page_info *)(page_itr->second);
+      assert(pg_info);
+
+      if (pg_info->valid == FALSE && pg_info->unused == FALSE)
+      {
+        entries++;
+        cache->remap_pages[pg_info->cluster->page_stream[pg_info->cluster_off]] += 1;
+
+        if (pg_info->cluster->page_access[pg_info->cluster_off] < pg_info->cluster->page_remap_access[pg_info->cluster_off])
+        {
+          cache->zero_reuse_page[pg_info->cluster->page_stream[pg_info->cluster_off]] += 1;
+        }
+
+        printf("[%6ld %3s] :S: %3ld - %3ld | ", pg_info->cluster->id * PG_CLSTR_SIZE + pg_info->cluster_off, 
+            stream_names[pg_info->cluster->page_stream[pg_info->cluster_off]], 
+            pg_info->cluster->page_remap_access[pg_info->cluster_off], 
+            pg_info->cluster->page_access[pg_info->cluster_off]);
+
+        if (entries == 6)
+        {
+          entries = 0;
+          printf("\n");
+        }
+      }
+
+      delete pg_info;
+    }
+
+    if (cache->tgt_frames.size())
+    {
+      printf("\n Tgt freams ");
+    }
+
+    entries = 0;
+
+    for (page_itr = cache->tgt_frames.begin(); page_itr != cache->tgt_frames.end(); page_itr++)
+    {
+      pg_info = (page_info *)(page_itr->second);
+      assert(pg_info);
+
+      if (pg_info->valid == FALSE && pg_info->unused == FALSE)
+      {
+        entries++;
+        cache->tgt_remap_pages[pg_info->cluster->page_stream[pg_info->cluster_off]] += 1;
+
+        printf("[%6ld  %3s] :T: %3ld - %3ld | ", pg_info->cluster->id * PG_CLSTR_SIZE + pg_info->cluster_off, 
+            stream_names[pg_info->cluster->page_stream[pg_info->cluster_off]], 
+            pg_info->cluster->page_remap_access[pg_info->cluster_off], 
+            pg_info->cluster->page_access[pg_info->cluster_off]);
+
+        if (entries == 6)
+        {
+          entries = 0;
+          printf("\n");
+        }
+      }
+
+      delete pg_info;
+    }
+
+    if (cache->tgt_frames.size())
+    {
+      printf("\n");
+    }
+
+    cache->remap_clstr.clear();
+    cache->src_remap_clstr.clear();
+    cache->remap_frames.clear();
+    cache->src_frames.clear();
+    cache->tgt_frames.clear();
+    cache->src_frame_list.clear();
+    cache->tgt_frame_list.clear();
+    cache->remap_page_table.clear(); 
+
+    assert(cache->src_frame_list.size() == 0);
+    assert(cache->tgt_frame_list.size() == 0);
+
+    cache->src_added  = 0;
+    cache->tgt_added  = 0;
+
+#if 0
+    /* Got through all pages. Find a page which belong to speedup stream and 
+     * have very low access */
+    /* Find the clusters that belong to critical stream */
+    for (clstr_itr = cache->i_page_table.cluster.begin(); clstr_itr != cache->i_page_table.cluster.end(); clstr_itr++)
+    {
+      cluster = (page_cluster *)(clstr_itr->second);
+      assert(cluster);
+
+      for (ub1 page = 0; page < PG_CLSTR_SIZE; page++)
+      {
+        pg_info = new page_info();
+        assert(pg_info);
+
+        pg_info->cluster_id   = cluster->id;
+        pg_info->cluster_off  = page;
+        pg_info->valid        = TRUE;
+
+        if (cache->speedup_stream[cluster->page_stream[page]])
+        {
+          assert(cluster->page_stream[page] == CS || cluster->page_stream[page] == ZS || 
+              cluster->page_stream[page] == TS || cluster->page_stream[page] == IS || 
+              cluster->page_stream[page] == XS);
+
+          cache->remap_clstr.push_back((ub8)pg_info); 
+        }
+        else
+        {
+          cache->src_remap_clstr.push_back((ub8)pg_info); 
+        }
+      }
+    }
+#endif
+
+#if 0
+    printf("Srd clstr size  %ld\n", cache->src_remap_clstr.size());
+    printf("Tgt clstr size  %ld\n", cache->remap_clstr.size());
+    printf("Remap done %ld\n", cache->remap_done);
+#endif
+
+#if 0
+    for (ub8 src_page = 0; src_page < cache->src_remap_clstr.size(); src_page++)
+    {
+      pg_info = (page_info *)(cache->src_remap_clstr[src_page]);
+      assert(pg_info);
+
+      clstr_itr = cache->i_page_table.cluster.find(pg_info->cluster_id); 
+      assert(clstr_itr != cache->i_page_table.cluster.end());
+
+      src_cluster = (page_cluster *)(clstr_itr->second); 
+      assert(src_cluster);
+
+      src_frame_no = src_cluster->page_no[pg_info->cluster_off];
+      src_page_access = src_cluster->page_access[pg_info->cluster_off];
+
+      for (ub8 tgt_page = 0; tgt_page < cache->remap_clstr.size(); tgt_page++)
+      {
+        tgt_pg_info = (page_info *)cache->remap_clstr[tgt_page];
+        assert(tgt_pg_info);
+
+        if (tgt_pg_info->valid)
+        {
+          tgt_cluster = (page_cluster *)(cache->i_page_table.cluster.find(tgt_pg_info->cluster_id)->second);
+          assert(tgt_cluster);
+
+          tgt_frame_no = tgt_cluster->page_no[tgt_pg_info->cluster_off];
+          tgt_page_access = tgt_cluster->page_access[tgt_pg_info->cluster_off];
+
+          if (src_page_access > tgt_page_access)
+          {
+            cache->remap_page_count[tgt_cluster->page_stream[tgt_pg_info->cluster_off]] += 1;
+            cache->remap_src_page_count[src_cluster->page_stream[pg_info->cluster_off]] += 1;
+            cache->remap_access_count[tgt_cluster->page_stream[tgt_pg_info->cluster_off]] += src_page_access - tgt_page_access;
+            cache->remap_src_access_count[src_cluster->page_stream[pg_info->cluster_off]] += src_page_access;
+            cache->remap_tgt_access_count[tgt_cluster->page_stream[tgt_pg_info->cluster_off]] += tgt_page_access;
+
+            tgt_pg_info->valid = FALSE;
+            cache->remap_frames.push_back(tgt_frame_no);
+
+            cache->tgt_frames.insert(pair<ub8, ub8>(tgt_cluster->page_no[tgt_pg_info->cluster_off], 1)); 
+            cache->src_frames.insert(pair<ub8, ub8>(src_cluster->page_no[pg_info->cluster_off], 1)); 
+            break;
+          }
+        }
+      }
+    }
+#endif
+#undef CRTCL_PAGE
+#undef NON_CRTCL_PAGE
+#undef PAGE_TYPE
+
+    /* Update per-stream accessed pages */
+    for (ub1 stream = NN; stream <= TST; stream++)
+    {
+      cache->per_stream_page_access[stream] += cache->per_stream_pages[stream].size();
+      cache->per_stream_pages[stream].clear();
+
+      cache->per_stream_clstr_access[stream] += cache->per_stream_clstr[stream].size();
+
+      /* Delete all page maps */
+      for (clstr_itr = cache->per_stream_clstr[stream].begin(); clstr_itr != cache->per_stream_clstr[stream].end(); clstr_itr++)
+      {
+        per_clstr_pages = (map<ub8, ub8> *)(clstr_itr->second);
+
+        for (page_itr = per_clstr_pages->begin(); page_itr != per_clstr_pages->end(); page_itr++)
+        {
+          per_page_block = (map<ub8, ub8>*)(page_itr->second);
+
+          per_page_block->clear();
+
+          delete per_page_block;
+        }
+
+        per_clstr_pages->clear(); 
+
+        delete (map<ub8, ub8> *)(clstr_itr->second);
+      }
+
+      cache->per_stream_clstr[stream].clear();
+    }
+
+#undef TOTAL_BANKS
+
+    /* Clear access count for all clusters */
+    for (clstr_itr = cache->i_page_table.cluster.begin(); clstr_itr != cache->i_page_table.cluster.end(); clstr_itr++)
+    {
+      ((page_cluster*)(clstr_itr->second))->access_count      = 0;
+
+      for (ub1 page = 0; page < PG_CLSTR_SIZE; page++)
+      {
+        ((page_cluster*)(clstr_itr->second))->page_access[page] = 0;
+      }
+    }
+
+    cachesim_update_interval_end(cache);
+    
+    /* Print row-wise access and hit stats */
+#if 0
+    ub1 row_count;
+    ub8 row_access;
+    ub8 row_hit;
+
+    row_stats *row_info;
+
+    printf("\nSpeedup rows %ld\n", cache->speedup_rows.size());
+
+    row_count   = 0;
+    row_access  = 0;
+    row_hit     = 0;
+
+    for (row_itr = cache->speedup_rows.begin(); row_itr != cache->speedup_rows.end(); row_itr++)
+    {
+      row_info = (row_stats*)row_itr->second;
+      assert(row_info);
+
+      printf("[");
+      for (ub1 s = 0; s <= TST; s++)
+      {
+        if (row_info->stream[s])
+        {
+          printf("%3s-", stream_names[s]);
+          break;
+        }
+      }
+
+      printf("]");
+
+      printf("R:%5ld A:%5d H:%5.2f B:%5.2f| ", row_itr->first, row_info->access, 
+          (double)row_info->row_hits / row_info->access, (double)row_info->blocks.size() / 256);
+
+      if (++row_count == 6)
+      {
+        printf("\n");
+        row_count = 0;
+      }
+#if 0
+      if ((double)row_info->blocks.size() / 256 < .7)
+#endif
+      {
+        row_access += row_info->access;
+        row_hit    += row_info->row_hits;
+      }
+
+      delete row_info;
+    }
+
+    printf("\n Row access %5ld hit %5ld\n", row_access, row_hit);
+    
+    cache->speedup_rows.clear();
+#endif
+
+    /* Finalize component simulators */
+    cache->cache_access_count = 0;
+    cache->max_clstr_access   = 0;
+
+    cache->agg_remap_src_access += cache->remap_src_access;
+    cache->agg_remap_tgt_access += cache->remap_tgt_access;
+
+    cache->remap_src_access  = 0;
+    cache->remap_tgt_access  = 0;
+
+    printf(".");
+
+    fflush(stdout);
+  }
+
   return ret;
+}
+
+void cachesim_shadow_cache_lookup(cachesim_cache *cache, ub8 addr, 
+  ub1 strm, memory_trace *info)
+{
+  struct    cache_block_t *block;
+  ub8       indx;
+  ub8       old_tag;
+  memory_trace *info_out;
+
+  assert(cache);
+
+  indx        = ADDR_NDX(cache, addr);
+  addr        = BLCKALIGN(addr); 
+
+  if (strm == NN || strm > TST + MAX_CORES - 1)
+  {
+    cout << "Illegal stream " << (int)strm << endl;
+  }
+
+  assert(strm != NN && strm <= TST + MAX_CORES - 1);
+
+  block = cache_find_block(cache->cache, indx, addr, info);
+
+  /* If access is a miss */
+  if (!block)
+  {
+    assert(info->prefetch == FALSE);
+
+    if (cache->dramsim_enable && info->fill == TRUE)
+    {
+      /* If mshr is available and DRAM transaction queue has space,
+       * send request to DRAM, else NACK the request */
+      info_out = (memory_trace *)calloc(1, sizeof(memory_trace));
+      assert(info_out);
+
+      info_out->address     = info->address;
+      info_out->stream      = info->stream;
+      info_out->sap_stream  = info->sap_stream;
+      info_out->fill        = TRUE;
+      info_out->cycle       = cache->dramcycle;
+      info_out->vtl_addr    = info_out->address;
+      info_out->prefetch    = FALSE;
+
+      ub8 speedup_row_id;
+      map<ub8, ub8>::iterator map_itr;
+      row_stats *row_info;
+
+      dram_row_set *row_set;
+      dram_row     *set_row;
+      ub8           row_indx;
+      ub8           row_set_indx;
+      ub8           min_access_row;
+
+      if (cache->shuffle_row)
+      {
+        row_indx      = get_row_id(info->address);
+        row_set_indx  = row_indx % ROW_SET_SIZE;
+
+        /* Add to row_set */
+        map_itr = cache->dramsim_row_set.find(row_set_indx);
+        if (map_itr == cache->dramsim_row_set.end())
+        {
+          row_set = new dram_row_set();
+          assert(row_set);
+
+          row_set->set_access = 0;
+
+          cache->dramsim_row_set.insert(pair<ub8, ub8>(row_set_indx, (ub8)row_set));
+        }
+        else
+        {
+          row_set = (dram_row_set *)(map_itr->second);
+          assert(row_set);
+        }
+
+        row_set->set_access += 1;
+
+        map_itr = row_set->rows.find(row_indx);
+        if (map_itr == row_set->rows.end()) 
+        {
+          set_row = new dram_row();
+          assert(set_row);
+
+          row_set->rows.insert(pair<ub8, ub8>(row_indx, (ub8)set_row));
+        }
+        else
+        {
+          set_row = (dram_row *)(map_itr->second);
+          assert(set_row);
+        }
+
+        set_row->row_access += 1;
+        row_set->row_access += 1;
+
+
+       row_set->open_row_id = dramsim_get_open_row(info);
+
+        if (row_set->open_row_id == row_indx)
+        {
+          set_row->row_open   += 1;
+          set_row->btob_hits  += 1;
+        }
+        else
+        {
+          if (set_row->btob_hits > set_row->max_btob_hits)
+          {
+            set_row->max_btob_hits = set_row->btob_hits;
+          }
+
+#if 0
+          set_row->btob_hits = 0;
+
+          if (row_set->row_access >= 1024 && row_set->rows.size() > 64)
+          {
+            min_access_row = row_set->getMinRow();
+            printf("%ld\n", min_access_row);
+
+            if (min_access_row != row_indx)
+            {
+              info_out->address = change_row_id(info_out->address, min_access_row);
+            }
+          }
+#endif
+        }
+
+        update_dramsim_shadow_tag_open_row_stats(cache, info_out);
+#if 0
+        update_dramsim_open_row_stats(cache, info_out);
+#endif
+      }
+
+      pending_requests += 1;
+    }
+
+    cachesim_fill_block(cache, info);
+  }
+  else
+  {
+    cache_access_block(cache->cache, indx, block->way, strm, info);
+  }
+  
+  cachesim_update_hint_count(cache, info);
+  
+  if (++(cache->cache_access_count) >= INTERVAL_SIZE)
+  {
+    /* Dump dramsim bank info */
+    dram_config *dram_info;
+
+#define TOTAL_BANKS (NUM_CHANS * NUM_RANKS * NUM_BANKS)
+
+    map<ub1, ub8>::iterator bank_itr;
+    map<ub1, ub8>::iterator stream_itr;
+    map<ub8, ub8>::iterator row_itr;
+    ub1 stream_id;
+    ub1 bank_id;
+    map <ub1, ub8> *bank_list;
+    bank_stats     *per_bank_stats;
+    row_stats      *per_row_stats;
+    map <ub8, ub8> *per_stream_rows[TST + 1][TOTAL_BANKS + 1];
+    map <ub8, ub8> *per_stream_row_list;
+    map <ub8, ub8> *cs_row_list;
+    map <ub8, ub8> *zs_row_list;
+    map <ub8, ub8> *ts_row_list;
+    map <ub8, ub8> *ps_row_list;
+    map <ub8, ub8> *bs_row_list;
+
+    for (ub4 i = 0; i <= TST; i++)
+    {
+      for (ub4 j = 0; j <= TOTAL_BANKS; j++)
+      {
+        per_stream_rows[i][j] = NULL;
+      }
+    }
+
+    ub8 clstr_page;
+    ub8 clstr_block;
+    ub8 block_access;
+    ub8 min_access;
+    ub8 max_access;
+    map <ub8, ub8>::iterator  clstr_itr;
+    map <ub8, ub8>::iterator  clstr_itr1;
+    map <ub8, ub8>::iterator  page_itr;
+    map <ub8, ub8>::iterator  block_itr;
+    map <ub8, ub8> *per_clstr_pages;
+    map <ub8, ub8> *per_page_block;
+
+    for (ub1 stream = NN + 1; stream <= TST; stream++)
+    {
+      if (cache->speedup_stream[stream])
+      {
+        cache->speedup_stream_count[stream] += 1;
+
+        cache->speedup_clstr[stream]  += cache->per_stream_clstr[stream].size();
+
+        clstr_page    = 0;
+        clstr_block   = 0;
+        block_access  = 0;
+        min_access    = cache->speedup_min_access[stream];
+        max_access    = cache->speedup_max_access[stream];
+
+        for (clstr_itr = cache->per_stream_clstr[stream].begin(); clstr_itr != cache->per_stream_clstr[stream].end(); clstr_itr++)
+        {
+          per_clstr_pages = (map<ub8, ub8> *)(clstr_itr->second);
+          clstr_page += per_clstr_pages->size(); 
+
+          for (page_itr = per_clstr_pages->begin(); page_itr != per_clstr_pages->end(); page_itr++)
+          {
+            per_page_block = (map<ub8, ub8> *)(page_itr->second);
+            clstr_block += per_page_block->size();
+
+            for (block_itr = per_page_block->begin(); block_itr != per_page_block->end(); block_itr++)
+            {
+              block_access += block_itr->second;    
+
+              if (block_itr->second > max_access)
+              {
+                max_access = block_itr->second;
+              }
+
+              if (min_access && block_itr->second < min_access)
+              {
+                min_access = block_itr->second;;
+              }
+            }
+          }
+        }
+
+        cache->speedup_page[stream]           += clstr_page;
+        cache->speedup_block[stream]          += clstr_block;
+        cache->speedup_access[stream]         += block_access;
+        cache->speedup_min_access[stream]      = (min_access == 0xffffffff) ? 0 : min_access;
+        cache->speedup_max_access[stream]      = max_access;
+        cache->speedup_page_z_access[stream]  += (PG_CLSTR_SIZE * cache->per_stream_clstr[stream].size()) - clstr_page;
+      }
+
+      cache->per_stream_fill[stream] /= 2;
+      cache->per_stream_max_fill /= 2;
+    }
+
+    dram_info = &(cache->dram_info);
+
+    for (stream_itr = dram_info->bank_list.begin(); stream_itr != dram_info->bank_list.end(); stream_itr++)
+    {
+      stream_id =  stream_itr->first;
+      bank_list = (map<ub1, ub8> *)(stream_itr->second);
+
+      for (bank_itr = bank_list->begin(); bank_itr != bank_list->end(); bank_itr++)
+      {
+        bank_id         = bank_itr->first;
+        per_bank_stats  = (bank_stats *)(bank_itr->second);
+
+        per_stream_row_list = new map <ub8, ub8> ();
+
+        cache->stream_access[stream_id][bank_id] += per_bank_stats->access;
+        cache->bank_access[stream_id][bank_id]   += 1;
+        cache->row_access[stream_id][bank_id]    += per_bank_stats->rows.size();
+
+        for (row_itr = per_bank_stats->rows.begin(); row_itr != per_bank_stats->rows.end(); row_itr++)
+        {
+          per_row_stats = (row_stats *)(row_itr->second);
+
+          cache->row_coverage[stream_id][bank_id] += per_row_stats->blocks.size();
+
+          delete per_row_stats;
+
+          per_stream_row_list->insert(pair<ub8, ub8>(row_itr->first, 1));
+        }
+
+        per_stream_rows[stream_id][bank_id] = per_stream_row_list;
+
+        delete per_bank_stats;
+      }
+
+      /* If stream has accesses any bank */
+      if (bank_list->size())
+      {
+        cache->bank_access_itr[stream_id]  += 1;
+        cache->bank_hit[stream_id]         += bank_list->size();
+      }
+
+      delete bank_list;
+    }
+
+    dram_info->bank_list.clear();
+  }
 }
 
 cache_access_status cachesim_only_dram(cachesim_cache *cache, ub8 addr, 
@@ -1796,6 +4531,7 @@ void set_cache_params(struct cache_params *params, LChParameters *lcP,
   params->streams               = lcP->streams;
   params->bs_epoch              = lcP->useBs;
   params->speedup_enabled       = lcP->speedupEnabled;
+  params->remap_crtcl           = lcP->remapCrtcl;
   params->use_step              = lcP->useStep;
   params->sampler_sets          = lcP->samplerSets;
   params->sampler_ways          = lcP->samplerWays;
@@ -2118,7 +4854,7 @@ void closeStatisticsStream(gzofstream &out_stream)
   out_stream.close();
 }
 
-void dumpOverallStats(cachesim_cache *cache, ub8 cycle, ub8 cache_cycle, ub8 dram_cycle)
+void dumpOverallStats(cachesim_cache *cache, ub8 cycle, ub8 cachecycle, ub8 dramcycle)
 {
   FILE *fout;
   ub1   i;
@@ -2129,8 +4865,17 @@ void dumpOverallStats(cachesim_cache *cache, ub8 cycle, ub8 cache_cycle, ub8 dra
   fprintf(fout, "[LLC]\n");
   
   fprintf(fout, "Cycles = %ld\n", cycle);
-  fprintf(fout, "CacheCycles = %ld\n", cache_cycle);
-  fprintf(fout, "DramCycles = %ld\n", dram_cycle);
+  fprintf(fout, "CacheCycles = %ld\n", cachecycle);
+  fprintf(fout, "DramCycles = %ld\n", dramcycle);
+  fprintf(fout, "CSDramRquestCycles = %ld\n", dram_request_cycle[CS]);
+  fprintf(fout, "ZSDramRquestCycles = %ld\n", dram_request_cycle[ZS]);
+  fprintf(fout, "TSDramRquestCycles = %ld\n", dram_request_cycle[TS]);
+  fprintf(fout, "BSDramRquestCycles = %ld\n", dram_request_cycle[BS]);
+  fprintf(fout, "PSDramRquestCycles = %ld\n", dram_request_cycle[PS]);
+  fprintf(fout, "OSDramRquestCycles = %ld\n", 
+      dram_request_cycle[IS] + dram_request_cycle[NS] + dram_request_cycle[XS] + 
+      dram_request_cycle[DS] + dram_request_cycle[HS]);
+
   fprintf(fout, "ReadStall = %ld\n", read_stall);
   fprintf(fout, "WriteStall = %ld\n", write_stall);
   fprintf(fout, "MSHRStall = %ld\n", mshr_stall);
@@ -4381,11 +7126,15 @@ void update_access_stats(cachesim_cache *cache, memory_trace *info, cache_access
   }
 }
 
-ub1 dram_cycle(cachesim_cache *cache)
+ub1 dram_cycle(cachesim_cache *cache, ub8 dramcycle)
 {
   memory_trace        *info;
   cache_access_status  ret;
-  
+  row_stats           *row_info;
+  ub8                  row_id;
+
+  map<ub8, ub8>::iterator row_itr;
+
   assert(cache->dramsim_enable);
 
   dramsim_update();
@@ -4395,13 +7144,49 @@ ub1 dram_cycle(cachesim_cache *cache)
   if (info)
   {
     assert(pending_requests);
+    
+#if 0
+    if (cache->shuffle_row)
+#endif
+    if (info->fill && cache->shuffle_row)
+    {
+      update_dramsim_open_row_response_stats(cache, info);
+    }
+    
+    /* Restore old physical address */
+    info->address = info->vtl_addr;
 
     cs_free_mshr(cache, info);
 
     pending_requests -= 1;
 
+    assert(dramcycle >= info->cycle);
+
     if (info->fill)
     {
+      dram_request_cycle[info->stream] += dramcycle - info->cycle;
+      
+      /* Prefetch is used for row hits */
+#if 0
+      if (info->prefetch && info->sap_stream == speedup_stream_x)
+      if (info->prefetch)
+      if (info->prefetch && info->stream == PS)
+#endif
+      if (info->prefetch && info->stream == PS)
+      {
+        row_id = get_row_id(info->address);
+
+        row_itr = cache->speedup_rows.find(row_id);
+        if (row_itr != cache->speedup_rows.end())
+        {
+
+          row_info = (row_stats *)(row_itr->second);
+          assert(row_info);
+
+          row_info->row_hits += 1;
+        }
+      }
+
       ret = cachesim_fill_block(cache, info);
 
       update_access_stats(cache, info, ret);
@@ -4413,7 +7198,7 @@ ub1 dram_cycle(cachesim_cache *cache)
   return (pending_requests == 0);
 }
 
-ub1 cache_cycle(cachesim_cache *cache, ub8 cachecycle)
+ub1 cache_cycle(cachesim_cache *cache, cachesim_cache *shadow_tag, ub8 cachecycle)
 {
   cs_qnode             *current_queue;  /* Queue for last request */
   cs_qnode             *current_node;   /* Last request node */
@@ -4472,18 +7257,22 @@ ub1 cache_cycle(cachesim_cache *cache, ub8 cachecycle)
 #undef QUEUE_HEAD
 #undef QUEUE_HEAD_DATA
 
+#if 0
+    if (info)
+#endif
     if (info && cachecycle >= info->cycle)
     {
       assert(current_queue);
       assert(current_node);
 
       info->vtl_addr  = info->address;
+#if 0
       info->address   = mmu_translate(cache, info);
-
+#endif
       if (cache->dramsim_trace == FALSE)
       {
         /* Increment per-set access count */
-        ret = cachesim_incl_cache(cache, info->address, 0, info->stream, info);
+        ret = cachesim_incl_cache(cache, shadow_tag, info->address, 0, info->stream, info);
 
         assert(ret.fate == CACHE_ACCESS_HIT || ret.fate == CACHE_ACCESS_MISS ||
             ret.fate == CACHE_ACCESS_NACK || ret.fate == CACHE_ACCESS_UNK || 
@@ -4531,10 +7320,156 @@ ub1 cache_cycle(cachesim_cache *cache, ub8 cachecycle)
           }
         }
       }
+      
+      /* Update cachecycle interval end */
+      if (cache->cachecycle_interval >= CYCLE_INTERVAL)
+      {
+        map<ub8, ub8>::iterator row_set_itr;
+        map<ub8, ub8>::iterator row_itr;
+        dram_row_set  *row_set;
+        dram_row      *set_row;
+
+        cachesim_update_cycle_interval_end(cache, shadow_tag);
+        cache->cachecycle_interval = 0;
+
+        for (row_set_itr = cache->dramsim_row_set.begin(); row_set_itr != cache->dramsim_row_set.end(); row_set_itr++)
+        {
+          row_set = (dram_row_set *)(row_set_itr->second);
+          assert(row_set);
+          
+          row_set->set_access /= 2;
+
+          for (row_itr = row_set->rows.begin(); row_itr != row_set->rows.end(); row_itr++)  
+          {
+            set_row = (dram_row *)(row_itr->second);
+
+            set_row->row_access /= 2; 
+            set_row->row_open   /= 2; 
+
+            if (set_row->row_access == 0)
+            {
+              delete set_row;
+
+              row_set->rows.erase(row_itr->first);
+            }
+          }
+        }
+      }
     }
   }
 
   return (gzeof(cache->trc_file));
+}
+
+void shadow_tag_cycle(cachesim_cache *cache)
+{
+  cs_qnode             *current_queue;  /* Queue for last request */
+  cs_qnode             *current_node;   /* Last request node */
+  memory_trace         *info;           /* Generic structure used for requests between units */
+  memory_trace         *new_info;       /* Generic structure used for requests between units */
+
+  if (!gzeof(cache->trc_file) || !cs_qempty(&(cache->rdylist)) || !cs_qempty(&(cache->plist)))
+  {
+    info          = NULL;
+    current_queue = NULL;
+    current_node  = NULL;
+
+    if (cs_qempty(&(cache->rdylist)) && !gzeof(cache->trc_file))
+    {
+      new_info = (memory_trace *)calloc(1, sizeof(memory_trace));
+      assert(new_info);
+  
+      gzread(cache->trc_file, (char *)new_info, sizeof(memory_trace));
+
+      if (!gzeof(cache->trc_file))
+      {
+        cs_qappend(&(cache->rdylist), (ub1 *)new_info);  
+      }
+      else
+      {
+        free(new_info);
+      }
+    }
+
+    /* Read entire trace file and run the simulation */
+
+#define QUEUE_HEAD(q)       ((cs_qnode *)((q)->next))
+#define QUEUE_HEAD_DATA(q)  (((cs_qnode *)((q)->next))->data)
+
+    if (cs_qempty(&(cache->plist)))
+    {
+      if (!cs_qempty(&(cache->rdylist)))
+      {
+        current_queue = &(cache->rdylist);
+        current_node  = (cs_qnode*)QUEUE_HEAD(&(cache->rdylist));
+
+        info = (memory_trace *)QUEUE_HEAD_DATA(&(cache->rdylist));
+      }
+    }
+    else
+    {
+      current_queue = &(cache->plist);
+      current_node  = (cs_qnode*)QUEUE_HEAD(&(cache->plist));
+
+      info = (memory_trace *)QUEUE_HEAD_DATA(&(cache->plist));
+    }
+
+#undef QUEUE_HEAD
+#undef QUEUE_HEAD_DATA
+
+    if (info)
+    {
+      assert(current_queue);
+      assert(current_node);
+
+      info->vtl_addr  = info->address;
+
+      assert(cache->dramsim_trace == FALSE);
+
+      
+      /* Increment per-set access count */
+      cachesim_shadow_cache_lookup(cache, info->address, info->stream, info);
+
+      cs_qdelete(current_queue, current_node);
+      free(info);
+      
+      /* Update cachecycle interval end */
+      if (cache->cachecycle_interval >= CYCLE_INTERVAL)
+      {
+        map<ub8, ub8>::iterator row_set_itr;
+        map<ub8, ub8>::iterator row_itr;
+        dram_row_set  *row_set;
+        dram_row      *set_row;
+#if 0
+        cachesim_update_cycle_interval_end(cache);
+#endif
+        cache->cachecycle_interval = 0;
+
+        for (row_set_itr = cache->dramsim_row_set.begin(); row_set_itr != cache->dramsim_row_set.end(); row_set_itr++)
+        {
+          row_set = (dram_row_set *)(row_set_itr->second);
+          assert(row_set);
+          
+          row_set->set_access /= 2;
+
+          for (row_itr = row_set->rows.begin(); row_itr != row_set->rows.end(); row_itr++)  
+          {
+            set_row = (dram_row *)(row_itr->second);
+
+            set_row->row_access /= 2; 
+            set_row->row_open   /= 2; 
+
+            if (set_row->row_access == 0)
+            {
+              delete set_row;
+
+              row_set->rows.erase(row_itr->first);
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 /* Simulation start */
@@ -4560,8 +7495,6 @@ int main(int argc, char **argv)
   ub8  dram_next_cycle;
   ub8  current_cycle;
   ub8  total_cycle;
-  ub8  dramcycle;
-  ub8  cachecycle;
   ub1  dram_done;
   ub1  cache_done;
 
@@ -4571,20 +7504,25 @@ int main(int argc, char **argv)
   SimParameters       sim_params;
   struct cache_params params;
   cachesim_cache      l3cache;
+  cachesim_cache      shadow_tags;
   ConfigLoader       *cfg_loader;
   StatisticsManager  *sm;
 
   /* Verify bitness */
   assert(sizeof(ub8) == 8 && sizeof(ub4) == 4);
 
-  inscnt            = 0;
-  trc_file_name     = NULL;
-  config_file_name  = NULL;
-  invalid_hits      = 0;
-  pending_requests  = 0;
-  total_cycle       = 0;
-  dramcycle         = 0;
-  cachecycle        = 0;
+  inscnt              = 0;
+  trc_file_name       = NULL;
+  config_file_name    = NULL;
+  invalid_hits        = 0;
+  pending_requests    = 0;
+  total_cycle         = 0;
+  cache_done          = TRUE;
+
+  for (ub1 stream = NN; stream <= TST; stream++)
+  {
+    dram_request_cycle[stream]  = 0;
+  }
 
   /* Instantiate statistics manager */
   sm = &StatisticsManager::instance(); 
@@ -4702,7 +7640,7 @@ int main(int argc, char **argv)
     dram_config_init(&(l3cache.dram_info));
   }
 
-  cout << "Running for " << cache_count << " iterations\n";
+  cout << endl << "Running for " << cache_count << " iterations" << endl;
 
   for (ub1 c_cache = 0; c_cache < cache_count; c_cache++)
   {
@@ -4715,6 +7653,9 @@ int main(int argc, char **argv)
       CLRSTRUCT(l3cache.access); 
       CLRSTRUCT(l3cache.miss); 
       CLRSTRUCT(l3cache.itr_count);
+      CLRSTRUCT(shadow_tags.access); 
+      CLRSTRUCT(shadow_tags.miss); 
+      CLRSTRUCT(shadow_tags.itr_count);
 
 #define TOTAL_BANKS (NUM_CHANS * NUM_RANKS * NUM_BANKS)
 
@@ -4751,8 +7692,6 @@ int main(int argc, char **argv)
         l3cache.pb_row_access[j]  = 0;
       }
 
-#undef TOTAL_BANKS
-
       l3cache.g_bank_access_itr = 0;
 
       set_cache_params(&params, &(sim_params.lcP), cache_sizes[c_cache], cache_ways[c_way], cache_set);
@@ -4779,8 +7718,13 @@ int main(int argc, char **argv)
           cache_sizes[c_cache], params.ways, params.num_sets);
 
       /* Initialize components and record cycle times */
-      cache_ctime       = cs_init(&l3cache, params, trc_file_name);
-      cache_next_cycle  = cache_ctime;
+      cache_ctime         = cs_init(&l3cache, params, trc_file_name);
+      cache_next_cycle    = cache_ctime;
+      l3cache.shadow_tag  = FALSE; 
+
+      /* Initialize shadow tags */
+      cs_init(&shadow_tags, params, trc_file_name);
+      shadow_tags.shadow_tag  = TRUE; 
       
       if (l3cache.dramsim_enable)
       {
@@ -4812,16 +7756,21 @@ int main(int argc, char **argv)
 
         if (!cache_next_cycle)
         {
-          cache_done = cache_cycle(&l3cache, cachecycle);
-          cache_next_cycle = cache_ctime;
-          cachecycle += 1;
+          cache_done        = cache_cycle(&l3cache, &shadow_tags, l3cache.cachecycle);
+          cache_next_cycle  = cache_ctime;
+          
+          /* Access shadow tags  */
+          shadow_tag_cycle(&shadow_tags);
+
+          l3cache.cachecycle          += 1;
+          l3cache.cachecycle_interval += 1;
         }
 
         if (l3cache.dramsim_enable && !dram_next_cycle)
         {
-          dram_done = dram_cycle(&l3cache);
+          dram_done = dram_cycle(&l3cache, l3cache.dramcycle);
           dram_next_cycle = dram_ctime;
-          dramcycle += 1;
+          l3cache.dramcycle += 1;
         }
 
         total_cycle += 1;
@@ -4840,211 +7789,6 @@ int main(int argc, char **argv)
           sm->dumpValues(cache_sizes[c_cache], 0, CH, stats_stream);
           periodicReset();
 
-          /* Dump dramsim bank info */
-          dram_config *dram_info;
-
-#define TOTAL_BANKS (NUM_CHANS * NUM_RANKS * NUM_BANKS)
-
-          map<ub1, ub8>::iterator bank_itr;
-          map<ub1, ub8>::iterator stream_itr;
-          map<ub8, ub8>::iterator row_itr;
-          ub1 stream_id;
-          ub1 bank_id;
-          map <ub1, ub8> *bank_list;
-          bank_stats     *per_bank_stats;
-          row_stats      *per_row_stats;
-          map <ub8, ub8> *per_stream_rows[TST + 1][TOTAL_BANKS + 1];
-          map <ub8, ub8> *per_stream_row_list;
-          map <ub8, ub8> *cs_row_list;
-          map <ub8, ub8> *zs_row_list;
-          map <ub8, ub8> *ts_row_list;
-          map <ub8, ub8> *ps_row_list;
-          map <ub8, ub8> *bs_row_list;
-          
-          for (ub4 i = 0; i <= TST; i++)
-          {
-            for (ub4 j = 0; j <= TOTAL_BANKS; j++)
-            {
-              per_stream_rows[i][j] = NULL;
-            }
-          }
-
-          dram_info = &(l3cache.dram_info);
-
-          for (stream_itr = dram_info->bank_list.begin(); stream_itr != dram_info->bank_list.end(); stream_itr++)
-          {
-            stream_id =  stream_itr->first;
-            bank_list = (map<ub1, ub8> *)(stream_itr->second);
-            
-            for (bank_itr = bank_list->begin(); bank_itr != bank_list->end(); bank_itr++)
-            {
-              bank_id         = bank_itr->first;
-              per_bank_stats  = (bank_stats *)(bank_itr->second);
-              
-              per_stream_row_list = new map <ub8, ub8> ();
-
-              l3cache.stream_access[stream_id][bank_id] += per_bank_stats->access;
-              l3cache.bank_access[stream_id][bank_id]   += 1;
-              l3cache.row_access[stream_id][bank_id]    += per_bank_stats->rows.size();
-               
-              for (row_itr = per_bank_stats->rows.begin(); row_itr != per_bank_stats->rows.end(); row_itr++)
-              {
-                per_row_stats = (row_stats *)(row_itr->second);
-
-                l3cache.row_coverage[stream_id][bank_id] += per_row_stats->blocks.size();
-
-                delete per_row_stats;
-
-                per_stream_row_list->insert(pair<ub8, ub8>(row_itr->first, 1));
-              }
-              
-              per_stream_rows[stream_id][bank_id] = per_stream_row_list;
-
-              delete per_bank_stats;
-            }
-            
-            /* If stream has accesses any bank */
-            if (bank_list->size())
-            {
-              l3cache.bank_access_itr[stream_id]  += 1;
-              l3cache.bank_hit[stream_id]         += bank_list->size();
-            }
-
-            delete bank_list;
-          }
-          
-          /* Find overlapping rows */
-          for (ub1 bank = 0; bank <= TOTAL_BANKS; bank++)
-          {
-            cs_row_list = per_stream_rows[CS][bank];
-            zs_row_list = per_stream_rows[ZS][bank];
-            ts_row_list = per_stream_rows[TS][bank];
-            ps_row_list = per_stream_rows[PS][bank];
-            bs_row_list = per_stream_rows[BS][bank];
-
-            /* Find color overlap */
-            if (cs_row_list)
-            {
-              for (row_itr = cs_row_list->begin(); row_itr != cs_row_list->end(); row_itr++)
-              {
-                if (zs_row_list && zs_row_list->find(row_itr->first) != zs_row_list->end())
-                {
-                  l3cache.cz_row_access[bank] += 1;
-                }
-
-                if (ts_row_list && ts_row_list->find(row_itr->first) != ts_row_list->end())
-                {
-                  l3cache.ct_row_access[bank] += 1;
-                }
-
-                if (ps_row_list && ps_row_list->find(row_itr->first) != ps_row_list->end())
-                {
-                  l3cache.cp_row_access[bank] += 1;
-                }
-
-                if (bs_row_list && bs_row_list->find(row_itr->first) != bs_row_list->end())
-                {
-                  l3cache.cb_row_access[bank] += 1;
-                }
-              }
-            }
-
-            /* Find depth overlap */
-            if (zs_row_list)
-            {
-              for (row_itr = zs_row_list->begin(); row_itr != zs_row_list->end(); row_itr++)
-              {
-                if (ts_row_list && ts_row_list->find(row_itr->first) != ts_row_list->end())
-                {
-                  l3cache.zt_row_access[bank] += 1;
-                }
-
-                if (ps_row_list && ps_row_list->find(row_itr->first) != ps_row_list->end())
-                {
-                  l3cache.zp_row_access[bank] += 1;
-                }
-
-                if (bs_row_list && bs_row_list->find(row_itr->first) != bs_row_list->end())
-                {
-                  l3cache.zb_row_access[bank] += 1;
-                }
-              }
-            }
-
-            /* Find texture overlap */
-            if (ts_row_list)
-            {
-              for (row_itr = ts_row_list->begin(); row_itr != ts_row_list->end(); row_itr++)
-              {
-                if (ps_row_list && ps_row_list->find(row_itr->first) != ps_row_list->end())
-                {
-                  l3cache.tp_row_access[bank] += 1;
-                }
-
-                if (bs_row_list && bs_row_list->find(row_itr->first) != bs_row_list->end())
-                {
-                  l3cache.tb_row_access[bank] += 1;
-                }
-              }
-            }
-
-            /* Find CPU overlap */
-            if (ps_row_list)
-            {
-              for (row_itr = ps_row_list->begin(); row_itr != ps_row_list->end(); row_itr++)
-              {
-                if (bs_row_list && bs_row_list->find(row_itr->first) != bs_row_list->end())
-                {
-                  l3cache.pb_row_access[bank] += 1;
-                }
-              }
-            }
-          }
-
-          for (ub1 stream = NN; stream <= TST; stream++)
-          {
-            for (ub1 bank = 0; bank <= TOTAL_BANKS; bank++)
-            {
-              if (per_stream_rows[stream][bank])
-              {
-                delete per_stream_rows[stream][bank];
-              }
-            }
-          }
-
-          dram_info->bank_list.clear();
-          
-          /* Reset global bank list and add values into accumulator counters */
-          for (bank_itr = dram_info->g_bank_list.begin(); bank_itr != dram_info->g_bank_list.end(); bank_itr++)
-          {
-            bank_id = bank_itr->first;
-            per_bank_stats = (bank_stats *)(bank_itr->second);
-
-            l3cache.g_bank_access[bank_id]   += 1;
-            l3cache.g_row_access[bank_id]    += per_bank_stats->rows.size();
-
-            for (row_itr = per_bank_stats->rows.begin(); row_itr != per_bank_stats->rows.end(); row_itr++)
-            {
-              per_row_stats = (row_stats *)(row_itr->second);
-
-              l3cache.g_row_coverage[bank_id] += per_row_stats->blocks.size();
-
-              delete per_row_stats;
-            }
-
-            delete per_bank_stats;
-          }
-
-          /* If stream has accesses any bank */
-          if (dram_info->g_bank_list.size())
-          {
-            l3cache.g_bank_access_itr  += 1;
-          }
-
-          dram_info->g_bank_list.clear();
-
-          /* Add new values to total */
-          l3cache.itr_count += 1;
         }
       }while(!cache_done || !dram_done);
       
@@ -5052,7 +7796,35 @@ int main(int argc, char **argv)
       ub1 stream_id;
       ub1 bank_id;
       map <ub1, ub8> *bank_list;
+      map<ub1, ub8>::iterator bank_itr;
+      map<ub8, ub8>::iterator row_itr;
+      bank_stats     *per_bank_stats;
+      row_stats      *per_row_stats;
       
+      dram_info = &(l3cache.dram_info);
+
+      /* Reset global bank list and add values into accumulator counters */
+      for (bank_itr = dram_info->g_bank_list.begin(); bank_itr != dram_info->g_bank_list.end(); bank_itr++)
+      {
+        bank_id = bank_itr->first;
+        per_bank_stats = (bank_stats *)(bank_itr->second);
+
+        l3cache.g_bank_access[bank_id]   += 1;
+        l3cache.g_row_access[bank_id]    += per_bank_stats->rows.size();
+
+        for (row_itr = per_bank_stats->rows.begin(); row_itr != per_bank_stats->rows.end(); row_itr++)
+        {
+          per_row_stats = (row_stats *)(row_itr->second);
+
+          l3cache.g_row_coverage[bank_id] += per_row_stats->blocks.size();
+
+          delete per_row_stats;
+        }
+
+        delete per_bank_stats;
+      }
+
+#if 0
       printf("Total iterations %ld\n", l3cache.itr_count);
 
       printf("DRAM Average bank access stats \n");
@@ -5115,10 +7887,7 @@ int main(int argc, char **argv)
         {
           if (l3cache.bank_access_itr[stream_id])
           {
-#if 0
             printf("%ld; ", l3cache.row_access[stream_id][bank_id] / l3cache.bank_access_itr[stream_id]);
-#endif
-            printf("%ld; ", l3cache.row_access[stream_id][bank_id]);
           }
           else
           {
@@ -5140,10 +7909,7 @@ int main(int argc, char **argv)
         {
           if (l3cache.row_access[stream_id][bank_id])
           {
-#if 0
             printf("%ld; ", l3cache.row_coverage[stream_id][bank_id] / l3cache.row_access[stream_id][bank_id]);
-#endif
-            printf("%ld; ", l3cache.row_coverage[stream_id][bank_id]);
           }
           else
           {
@@ -5162,9 +7928,6 @@ int main(int argc, char **argv)
       {
         if (l3cache.g_bank_access_itr)
         {
-#if 0
-          printf("%ld; ", l3cache.g_row_access[bank_id] / l3cache.g_bank_access_itr);
-#endif
           printf("%ld; ", l3cache.g_row_access[bank_id]);
         }
         else
@@ -5181,9 +7944,6 @@ int main(int argc, char **argv)
      {
        if (l3cache.g_row_access[bank_id])
        {
-#if 0
-         printf("%ld; ", l3cache.g_row_coverage[bank_id] / l3cache.g_row_access[bank_id]);
-#endif
          printf("%ld; ", l3cache.g_row_coverage[bank_id]);
        }
        else
@@ -5199,7 +7959,7 @@ int main(int argc, char **argv)
       {
         if (l3cache.bank_access_itr[stream_id])
         {
-          printf("%ld; ", l3cache.bank_hit[stream_id] / l3cache.bank_access_itr[stream_id]);
+          printf("%ld; ", l3cache.bank_hit[stream_id]);
         }
         else
         {
@@ -5271,8 +8031,231 @@ int main(int argc, char **argv)
       }
       
       printf("\n");
+      
+      printf("Per-stream page allocation and access\n");
+      
+      for (ub1 i = 0; i <= TST; i++)
+      {
+        printf("[%3s] %6ld ", stream_names[i], l3cache.i_page_table.stream_alloc[i]);
 
+        if (l3cache.bank_access_itr[i])
+        {
+          printf("%6ld\n", l3cache.per_stream_page_access[i] / l3cache.bank_access_itr[i]);
+        }
+        else
+        {
+          printf("%6ld\n", 0);
+        }
+      }
+
+      printf("\n");
+      
+      printf("Speedup: ");
+
+      for (ub1 i = 0; i <= TST; i++)
+      {
+        if (l3cache.speedup_stream_count[i])
+        {
+          printf("%3s:%6ld ", stream_names[i], l3cache.speedup_stream_count[i]);
+        }
+      }
+      
+      printf("\n");
+
+      printf("Iterations : ");
+
+      for (ub1 i = 0; i <= TST; i++)
+      {
+        if (l3cache.bank_access_itr[i])
+        {
+          printf("%3s:%6ld ", stream_names[i], l3cache.bank_access_itr[i]);
+        }
+      }
+      
+      printf("\n");
+
+      printf("Per-stream cluster access\n");
+      
+      for (ub1 i = 0; i <= TST; i++)
+      {
+        printf("[%3s] ", stream_names[i]);
+        if (l3cache.bank_access_itr[i])
+        {
+          printf("%6ld\n", l3cache.per_stream_clstr_access[i] / l3cache.bank_access_itr[i]);
+        }
+        else
+        {
+          printf("%6ld\n", 0);
+        }
+      }
+
+      printf("\n");
 #undef TOTAL_BANKS
+      
+      printf("Speedup stream cluster \n");
+      
+      for (ub1 i = 0; i <= TST; i++)
+      {
+        if (l3cache.speedup_clstr[i])
+        {
+          printf("[%3s] ", stream_names[i]);
+          if (l3cache.speedup_stream_count[i])
+          {
+            printf("%6ld %6ld %6ld %6ld %6ld %6ld\n", l3cache.speedup_clstr[i] / l3cache.speedup_stream_count[i],
+                l3cache.speedup_page[i] / l3cache.speedup_stream_count[i], 
+                l3cache.speedup_block[i] / l3cache.speedup_stream_count[i],
+                l3cache.speedup_access[i],
+                l3cache.speedup_min_access[i],
+                l3cache.speedup_max_access[i]);
+          }
+          else
+          {
+            printf("%6ld %6ld %6ld %6ld %6ld %6ld\n", 0, 0, 0, 0, 0, 0);
+          }
+        }
+      }
+
+      printf("\n");
+      
+
+      printf("Remapable clusters tgt: %ld\n",  l3cache.remap_clstr_count);
+      printf("Mapped pages [S %5ld ] [T%5ld]\n",  l3cache.src_page_count, l3cache.tgt_page_count);
+      printf("Mapped Rows  [S %5ld ] [T%5ld]\n",  l3cache.src_rows.size(), l3cache.tgt_rows.size());
+      printf("Mapped reuse [S %5ld ] [T%5ld]\n",  l3cache.agg_remap_src_access, l3cache.agg_remap_tgt_access);
+
+      for (ub1 stream = NN + 1; stream <= TST; stream++)
+      {
+        printf("%3s remap [S %5ld] [T %5ld] [Z %5ld]\n",  stream_names[stream], 
+            l3cache.remap_pages[stream], l3cache.tgt_remap_pages[stream], l3cache.zero_reuse_page[stream]);
+      }
+#endif
+
+#if 0
+      for (ub1 stream = NN + 1; stream <= TST; stream++)
+      {
+        printf("%s Remapable pages : %ld : %ld access : %ld\n",  stream_names[stream], 
+            l3cache.remap_page_count[stream], 
+            l3cache.remap_src_page_count[stream],
+            l3cache.remap_access_count[stream]);
+      }
+#endif
+
+#if 0
+      for (ub1 stream = NN + 1; stream <= TST; stream++)
+      {
+        printf("%3s Predicted Remap access : [S %5ld] [T %5ld] \n", stream_names[stream], 
+            l3cache.remap_src_access_count[stream], l3cache.remap_tgt_access_count[stream]);
+      }
+
+      for (ub1 stream = NN + 1; stream <= TST; stream++)
+      {
+        printf("%3s Expected Remap access : [S %5ld] : [T %5ld] \n", stream_names[stream], 
+            l3cache.remap_src_access_count_exp[stream], l3cache.remap_tgt_access_count_exp[stream]);
+      }
+
+      printf("\n");
+#endif      
+    
+#if 0
+      ub1 row_count;
+      ub8 row_access;
+      ub8 row_hit;
+
+      row_stats *row_info;
+
+      printf("\nSpeedup rows %ld\n", l3cache.speedup_rows.size());
+
+      row_count   = 0;
+      row_access  = 0;
+      row_hit     = 0;
+
+      for (row_itr = l3cache.speedup_rows.begin(); row_itr != l3cache.speedup_rows.end(); row_itr++)
+      {
+        row_info = (row_stats*)row_itr->second;
+        assert(row_info);
+        
+        printf("[");
+        for (ub1 s = 0; s <= TST; s++)
+        {
+          if (row_info->stream[s])
+          {
+            printf("%3s-", stream_names[s]);
+            break;
+          }
+        }
+
+        printf("]");
+
+        printf("R:%5ld A:%5d H:%5.2f B:%5.2f| ", row_itr->first, row_info->access, 
+            (double)row_info->row_hits / row_info->access, (double)row_info->blocks.size() / 256);
+
+        if (++row_count == 6)
+        {
+          printf("\n");
+          row_count = 0;
+        }
+
+        if ((double)row_info->blocks.size() / 256 <= 1.0)
+        {
+          row_access += row_info->access;
+          row_hit    += row_info->row_hits;
+        }
+      }
+      
+      printf("\n Row access %5ld hit %5ld\n", row_access, row_hit);
+#endif
+      
+      dram_channel *current_channel;
+      dram_rank    *current_rank;
+      dram_bank    *current_bank;
+      dram_row     *current_row;
+
+      map<ub8, ub8>::iterator channel_itr;
+      map<ub8, ub8>::iterator rank_itr;
+      map<ub8, ub8>::iterator bnk_itr;
+      map<ub8, ub8>::iterator rw_itr;
+
+      ub1 row_count;
+
+      row_count = 0;
+      
+      printf("\n Per Bank stats \n");
+
+      for (channel_itr = l3cache.dramsim_channels.begin(); channel_itr != l3cache.dramsim_channels.end(); channel_itr++)
+      {
+        current_channel = (dram_channel *)(channel_itr->second);
+        assert(current_channel);
+
+        for (rank_itr = current_channel->ranks.begin(); rank_itr != current_channel->ranks.end(); rank_itr++)
+        {
+          current_rank = (dram_rank *)(rank_itr->second);
+          assert(current_rank); 
+
+          for (bnk_itr = current_rank->banks.begin(); bnk_itr != current_rank->banks.end(); bnk_itr++)
+          {
+            current_bank = (dram_bank *)(bnk_itr->second);
+            assert(current_bank);
+            
+            printf ("Bank %ld\n", bnk_itr->first);
+
+            for (rw_itr = current_bank->bank_rows.begin(); rw_itr != current_bank->bank_rows.end(); rw_itr++)
+            {
+              current_row = (dram_row *)(rw_itr->second);
+              assert(current_row);
+
+              printf("ROW:%5ld ACCESS: %5ld| ", rw_itr->first, current_row->row_access);
+
+              if (++row_count == 8)
+              {
+                row_count = 0;
+                printf("\n");
+              }
+            }
+          }
+
+          printf("\n");
+        }
+      }
 
       /* Finalize component simulators */
       cs_fini(&l3cache);
@@ -5302,6 +8285,7 @@ int main(int argc, char **argv)
     }
   }
 
+#if 0
   if (l3cache.dramsim_enable == false)
   {
     printf("DRAM Color stats \n");
@@ -5316,14 +8300,18 @@ int main(int argc, char **argv)
     printf("DRAM stats \n");
     printf("Row Access: %ld Row Hits: %ld\n", l3cache.dram_info.row_access, l3cache.dram_info.row_hits);
   }
+#endif
 
   /* Close statistics stream */
   closeStatisticsStream(stats_stream);
-  dumpOverallStats(&l3cache, total_cycle, cachecycle, dramcycle);
+  dumpOverallStats(&l3cache, total_cycle, l3cache.cachecycle, l3cache.dramcycle);
 
   return 0;
 }
 
+#undef INTERVAL_SIZE
+#undef CYCLE_INTERVAL
+#undef ROW_SET_SIZE
 #undef USE_INTER_STREAM_CALLBACK
 #undef MAX_CORES
 #undef IS_SPILL_ALLOCATED
@@ -5334,3 +8322,9 @@ int main(int argc, char **argv)
 #undef MAX_RRPV
 #undef MAX_MSHR
 #undef TQ_SIZE
+#undef ECTR_WIDTH
+#undef ECTR_MIN_VAL
+#undef ECTR_MAX_VAL
+#undef ECTR_MID_VAL
+#undef TOTAL_BANKS
+

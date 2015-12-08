@@ -176,7 +176,7 @@ namespace DRAMSim
 
         bool MemorySystem::addTransaction(bool isWrite, uint64_t addr, char stream, speedup_stream_type stream_type) {
                 TransactionType type = isWrite ? DATA_WRITE : DATA_READ;
-                Transaction *trans = new Transaction(type, addr, stream, stream_type, NULL);
+                Transaction *trans = new Transaction(type, addr, false, stream, stream_type, NULL);
 
                 /* push_back in memoryController will make a copy of this
                  * during addTransaction so it's kosher for the reference
@@ -250,7 +250,11 @@ namespace DRAMSim
                 WriteDataDone = writeCB;
                 ReportPower = reportPower;
         }
-
+        
+        ub8 MemorySystem::getOpenRow(unsigned rank, unsigned bank)
+        {
+          memoryController->getOpenRow(rank, bank);
+        }
 } /*namespace DRAMSim */
 
 

@@ -60,6 +60,7 @@ namespace DRAMSim
 
                 void InitOutputFiles(string tracefilename);
                 unsigned findChannelNumber(uint64_t addr, char stream);
+                ub8 getOpenRow(ub8 address);
 
                 //output file
                 std::ofstream visDataOut;

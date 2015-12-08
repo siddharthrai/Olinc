@@ -74,6 +74,7 @@ namespace DRAMSim
                 void printShortOverallStats(char *file_name);
                 void printShortOverallStatsPerStream(char *file_name);
                 void resetStats();
+                ub8 getOpenRow(unsigned rank, unsigned bank);
 
 
                 //fields
@@ -83,7 +84,7 @@ namespace DRAMSim
                 
                 // If true, writes are drained 
                 bool write_drain;
-                ub1  priority_stream;
+                ub1  priorityStream;
 
         private:
                 ostream &dramsim_log;
