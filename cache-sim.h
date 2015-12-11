@@ -70,21 +70,35 @@ typedef struct dram_rank
 
 typedef struct dram_row
 {
-  ub8 row_access;
-  ub8 row_open;
-  ub8 btob_hits;
-  ub8 max_btob_hits;
-  ub8 periodic_row_access;
-  map<ub8, ub8> row_blocks;
-  map<ub8, ub8> request_queue;
+  ub8 global_row_access;        /* Total row access */
+  ub8 global_row_critical;      /* Total critical access */
+  ub8 global_row_open;          /* Total row hits */
+  ub8 global_btob_hits;         /* Total possible hits */
+  ub8 interval_count;           /* # interval */
+  ub8 row_access;               /* # accesses to row */
+  ub8 row_critical;             /* # critical access */
+  ub8 row_open;                 /* # row hits */
+  ub8 btob_hits;                /* Possible hits */
+  ub8 max_btob_hits;            /* Max back to back hits */
+  ub8 periodic_row_access;      /* Periodic accesses to a row */
+  ub8 d_value;                  /* Obtain request density */
+  ub4 available_blocks;         /* Total blocks available in row */
+  map<ub8, ub8> row_blocks;     /* # blocks */
+  map<ub8, ub8> request_queue;  /* Pending request queue */
+  map<ub8, ub8> response_queue; /* Received response queue */
+  map<ub8, ub8> all_blocks;     /* All blocks belonging to the row */
 }dram_row;
 
+/*
+ * An access to any row is always mapped to a D row with min used blocks. 
+ *
+ * */
 typedef struct dram_bank
 {
   ub1 state;
   ub4 open_row_id;
   map<ub8, ub8> bank_rows;
-
+  map<ub8, ub8> d_rows;
 #if 0
   map<ub8, ub8> row_access;
   map<ub8, ub8> periodic_row_access;
@@ -92,6 +106,23 @@ typedef struct dram_bank
 #endif
 
   ub8 *rows;
+
+  static bool compare(std::pair<ub8, ub8> i, std::pair<ub8, ub8> j)
+  {
+    return (i.second < j.second);
+  }
+
+  ub8 getMaxDRow()
+  {
+    std::pair<ub8, ub8> min = *max_element(d_rows.begin(), d_rows.end(), compare);
+    return min.first;
+  }
+
+  ub8 getMinDRow()
+  {
+    std::pair<ub8, ub8> min = *min_element(d_rows.begin(), d_rows.end(), compare);
+    return min.first;
+  }
 }dram_bank;
 
 typedef struct dram_row_set
@@ -115,7 +146,6 @@ typedef struct dram_row_set
   ub8 getMaxRow()
   {
     std::pair<ub8, ub8> min = *max_element(rows.begin(), rows.end(), compare);
-    printf("%ld\n", min.first);
     return min.first;
   }
 
