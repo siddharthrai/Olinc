@@ -83,6 +83,10 @@ typedef struct dram_row
   ub8 periodic_row_access;      /* Periodic accesses to a row */
   ub8 d_value;                  /* Obtain request density */
   ub4 available_blocks;         /* Total blocks available in row */
+  map<ub8, ub8> ntv_blocks;     /* List of native blocks */
+  map<ub8, ub8> mig_blocks;     /* List of migrated blocks */
+  map<ub8, ub8> ntv_cols;       /* List of native columns */
+  map<ub8, ub8> avl_cols;       /* List of available columns */
   map<ub8, ub8> row_blocks;     /* # blocks */
   map<ub8, ub8> request_queue;  /* Pending request queue */
   map<ub8, ub8> response_queue; /* Received response queue */
@@ -99,6 +103,8 @@ typedef struct dram_bank
   ub4 open_row_id;
   map<ub8, ub8> bank_rows;
   map<ub8, ub8> d_rows;
+  map<ub8, ub8> remap_rows;
+
 #if 0
   map<ub8, ub8> row_access;
   map<ub8, ub8> periodic_row_access;
@@ -122,6 +128,11 @@ typedef struct dram_bank
   {
     std::pair<ub8, ub8> min = *min_element(d_rows.begin(), d_rows.end(), compare);
     return min.first;
+  }
+
+  ub1 isDRow(ub8 row_id)
+  {
+    return (d_rows.find(row_id) != d_rows.end());
   }
 }dram_bank;
 
@@ -258,6 +269,7 @@ struct cachesim_cache
   ub8                   dramcycle;                                /* # DRAM cycles */
   ub1                   dramsim_enable;                           /* If true, DRAMSIM is used */
   ub1                   remap_crtcl;                              /* If true, remap non-critical stream address */
+  ub8                   remap_count;                              /* # remap */
   ub1                   dramsim_trace;                            /* TRUE, if memory trace is DRAM access trace */
   map<ub8, cs_mshr*>    mshr;                                     /* MSHR storage */
   ub8                   access[TST + 1];                          /* Per stream access */
@@ -265,89 +277,17 @@ struct cachesim_cache
   ub1                   speedup_enabled;                          /* True if DRAM considers speedup hints */
   dram_config           dram_info;                                /* DRAM access info */
   ub8                   itr_count;                                /* Total stats iteration */
-  ub8                   stream_access[TST + 1][TOTAL_BANKS + 1];  /* Total per stream per bank access */
-  ub8                   bank_access[TST + 1][TOTAL_BANKS + 1];    /* Total per stream access to bank in iteration */
-  ub8                   row_access[TST + 1][TOTAL_BANKS + 1];     /* Total per stream per bank row access */
-  ub8                   row_coverage[TST + 1][TOTAL_BANKS + 1];   /* Total per stream per bank row access */
-  ub8                   ct_row_access[TOTAL_BANKS + 1];           /* Rows common to color and texture */
-  ub8                   cz_row_access[TOTAL_BANKS + 1];           /* Rows common to color and depth */
-  ub8                   cp_row_access[TOTAL_BANKS + 1];           /* Rows common to color and CPU */
-  ub8                   cb_row_access[TOTAL_BANKS + 1];           /* Rows common to color and blitter */
-  ub8                   zt_row_access[TOTAL_BANKS + 1];           /* Rows common to depth and texture */
-  ub8                   zp_row_access[TOTAL_BANKS + 1];           /* Rows common to depth and CPU */
-  ub8                   zb_row_access[TOTAL_BANKS + 1];           /* Rows common to depth and blitter */
-  ub8                   tp_row_access[TOTAL_BANKS + 1];           /* Rows common to texture and CPU */
-  ub8                   tb_row_access[TOTAL_BANKS + 1];           /* Rows common to texture and blitter */
-  ub8                   pb_row_access[TOTAL_BANKS + 1];           /* Rows common to CPU and blitter */
-  ub8                   g_bank_access[TOTAL_BANKS + 1];           /* Total per stream access to bank in iteration */
-  ub8                   g_row_access[TOTAL_BANKS + 1];            /* Total per stream per bank row access */
-  ub8                   g_row_coverage[TOTAL_BANKS + 1];          /* Total per stream per bank row access */
-  ub8                   g_bank_access_itr;                        /* Global bank access iterations */
-  ub8                   bank_access_itr[TST + 1];                 /* Total access iteration for each bank */
-  ub8                   bank_hit[TST + 1];                        /* Number of bank access by each stream */
-  ub8                   per_stream_page_access[TST + 1];          /* Total pages accessed in all intervals */
-  ub8                   per_stream_clstr_access[TST + 1];         /* Total clusters accessed in all intervals */
-  page_mapper           i_page_table;                             /* Used for a next level of translation */
-  ub8                   remap_src_access;                         /* Access to src remap set */
-  ub8                   remap_tgt_access;                         /* Access to tgt remap set */
-  ub8                   agg_remap_src_access;                     /* Aggregate access to src remap set */
-  ub8                   agg_remap_tgt_access;                     /* Aggregate access to tgt remap set */
-  ub8                   min_remap_tgt_access;                     /* Minimum  access to tgt remap set */
-  ub8                   max_remap_src_access;                     /* Maximum access to src remap set */
-  vector<ub8>           remap_clstr;                              /* Pages can be replaced remapping */
-  vector<ub8>           src_remap_clstr;                          /* Pages to be remapped */
-  vector<ub8>           remap_frames;                             /* Mappable frames */
-  map<ub8, ub8>         src_frames;                               /* Pages to be remapped */
-  map<ub8, ub8>         tgt_frames;                               /* Pages replaced after remap */
-  list<pair<ub8, ub8> > src_frame_list;                           /* List of src pages to be remapped */
-  list<pair<ub8, ub8> > tgt_frame_list;                           /* List of tgt pages to be replaced */
-  map<ub8, ub8>         speedup_rows;                             /* Distinct rows in src frames */
-  map<ub8, ub8>         src_rows;                                 /* Distinct rows in src frames */
-  map<ub8, ub8>         tgt_rows;                                 /* Distinct rows in tgt frames */
-  ub8                   src_page_count;                           /* Pages in src set */
-  ub8                   tgt_page_count;                           /* Pages in tgt set */
-  ub8                   src_added;                                /* New src pages */
-  ub8                   tgt_added;                                /* New tgt pages */
-  ub8                   next_remap_clstr;                         /* Next cluster to be used for remapping */
-  ub1                   access_thr[TST + 1];                      /* Access threshold to decide src pages */
-  ub1                   entry_thr[TST + 1];                       /* Entry threshold to decide tgt pages */
-  ub8                   remap_pages[TST + 1];                     /* # pages remapped */
-  ub8                   tgt_remap_pages[TST + 1];                 /* # target pages remapped */
-  ub8                   remap_requested;                          /* # remaps requested */
-  ub8                   remap_done;                               /* # remaps done */
-  ub8                   remap_page_count[TST + 1];                /* # Pages that can be remapped */
-  ub8                   remap_src_page_count[TST + 1];            /* # Pages that can be remapped */
-  ub8                   remap_access_count[TST + 1];              /* # Access that can be remapped */
-  ub8                   remap_src_access_count[TST + 1];          /* # Src access that are remapped */
-  ub8                   remap_tgt_access_count[TST + 1];          /* # Tgt access that are remapped */
-  ub8                   remap_src_access_count_exp[TST + 1];      /* # src access expected on remapping */
-  ub8                   remap_tgt_access_count_exp[TST + 1];      /* # Tgt access expected on remapping */
-  map<ub8, ub8>         remap_src_clstr;                          /* Clusters can be used as source of remapping */
-  ub8                   zero_reuse_page[TST + 1];                 /* Remapped pages that see no reuse */
-  ub8                   max_clstr_access;                         /* Maximum access to a cluster */
-  ub8                   remap_clstr_count;                        /* Maximum access to a cluster */
-  ub8                   remap_src_clstr_count;                    /* Maximum access to a cluster */
-  ub8                   src_remap_page_count[TST + 1];            /* # pages remapped for each stream */
-  map<ub8, ub8>         per_stream_pages[TST + 1];                /* Per-stream pages accessed in an interval */
-  map<ub8, ub8>         per_stream_clstr[TST + 1];                /* Per-stream clusters accessed in an interval */
   map<ub8, ub8>         page_table;                               /* Page table */
   map<ub8, ub8>         remap_page_table;                         /* Remap page table */
+  map<ub8, ub8>         remap_rows;                               /* Remapped rows */
   ub8                   cache_access_count;                       /* # access to cache */
   ub8                   per_stream_fill[TST + 1];                 /* # fills by each stream */
   ub8                   per_stream_max_fill;                      /* Maximum fills across all streams */
   sctr                  sarp_hint[TST + 1];                       /* Speedup count */
   ub1                   speedup_stream[TST + 1];                  /* True, if stream is speedup */
-  ub1                   speedup_stream_count[TST + 1];            /* True, if stream is speedup */
-  ub8                   speedup_clstr[TST + 1];                   /* Clusters accessed by critical stream */
-  ub8                   speedup_page[TST + 1];                    /* Pages accessed by speedup stream */
-  ub8                   speedup_block[TST + 1];                   /* Blocks accessed by speedup stream */
-  ub8                   speedup_access[TST + 1];                  /* Access to blocks of critical stream */
-  ub8                   speedup_min_access[TST + 1];              /* Min accesses to a block of critical stream */
-  ub8                   speedup_max_access[TST + 1];              /* Max accesses to a block of critical stream */
-  ub8                   speedup_page_z_access[TST + 1];           /* Pages not accessed */
   ub1                   shuffle_row;                              /* True if accesses are shuffled across rows */
   map<ub8, ub8>         dramsim_channels;                         /* Per-rank per-bank open rows */
-  map<ub8, ub8>         dramsim_row_set;                          /* Set of rows used for dynamic dow mapping */
+  map<ub8, ub8>         dramsim_row_set;                          /* Set of rows used for dynamic row mapping */
 };
 
 #undef TOTAL_BANKS
