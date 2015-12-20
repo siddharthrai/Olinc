@@ -57,6 +57,9 @@ typedef struct dram_request
 #define DRAM_BANK_UNK   (0)
 #define DRAM_BANK_IDLE  (1)
 #define DRAM_BANK_ACT   (2)
+#define LOG_MPAGE_COUNT (2)
+#define MPAGE_COUNT     (128 >> LOG_MPAGE_COUNT)
+#define MPAGE_OFFSET(c) (c >> LOG_MPAGE_COUNT)
 
 typedef struct dram_channel
 {
@@ -83,6 +86,7 @@ typedef struct dram_row
   ub8 periodic_row_access;      /* Periodic accesses to a row */
   ub8 d_value;                  /* Obtain request density */
   ub4 available_blocks;         /* Total blocks available in row */
+  ub8 page_access[MPAGE_COUNT]; /* Per micro-page access */
   map<ub8, ub8> ntv_blocks;     /* List of native blocks */
   map<ub8, ub8> mig_blocks;     /* List of migrated blocks */
   map<ub8, ub8> ntv_cols;       /* List of native columns */
@@ -104,6 +108,7 @@ typedef struct dram_bank
   map<ub8, ub8> bank_rows;
   map<ub8, ub8> d_rows;
   map<ub8, ub8> remap_rows;
+  map<ub8, ub8> predicted_rows;
 
 #if 0
   map<ub8, ub8> row_access;
