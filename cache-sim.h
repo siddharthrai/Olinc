@@ -95,6 +95,7 @@ typedef struct dram_row
   map<ub8, ub8> request_queue;  /* Pending request queue */
   map<ub8, ub8> response_queue; /* Received response queue */
   map<ub8, ub8> all_blocks;     /* All blocks belonging to the row */
+  map<ub8, ub8> dist_blocks;    /* Distinct blocks accessed in the row */
 }dram_row;
 
 /*
@@ -105,10 +106,11 @@ typedef struct dram_bank
 {
   ub1 state;
   ub4 open_row_id;
-  map<ub8, ub8> bank_rows;
-  map<ub8, ub8> d_rows;
-  map<ub8, ub8> remap_rows;
-  map<ub8, ub8> predicted_rows;
+  map<ub8, ub8> bank_rows;      /* Per bank rows */
+  map<ub8, ub8> d_rows;         /* Set of D rows */
+  map<ub8, ub8> remap_rows;     /* Remapped rows */
+  map<ub8, ub8> predicted_rows; /* Predicted rows for reuse */
+  list<ub8>     access_list;    /* Sequential list of accessed rows */
 
 #if 0
   map<ub8, ub8> row_access;

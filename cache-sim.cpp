@@ -437,9 +437,17 @@ void cachesim_dump_per_bank_stats(cachesim_cache *cache, cachesim_cache *shadow_
         printf("\n \n");
 
         printf ("\n Shadow Bank %ld\n", bnk_itr->first);
+        
+        ub4 list_size = shadow_bank->access_list.size();
+        for (ub4 i = 0; i < list_size; i++)
+        {
+          printf("%ld ", shadow_bank->access_list.front());
+          shadow_bank->access_list.pop_front();
+        }
+        
+        printf("\n");
 
         row_count = 0;
-
         for (srw_itr = shadow_bank->bank_rows.begin(); srw_itr != shadow_bank->bank_rows.end(); srw_itr++)
         {
           shadow_row = (dram_row *)(srw_itr->second);
@@ -449,7 +457,10 @@ void cachesim_dump_per_bank_stats(cachesim_cache *cache, cachesim_cache *shadow_
           if (rw_itr != current_bank->bank_rows.end())
           {
             current_row = (dram_row *)(rw_itr->second);
+#if 0
             if (shadow_row->row_access > current_row->row_access)
+#endif
+            if (shadow_row->row_access)
             {
               printf("|%5ld| A: %5ld C:%5ld D:%5ld| ", srw_itr->first, 
                   shadow_row->row_access,  
@@ -463,7 +474,8 @@ void cachesim_dump_per_bank_stats(cachesim_cache *cache, cachesim_cache *shadow_
               }
             }
 
-            if (current_bank->predicted_rows.find(srw_itr->first) == current_bank->predicted_rows.end())
+            if (!current_bank->isDRow(srw_itr->first) && 
+                current_bank->predicted_rows.find(srw_itr->first) == current_bank->predicted_rows.end())
             {
               current_bank->predicted_rows.insert(pair<ub8, ub8>(srw_itr->first, 1)); 
             }
@@ -705,7 +717,10 @@ void cachesim_update_cycle_interval_end(cachesim_cache *cache, cachesim_cache *s
             current_row->max_btob_hits           = 0;
 
             current_row->row_blocks.clear();
+#if 0
             current_row->all_blocks.clear();
+#endif
+            current_row->dist_blocks.clear();
 
             current_row->mig_blocks.clear();
             current_row->avl_cols.clear();
@@ -754,8 +769,6 @@ void cachesim_update_cycle_interval_end(cachesim_cache *cache, cachesim_cache *s
           {
             shadow_row->page_access[i] = 0;
           }
-      
-          shadow_row->row_blocks.clear();
         }
 
         current_bank->d_rows.clear();
@@ -1482,7 +1495,7 @@ static void update_dramsim_row_access_stats(cachesim_cache *cache, memory_trace 
         if (map_itr != current_bank->bank_rows.end())
         {
           current_row = (dram_row *)(map_itr->second);
-
+#if 0
           /* Update per-bank row stats */
           map_itr = current_row->all_blocks.find(info->address);
           if (map_itr == current_row->all_blocks.end())
@@ -1495,7 +1508,7 @@ static void update_dramsim_row_access_stats(cachesim_cache *cache, memory_trace 
               map_itr->second = current_row->all_blocks.size();
             }
           }
-          
+#endif          
           /* If block is not in native and migrated set, insert into native 
            * set */
           map_itr = current_row->ntv_blocks.find(info->address);
@@ -1793,6 +1806,12 @@ static void update_dramsim_open_row_stats(cachesim_cache *cache, cachesim_cache 
     current_row->all_blocks.insert(pair<ub8, ub8>(info->address, 1));
   }
 
+  map_itr = current_row->dist_blocks.find(info->address);
+  if (map_itr == current_row->dist_blocks.end())
+  {
+    current_row->dist_blocks.insert(pair<ub8, ub8>(info->address, 1));
+  }
+
   if (newTransactionRow == current_bank->open_row_id)
   {
     current_row->btob_hits += current_row->request_queue.size();
@@ -1948,7 +1967,7 @@ static void update_dramsim_shadow_tag_open_row_stats(cachesim_cache *cache, memo
     {
       current_row->avl_cols.insert(pair<ub8, ub8>(i, 0)); 
     }
-
+  
     current_bank->bank_rows.insert(pair<ub8, ub8>(newTransactionRow, (ub8)current_row));
 
     current_rank->banks.insert(pair<ub8, ub8>(newTransactionBank, (ub8)current_bank));
@@ -2014,6 +2033,10 @@ static void update_dramsim_shadow_tag_open_row_stats(cachesim_cache *cache, memo
       else
       {
         current_row = (dram_row *)(map_itr->second);
+
+        if (current_row->row_access == 0)
+        {
+        }
       }
     }
     else
@@ -2053,8 +2076,15 @@ static void update_dramsim_shadow_tag_open_row_stats(cachesim_cache *cache, memo
       current_channel->ranks.insert(pair<ub8, ub8>(newTransactionRank, (ub8)current_rank));
     }
   }
+
   
+  if (current_row->row_access == 0)
+  {
+    current_bank->access_list.push_back(newTransactionRow);
+  }
+
   current_row->row_access += 1;
+
   current_row->periodic_row_access += 1;
 
   current_row->page_access[MPAGE_OFFSET(newTransactionColumn)] += 1;
@@ -2195,8 +2225,20 @@ static void update_dramsim_open_row_response_stats(cachesim_cache *cache, memory
     current_row->request_queue.erase(info->address);
   }
   
+  if (current_row->all_blocks.find(info->address) != current_row->all_blocks.end())
+  {
+    current_row->all_blocks.erase(info->address);
+  }
+
+  map_itr = current_bank->d_rows.find(newTransactionRow);
+  if (map_itr != current_bank->d_rows.end())
+  {
+    map_itr->second = current_row->all_blocks.size();
+  }
+
+#if 0
   /* Collect response and remap blocks */
-#define RESPONSE_TH (16)
+#define RESPONSE_TH (0)
 
   map_itr = current_row->response_queue.find(info->address);
   if (map_itr == current_row->response_queue.end())
@@ -2222,6 +2264,8 @@ static void update_dramsim_open_row_response_stats(cachesim_cache *cache, memory
       current_row->response_queue.clear();
     }
   }
+#endif
+
 
 #undef RESPONSE_TH
 
@@ -2593,6 +2637,9 @@ static void get_d_row_id(cachesim_cache *cache, memory_trace *info,
             else
             {
               cache->remap_count += 1;
+#if 0
+              printf("M:%ld[%ld]:%ld:%ld ", d_row, newTransactionRow, current_row->dist_blocks.size(), current_row->all_blocks.size());
+#endif
             }
           }
         }
@@ -2665,7 +2712,7 @@ static void get_d_row_id(cachesim_cache *cache, memory_trace *info,
                 map_itr->second = newTransactionRow;
               }
 
-              printf("%ld:%ld ", d_row, current_row->all_blocks.size());
+              printf("%ld[%ld]:%ld:%ld ", d_row, newTransactionRow, current_row->dist_blocks.size(), current_row->all_blocks.size());
             }
           }
         }
@@ -2942,6 +2989,11 @@ void cachesim_shadow_cache_lookup(cachesim_cache *cache, ub8 addr,
   }
   else
   {
+    if (cache->dramsim_enable && info->fill == TRUE && cache->shuffle_row)
+    {
+      update_dramsim_shadow_tag_open_row_stats(cache, info);
+    }
+
     cache_access_block(cache->cache, indx, block->way, strm, info);
   }
 }
@@ -5802,7 +5854,9 @@ ub1 cache_cycle(cachesim_cache *cache, cachesim_cache *shadow_tag, ub8 cachecycl
       if (cache->cachecycle_interval >= CYCLE_INTERVAL)
       {
         cachesim_dump_per_bank_stats(cache, shadow_tag);
+#if 0
         cachesim_update_cycle_interval_end(cache, shadow_tag);
+#endif
         cache->remap_page_table.clear();
         cache->remap_rows.clear();
         cache->cachecycle_interval = 0;
@@ -6148,7 +6202,7 @@ int main(int argc, char **argv)
       cache_next_cycle    = cache_ctime;
       l3cache.shadow_tag  = FALSE; 
 
-#define SHADOW_TAG_CTIME (230)
+#define SHADOW_TAG_CTIME (240)
 
       /* Initialize shadow tags */
       shadow_tag_ctime        = cs_init(&shadow_tags, params, trc_file_name);
@@ -6203,7 +6257,9 @@ int main(int argc, char **argv)
         if (!shadow_tag_next_cycle)
         {
           /* Access shadow tags  */
+#if 0
           shadow_tag_cycle(&shadow_tags, shadow_tags.cachecycle, l3cache.cachecycle);
+#endif
           shadow_tag_next_cycle = SHADOW_TAG_CTIME;
 
           shadow_tags.cachecycle += 1;
@@ -6246,7 +6302,6 @@ int main(int argc, char **argv)
         dram_fini();
       }
       
-
       if (cache_count > 1 || (cache_count == 1 && way_count == 1))
       {
         sm->dumpValues(cache_sizes[c_cache], 0, CH, stats_stream);
@@ -6292,4 +6347,3 @@ int main(int argc, char **argv)
 #undef ECTR_MAX_VAL
 #undef ECTR_MID_VAL
 #undef TOTAL_BANKS
-
