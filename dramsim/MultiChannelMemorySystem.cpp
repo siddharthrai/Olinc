@@ -106,6 +106,10 @@ csvOut(new CSVWriter(visDataOut)) {
                 MemorySystem *channel = new MemorySystem(i, megsOfMemory / NUM_CHANS, (*csvOut), dramsim_log);
                 channels.push_back(channel);
         }
+
+        speedup_hint_enable = SPEEDUP_HINT;
+
+        printf("Speedup enable %d\n", speedup_hint_enable);
 }
 
 
@@ -505,3 +509,7 @@ ub8 MultiChannelMemorySystem::getOpenRow(ub8 address)
         return channels[chan]->getOpenRow(rank, bank);
 }
 
+bool MultiChannelMemorySystem::isSpeedupHintEnable()
+{
+  return speedup_hint_enable;
+}

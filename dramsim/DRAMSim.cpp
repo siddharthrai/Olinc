@@ -241,6 +241,8 @@ int dramsim_init(const char *deviceIniFilename, unsigned int megsOfMemory, unsig
                 (kv_map)[string("IDD7")] = string("415");
 
                 (kv_map)[string("Vdd")] = string("1.5");
+
+                (kv_map)[string("SPEEDUP_HINT")] = string("false");
         }
 
         /* Initialize Receiver */
@@ -290,29 +292,6 @@ void dramsim_update() {
 
         /* Update memory system */
         memSystem->update();
-
-#if 0
-        /* If there are waiting events and there is space in transaction queue
-         * wakeup waiting events */
-        for (unsigned chan = 0; chan < numControllers; chan++)
-        {
-                it = waitingRequests.find(chan);
-                if (it == waitingRequests.end())
-                        continue;
-
-                if (!memSystem->willAcceptTransaction(chan))
-                        continue;
-
-                /* Get waiting events */
-                waiting_event = it->second.first;
-                waiting_stack = it->second.second;
-
-                /* Remove waiting event */
-                waitingRequests.erase(it);
-                /* Schedule waiting event */
-                esim_schedule_event(waiting_event, waiting_stack, 0);
-        }
-#endif
 }
 
 
@@ -339,30 +318,14 @@ int dramsim_will_accept_request(uint64_t addr, bool isWrite, char stream) {
         return memSystem->willAcceptTransaction(addr, isWrite, stream) ? 1 : 0;
 }
 
-#if 0
-extern "C"
-void dramsim_request_wait(uint64_t addr, int event, void *stack) {
-        unsigned chan;
-        WaitingRequests::iterator it;
-
-        chan = memSystem->findChannelNumber(addr);
-
-        /* Check: that channel's transaction queue is full */
-        assert(!memSystem->willAcceptTransaction(chan));
-
-        /* Check: no previous pending request to the same channel */
-        it = waitingRequests.find(chan);
-        assert(it == waitingRequests.end());
-        
-        waitingRequests[chan] = RequestPair(event, stack);
-}
-#endif
-
 extern "C"
 void dramsim_request(int isWrite, uint64_t addr, char stream, memory_trace *info) {
         bool result;
-        
-        result = memSystem->addTransaction(isWrite ? true : false, addr, stream, (speedup_stream_type)(info->sap_stream));
+        speedup_stream_type  new_stream;
+
+        new_stream = memSystem->isSpeedupHintEnable() ? (speedup_stream_type)(info->sap_stream) : speedup_stream_u;
+
+        result = memSystem->addTransaction(isWrite ? true : false, addr, stream, new_stream);
         assert(result);
 
         receiver->add_pending(isWrite, addr, info);

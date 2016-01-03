@@ -304,6 +304,9 @@ bool ConfigLoader::parseLCSectionParameter(LChParameters *lcP)
     if (!parseDecimalParameter("MaxCacheSize", id, lcP->maxCacheSize))
         return FALSE;
 
+    if (!parseDecimalParameter("ClockPeriod", id, lcP->clockPeriod))
+        return FALSE;
+
     if (!parseDecimalParameter("MinCacheWays", id, lcP->minCacheWays))
         return FALSE;
 

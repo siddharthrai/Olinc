@@ -245,8 +245,9 @@ int main(int argc, char **argv)
 #if 0
       if (trace.stream == TS && trace.spill == TRUE)
       if (trace.spill == TRUE)
+      if (trace.spill == FALSE && trace.sap_stream == sappriority_stream_q)
 #endif
-      if (trace.spill == FALSE)
+      if (trace.sap_stream == sappriority_stream_x)
       {
         if (old_cycle > trace.cycle)
         {

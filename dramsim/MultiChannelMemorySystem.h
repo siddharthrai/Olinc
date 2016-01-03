@@ -62,6 +62,8 @@ namespace DRAMSim
                 unsigned findChannelNumber(uint64_t addr, char stream);
                 ub8 getOpenRow(ub8 address);
 
+                bool isSpeedupHintEnable();
+
                 //output file
                 std::ofstream visDataOut;
                 ofstream dramsim_log;
@@ -78,6 +80,7 @@ namespace DRAMSim
                 static bool fileExists(string path);
                 CSVWriter *csvOut;
 
+                bool speedup_hint_enable;
 
         };
 }

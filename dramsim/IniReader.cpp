@@ -113,6 +113,8 @@ bool DEBUG_POWER;
 bool USE_LOW_POWER;
 bool VIS_FILE_OUTPUT;
 
+bool SPEEDUP_HINT;
+
 bool VERIFICATION_OUTPUT;
 
 bool DEBUG_INI_READER = false;
@@ -180,6 +182,9 @@ namespace DRAMSim
                                         DEFINE_UINT64_PARAM(EPOCH_LENGTH, SYS_PARAM),
                                         //Power
                                         DEFINE_BOOL_PARAM(USE_LOW_POWER, SYS_PARAM),
+
+                                        //Speedup hint
+                                        DEFINE_BOOL_PARAM(SPEEDUP_HINT, SYS_PARAM),
 
                                         DEFINE_STRING_PARAM(ROW_BUFFER_POLICY, SYS_PARAM),
                                         DEFINE_STRING_PARAM(SCHEDULING_POLICY, SYS_PARAM),

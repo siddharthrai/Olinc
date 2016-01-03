@@ -11,6 +11,7 @@
 struct cache_params
 {
   enum    cache_policy_t policy;  /* Cache Policy */
+  ub4     clock_period;           /* Cache clock period */
   int     num_sets;               /* # Sets */
   int     ways;                   /* Associativity */
   int     max_rrpv;               /* Maximum RRPV for RRIP based policies */

@@ -5,6 +5,7 @@
 
 #define INTERVAL_SIZE             (1 << 19)
 #define CYCLE_INTERVAL            (5000000)
+#define ROW_ACCESS_INTERVAL       (5000)
 #define ROW_SET_SIZE              (6)
 #define USE_INTER_STREAM_CALLBACK (FALSE)
 #define MAX_CORES                 (128)
@@ -335,7 +336,7 @@ static void cachesim_update_hint_count(cachesim_cache *cache, memory_trace *info
 
 #undef SPEEDUP
 
-void cachesim_dump_per_bank_stats(cachesim_cache *cache, cachesim_cache *shadow_tags)
+void cachesim_dump_per_bank_stats(cachesim_cache *cache, cachesim_cache *shadow_tags, ub1 global_stat = FALSE)
 {
   dram_channel *current_channel;
   dram_rank    *current_rank;
@@ -368,33 +369,34 @@ void cachesim_dump_per_bank_stats(cachesim_cache *cache, cachesim_cache *shadow_
   {
     current_channel = (dram_channel *)(channel_itr->second);
     assert(current_channel);
-
+#if 0
     schannel_itr = shadow_tags->dramsim_channels.find(channel_itr->first);
     assert(schannel_itr != shadow_tags->dramsim_channels.end());
 
     shadow_channel = (dram_channel *)(schannel_itr->second);
-
+#endif
     for (rank_itr = current_channel->ranks.begin(); rank_itr != current_channel->ranks.end(); rank_itr++)
     {
       current_rank = (dram_rank *)(rank_itr->second);
       assert(current_rank); 
-
+#if 0
       srank_itr = shadow_channel->ranks.find(rank_itr->first);
       assert(srank_itr != shadow_channel->ranks.end());
 
       shadow_rank = (dram_rank *)(srank_itr->second);
-
+#endif
       for (bnk_itr = current_rank->banks.begin(); bnk_itr != current_rank->banks.end(); bnk_itr++)
       {
         current_bank = (dram_bank *)(bnk_itr->second);
         assert(current_bank);
-
+#if 0
         sbnk_itr = shadow_rank->banks.find(bnk_itr->first);
         assert(sbnk_itr != shadow_rank->banks.end());
 
         shadow_bank = (dram_bank *)(sbnk_itr->second);
+#endif
+        printf ("\n");
 
-        printf ("\n Real Bank %ld\n", bnk_itr->first);
         row_count = 0;
 
         for (rw_itr = current_bank->bank_rows.begin(); rw_itr != current_bank->bank_rows.end(); rw_itr++)
@@ -418,11 +420,13 @@ void cachesim_dump_per_bank_stats(cachesim_cache *cache, cachesim_cache *shadow_
                 (shadow_row->global_row_access - current_row->global_row_access),
                 (current_row->global_row_critical), 
                 (shadow_row->global_btob_hits) - (current_row->global_btob_hits));
-#endif
-            printf("|%5ld| A: %5ld C:%5ld B:%5ld| ", rw_itr->first, 
+            printf("|%5ld| A: %5ld C:%5ld H:%5ld| ", rw_itr->first, 
                 current_row->row_access,  
                 current_row->row_critical, 
-                current_row->all_blocks.size());
+                current_row->row_open);
+#endif
+            printf("%5ld;%5ld;", rw_itr->first, 
+                current_row->row_open);
 
             if (++row_count == 5)
             {
@@ -431,9 +435,60 @@ void cachesim_dump_per_bank_stats(cachesim_cache *cache, cachesim_cache *shadow_
             }
           }
         }
+
+        printf ("\n");
+
+        row_count = 0;
+
+        for (rw_itr = current_bank->bank_rows.begin(); rw_itr != current_bank->bank_rows.end(); rw_itr++)
+        {
+          current_row = (dram_row *)(rw_itr->second);
+          assert(current_row);
+#if 0
+          srw_itr = shadow_bank->bank_rows.find(rw_itr->first);
+          assert(srw_itr != shadow_bank->bank_rows.end());
+
+          shadow_row = (dram_row *)(srw_itr->second);
+
+          interval_count = current_row->interval_count;
+          if (current_row->global_row_access && interval_count)
+#endif      
+          if (current_row->row_access)
+          {
+#if 0
+            printf("|%5ld| A: %5ld : %3ld C:%5ld D:%5ld| ", rw_itr->first, 
+                (current_row->global_row_access),  
+                (shadow_row->global_row_access - current_row->global_row_access),
+                (current_row->global_row_critical), 
+                (shadow_row->global_btob_hits) - (current_row->global_btob_hits));
+            printf("|%5ld| A: %5ld C:%5ld H:%5ld| ", rw_itr->first, 
+                current_row->row_access,  
+                current_row->row_critical, 
+                current_row->row_open);
+#endif
+            if (global_stat)
+            {
+              printf("%5ld;%5ld; ", rw_itr->first, 
+                  current_row->g_row_reopen);
+            }
+            else
+            {
+              printf("%5ld;%5ld; ", rw_itr->first, 
+                  current_row->row_reopen);
+            }
+
+            if (++row_count == 5)
+            {
+              row_count = 0;
+              printf("\n");
+            }
+          }
+        }
+
+        printf("\n");
         
         current_bank->predicted_rows.clear();
-
+#if 0
         printf("\n \n");
 
         printf ("\n Shadow Bank %ld\n", bnk_itr->first);
@@ -509,6 +564,7 @@ void cachesim_dump_per_bank_stats(cachesim_cache *cache, cachesim_cache *shadow_
             }
           }
         }
+#endif
 
 #if 0        
         row_count = 0;
@@ -572,6 +628,48 @@ void cachesim_dump_per_bank_stats(cachesim_cache *cache, cachesim_cache *shadow_
       break;
     }
     break;
+  }
+}
+
+void cachesim_update_row_reopen(cachesim_cache *cache)
+{
+  dram_channel *current_channel;
+  dram_rank    *current_rank;
+  dram_bank    *current_bank;
+  dram_row     *current_row;
+
+  map<ub8, ub8>::iterator channel_itr;
+  map<ub8, ub8>::iterator rank_itr;
+  map<ub8, ub8>::iterator bnk_itr;
+  map<ub8, ub8>::iterator rw_itr;
+
+  ub1 row_count;
+
+  for (channel_itr = cache->dramsim_channels.begin(); channel_itr != cache->dramsim_channels.end(); channel_itr++)
+  {
+    current_channel = (dram_channel *)(channel_itr->second);
+    assert(current_channel);
+
+    for (rank_itr = current_channel->ranks.begin(); rank_itr != current_channel->ranks.end(); rank_itr++)
+    {
+      current_rank = (dram_rank *)(rank_itr->second);
+      assert(current_rank); 
+
+      for (bnk_itr = current_rank->banks.begin(); bnk_itr != current_rank->banks.end(); bnk_itr++)
+      {
+        current_bank = (dram_bank *)(bnk_itr->second);
+        assert(current_bank);
+
+        for (rw_itr = current_bank->bank_rows.begin(); rw_itr != current_bank->bank_rows.end(); rw_itr++)
+        {
+          current_row = (dram_row *)(rw_itr->second);
+          assert(current_row);
+
+          current_row->g_row_reopen += current_row->row_reopen;
+          current_row->row_reopen    = 0;
+        }
+      }
+    }
   }
 }
 
@@ -762,6 +860,7 @@ void cachesim_update_cycle_interval_end(cachesim_cache *cache, cachesim_cache *s
           shadow_row->row_critical             = 0;
           shadow_row->row_access               = 0;
           shadow_row->row_open                 = 0;
+          shadow_row->row_reopen               = 0;
           shadow_row->btob_hits                = 0;
           shadow_row->max_btob_hits            = 0;
 
@@ -1124,7 +1223,7 @@ ub8 check_row_id(ub8 address, ub8 new_chn, ub8 new_rnk, ub8 new_bnk, ub8 new_row
   assert(newTransactionColumn == new_col);
 }
 
-#define CACHE_CTIME (.25 * 1000)
+#define CACHE_CTIME (.06 * 1000)
 
 ub8 cs_init(cachesim_cache *cache, cache_params params, sb1 *trc_file_name)
 {
@@ -1150,6 +1249,7 @@ ub8 cs_init(cachesim_cache *cache, cache_params params, sb1 *trc_file_name)
   /* Initialize policy specific part of cache */
   cache->cache = cache_init(&params);
 
+  cache->clock_period   = params.clock_period;
   cache->dramsim_enable = params.dramsim_enable;
   cache->dramsim_trace  = params.dramsim_trace;
   cache->shuffle_row    = params.remap_crtcl;
@@ -1165,8 +1265,9 @@ ub8 cs_init(cachesim_cache *cache, cache_params params, sb1 *trc_file_name)
   
   /* Allocate and initialize sampler cache */
   cache->cache_access_count   = 0;
+  cache->dram_access_count    = 0;
 
-  return CACHE_CTIME;
+  return cache->clock_period;
 }
 
 #undef CACHE_CTIME
@@ -1644,6 +1745,8 @@ static void update_dramsim_open_row_stats(cachesim_cache *cache, cachesim_cache 
     current_row->row_access             = 0;
     current_row->row_critical           = 0;
     current_row->row_open               = 0;
+    current_row->row_reopen             = 0;
+    current_row->g_row_reopen           = 0;
     current_row->btob_hits              = 0;
     current_row->max_btob_hits          = 0;
     current_row->periodic_row_access    = 0;
@@ -1708,6 +1811,8 @@ static void update_dramsim_open_row_stats(cachesim_cache *cache, cachesim_cache 
         current_row->max_btob_hits          = 0;
         current_row->periodic_row_access    = 0;
         current_row->row_open               = 0;
+        current_row->row_reopen             = 0;
+        current_row->g_row_reopen           = 0;
 
         for (ub4 i = 0; i < MPAGE_COUNT; i++)
         {
@@ -1747,6 +1852,8 @@ static void update_dramsim_open_row_stats(cachesim_cache *cache, cachesim_cache 
       current_row->btob_hits              = 0;
       current_row->max_btob_hits          = 0;
       current_row->row_open               = 0;
+      current_row->row_reopen             = 0;
+      current_row->g_row_reopen           = 0;
       current_row->periodic_row_access    = 0;
 
       for (ub4 i = 0; i < MPAGE_COUNT; i++)
@@ -1835,8 +1942,9 @@ static void update_dramsim_open_row_stats(cachesim_cache *cache, cachesim_cache 
     }
 
 #undef D_TH
-
+#if 0
     current_row->row_open += 1;
+#endif
   }
   else
   {
@@ -1844,6 +1952,15 @@ static void update_dramsim_open_row_stats(cachesim_cache *cache, cachesim_cache 
     {
       current_row->max_btob_hits = current_row->btob_hits;
     }
+  }
+
+  if (++cache->dram_access_count >= ROW_ACCESS_INTERVAL)
+  {
+    cache->dram_access_count = 0;
+
+    cachesim_dump_per_bank_stats(cache, shadow_tags);
+
+    cachesim_update_row_reopen(cache);
   }
 }
 
@@ -1957,6 +2074,8 @@ static void update_dramsim_shadow_tag_open_row_stats(cachesim_cache *cache, memo
     current_row->max_btob_hits          = 0;
     current_row->periodic_row_access    = 0;
     current_row->row_open               = 0;
+    current_row->row_reopen             = 0;
+    current_row->g_row_reopen           = 0;
 
     for (ub4 i = 0; i < MPAGE_COUNT; i++)
     {
@@ -2017,6 +2136,8 @@ static void update_dramsim_shadow_tag_open_row_stats(cachesim_cache *cache, memo
         current_row->max_btob_hits          = 0;
         current_row->periodic_row_access    = 0;
         current_row->row_open               = 0;
+        current_row->row_reopen             = 0;
+        current_row->g_row_reopen           = 0;
 
         for (ub4 i = 0; i < MPAGE_COUNT; i++)
         {
@@ -2059,6 +2180,8 @@ static void update_dramsim_shadow_tag_open_row_stats(cachesim_cache *cache, memo
       current_row->btob_hits              = 0;
       current_row->max_btob_hits          = 0;
       current_row->row_open               = 0;
+      current_row->row_reopen             = 0;
+      current_row->g_row_reopen           = 0;
       current_row->periodic_row_access    = 0;
 
       for (ub4 i = 0; i < MPAGE_COUNT; i++)
@@ -2109,8 +2232,9 @@ static void update_dramsim_shadow_tag_open_row_stats(cachesim_cache *cache, memo
   {
     current_row = (dram_row *)(map_itr->second);
     assert(current_row);
-
+#if 0
     current_row->row_open += 1;
+#endif
   }
 }
 
@@ -2234,6 +2358,15 @@ static void update_dramsim_open_row_response_stats(cachesim_cache *cache, memory
   if (map_itr != current_bank->d_rows.end())
   {
     map_itr->second = current_row->all_blocks.size();
+  }
+    
+  if (info->prefetch)
+  {
+    current_row->row_open += 1;
+  }
+  else
+  {
+    current_row->row_reopen += 1;
   }
 
 #if 0
@@ -3078,6 +3211,7 @@ void set_cache_params(struct cache_params *params, LChParameters *lcP,
   ub8 cache_size, ub8 cache_way, ub8 cache_set)
 {
   params->policy                = lcP->policy;
+  params->clock_period          = lcP->clockPeriod;
   params->max_rrpv              = lcP->max_rrpv;
   params->spill_rrpv            = lcP->spill_rrpv;
   params->threshold             = lcP->threshold;
@@ -5736,7 +5870,7 @@ ub1 cache_cycle(cachesim_cache *cache, cachesim_cache *shadow_tag, ub8 cachecycl
   memory_trace         *info;           /* Generic structure used for requests between units */
   memory_trace         *new_info;       /* Generic structure used for requests between units */
   cache_access_status   ret;            /* Cache access status */
-
+  
   memset(&ret, 0, sizeof(cache_access_status));
 
   if (!gzeof(cache->trc_file) || !cs_qempty(&(cache->rdylist)) || !cs_qempty(&(cache->plist)))
@@ -5853,8 +5987,8 @@ ub1 cache_cycle(cachesim_cache *cache, cachesim_cache *shadow_tag, ub8 cachecycl
       /* Update cachecycle interval end */
       if (cache->cachecycle_interval >= CYCLE_INTERVAL)
       {
-        cachesim_dump_per_bank_stats(cache, shadow_tag);
 #if 0
+        cachesim_dump_per_bank_stats(cache, shadow_tag);
         cachesim_update_cycle_interval_end(cache, shadow_tag);
 #endif
         cache->remap_page_table.clear();
@@ -6291,6 +6425,8 @@ int main(int argc, char **argv)
         }
       }while(!cache_done || !dram_done);
       
+      cachesim_dump_per_bank_stats(&l3cache, &shadow_tags, TRUE);
+
       printf("Real miss:%ld:%ld Shadow miss: %ld:%ld\n", real_access, real_miss, shadow_access, shadow_miss);
       printf("Remap count:%ld\n", l3cache.remap_count);
 

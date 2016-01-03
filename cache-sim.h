@@ -81,6 +81,8 @@ typedef struct dram_row
   ub8 row_access;               /* # accesses to row */
   ub8 row_critical;             /* # critical access */
   ub8 row_open;                 /* # row hits */
+  ub8 row_reopen;               /* # per interval row conflict */
+  ub8 g_row_reopen;             /* # all row conflict */
   ub8 btob_hits;                /* Possible hits */
   ub8 max_btob_hits;            /* Max back to back hits */
   ub8 periodic_row_access;      /* Periodic accesses to a row */
@@ -271,6 +273,7 @@ struct cachesim_cache
   cs_qnode              plist;                                    /* Pending memory requests */
   ub4                   total_mshr;                               /* # total MSHR */
   ub4                   free_mshr;                                /* # available MSHR */
+  ub4                   clock_period;                             /* # Cache clock time period */
   ub8                   cachecycle;                               /* # CPU cycles */
   ub8                   cachecycle_interval;                      /* # Cache interval cycles */
   ub8                   dramcycle;                                /* # DRAM cycles */
@@ -288,6 +291,7 @@ struct cachesim_cache
   map<ub8, ub8>         remap_page_table;                         /* Remap page table */
   map<ub8, ub8>         remap_rows;                               /* Remapped rows */
   ub8                   cache_access_count;                       /* # access to cache */
+  ub8                   dram_access_count;                        /* # access to dram */
   ub8                   per_stream_fill[TST + 1];                 /* # fills by each stream */
   ub8                   per_stream_max_fill;                      /* Maximum fills across all streams */
   sctr                  sarp_hint[TST + 1];                       /* Speedup count */

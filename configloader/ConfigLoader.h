@@ -71,6 +71,7 @@ struct LChParameters
 {
   ub8   minCacheSize;           /* Minimum cache size in KB */
   ub8   maxCacheSize;           /* Maximum cache size in KB */
+  ub4   clockPeriod;            /* Clock frequency */
   ub4   cacheBlockSize;         /* Block size in bytes */
   ub4   minCacheWays;           /* Ways per set, 0 for fully associative */
   ub4   maxCacheWays;           /* Ways per set, 0 for fully associative */
@@ -97,7 +98,7 @@ struct LChParameters
   bool  cpuFillEnable;          /* If true, CPU fill is enable in SARP */
   bool  gpuFillEnable;          /* If true, GPU fill is enable in SARP */
   bool  dramSimEnable;          /* If true, DRAMSim is enable */
-  bool  dramSimTrace;          /* If true, DRAMSim is enable */
+  bool  dramSimTrace;           /* If true, DRAMSim is enable */
   sb1  *dramSimConfigFile;      /* DRAMSim config file */
   sb1  *dramPriorityStream;     /* DRAMSim priority stream */
   enum  cache_policy_t policy;  /* Cache policy */

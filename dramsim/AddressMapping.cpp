@@ -32,15 +32,6 @@
 #include <assert.h>
 #include "../common/intermod-common.h"
 
-#define CZ_START_BANK   (0)
-#define CZ_BANK_MASK    (0x03)
-#define BTP_START_BANK  (4)
-#define BTP_BANK_MASK   (0x03)
-
-#define CZ_S10_START_BANK   (0)
-#define CZ_S10_BANK_MASK    (0x01)
-#define BTP_S10_START_BANK  (6)
-#define BTP_S10_BANK_MASK   (0x01)
 
 namespace DRAMSim
 {
@@ -345,118 +336,6 @@ namespace DRAMSim
                         newTransactionRow = tempA ^ tempB;
 
                 }
-                else if (addressMappingScheme == Scheme9)
-                {
-                        /* This scheme statically divides address space between (C, Z)
-                         * and (B, T, P) */
-                        //row:rank:bank:col:chan
-                        tempA = physicalAddress;
-                        physicalAddress = physicalAddress >> channelBitWidth;
-                        tempB = physicalAddress << channelBitWidth;
-                        newTransactionChan = tempA ^ tempB;
-
-                        tempA = physicalAddress;
-                        physicalAddress = physicalAddress >> colHighBitWidth;
-                        tempB = physicalAddress << colHighBitWidth;
-                        newTransactionColumn = tempA ^ tempB;
-
-                        // bank id
-                        tempA = physicalAddress;
-                        physicalAddress = physicalAddress >> bankBitWidth;
-                        tempB = physicalAddress << bankBitWidth;
-                        newTransactionBank = tempA ^ tempB;
-
-                        /* XOR with lower LLC tag bits */
-                        tempA = tmpPhysicalAddress >> llcTagLowBitWidth;
-                        tempB = (tempA >> bankBitWidth) << bankBitWidth;
-                        newTransactionBank = newTransactionBank ^ (tempA ^ tempB);
-                        
-                        if (stream == CS || stream == ZS)
-                        {
-                          newTransactionBank = CZ_START_BANK + (newTransactionBank & CZ_BANK_MASK);
-                        }
-                        else
-                        {
-                          newTransactionBank = BTP_START_BANK + (newTransactionBank & BTP_BANK_MASK);
-                        }
-                          
-                        if (newTransactionBank >= 0 && newTransactionBank <= 3)
-                        {
-                          assert(stream == CS || stream == ZS);
-                        }
-
-                        if (newTransactionBank >= 4 && newTransactionBank <= 7)
-                        {
-                          assert(stream != CS && stream != ZS);
-                        }
-
-                        tempA = physicalAddress;
-                        physicalAddress = physicalAddress >> rankBitWidth;
-                        tempB = physicalAddress << rankBitWidth;
-                        newTransactionRank = tempA ^ tempB;
-
-                        tempA = physicalAddress;
-                        physicalAddress = physicalAddress >> rowBitWidth;
-                        tempB = physicalAddress << rowBitWidth;
-                        newTransactionRow = tempA ^ tempB;
-
-                }
-                else if (addressMappingScheme == Scheme10)
-                {
-                        /* This scheme statically divides address space between (C, Z)
-                         * and (B, T, P) */
-                        //row:rank:bank:col:chan
-                        tempA = physicalAddress;
-                        physicalAddress = physicalAddress >> channelBitWidth;
-                        tempB = physicalAddress << channelBitWidth;
-                        newTransactionChan = tempA ^ tempB;
-
-                        tempA = physicalAddress;
-                        physicalAddress = physicalAddress >> colHighBitWidth;
-                        tempB = physicalAddress << colHighBitWidth;
-                        newTransactionColumn = tempA ^ tempB;
-
-                        // bank id
-                        tempA = physicalAddress;
-                        physicalAddress = physicalAddress >> bankBitWidth;
-                        tempB = physicalAddress << bankBitWidth;
-                        newTransactionBank = tempA ^ tempB;
-
-                        /* XOR with lower LLC tag bits */
-                        tempA = tmpPhysicalAddress >> llcTagLowBitWidth;
-                        tempB = (tempA >> bankBitWidth) << bankBitWidth;
-                        newTransactionBank = newTransactionBank ^ (tempA ^ tempB);
-                        
-                        if (stream == CS || stream == ZS)
-                        {
-                          newTransactionBank = CZ_S10_START_BANK + (newTransactionBank & CZ_S10_BANK_MASK);
-                        }
-                        else
-                        {
-                          newTransactionBank = BTP_S10_START_BANK + ((newTransactionBank & BTP_S10_BANK_MASK) % 6);
-                        }
-                          
-                        if (newTransactionBank >= 0 && newTransactionBank <= 1)
-                        {
-                          assert(stream == CS || stream == ZS);
-                        }
-
-                        if (newTransactionBank >= 6 && newTransactionBank <= 7)
-                        {
-                          assert(stream != CS && stream != ZS);
-                        }
-
-                        tempA = physicalAddress;
-                        physicalAddress = physicalAddress >> rankBitWidth;
-                        tempB = physicalAddress << rankBitWidth;
-                        newTransactionRank = tempA ^ tempB;
-
-                        tempA = physicalAddress;
-                        physicalAddress = physicalAddress >> rowBitWidth;
-                        tempB = physicalAddress << rowBitWidth;
-                        newTransactionRow = tempA ^ tempB;
-
-                }
                 else
                 {
                         ERROR("== Error - Unknown Address Mapping Scheme");
@@ -468,10 +347,6 @@ namespace DRAMSim
                               << " Bank=" << newTransactionBank << " Row=" << newTransactionRow
                               << " Col=" << newTransactionColumn << "\n");
                 }
+
         }
 };
-
-#undef CZ_START_BANK
-#undef CZ_BANK_MASK
-#undef BTP_START_BANK
-#undef BTP_BANK_MASK

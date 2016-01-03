@@ -160,65 +160,65 @@ CommandQueue::~CommandQueue() {
 
 
 void CommandQueue::enqueue(BusPacket *newBusPacket) {
-        unsigned rank = newBusPacket->rank;
-        unsigned bank = newBusPacket->bank;
+  unsigned rank = newBusPacket->rank;
+  unsigned bank = newBusPacket->bank;
 
-        if (newBusPacket->stream_type == speedup_stream_x)
-        {
-          if (queuingStructure == PerRank)
-          {
-            speedup_queues[rank][0].push_back(newBusPacket);
-            if (speedup_queues[rank][0].size() > CMD_QUEUE_DEPTH)
-            {
-              ERROR("== Error - Enqueued more than allowed in command queue");
-              ERROR("						Need to call .hasRoomFor(int numberToEnqueue, unsigned rank, unsigned bank) first");
-              exit(0);
-            }
-          }
-          else if (queuingStructure == PerRankPerBank)
-          {
-            speedup_queues[rank][bank].push_back(newBusPacket);
-            if (speedup_queues[rank][bank].size() > CMD_QUEUE_DEPTH)
-            {
-              ERROR("== Error - Enqueued more than allowed in command queue");
-              ERROR("						Need to call .hasRoomFor(int numberToEnqueue, unsigned rank, unsigned bank) first");
-              exit(0);
-            }
-          }
-          else
-          {
-            ERROR("== Error - Unknown queuing structure");
-            exit(0);
-          }
-        }
-        else
-        {
-          if (queuingStructure == PerRank)
-          {
-            queues[rank][0].push_back(newBusPacket);
-            if (queues[rank][0].size() > CMD_QUEUE_DEPTH)
-            {
-              ERROR("== Error - Enqueued more than allowed in command queue");
-              ERROR("						Need to call .hasRoomFor(int numberToEnqueue, unsigned rank, unsigned bank) first");
-              exit(0);
-            }
-          }
-          else if (queuingStructure == PerRankPerBank)
-          {
-            queues[rank][bank].push_back(newBusPacket);
-            if (queues[rank][bank].size() > CMD_QUEUE_DEPTH)
-            {
-              ERROR("== Error - Enqueued more than allowed in command queue");
-              ERROR("						Need to call .hasRoomFor(int numberToEnqueue, unsigned rank, unsigned bank) first");
-              exit(0);
-            }
-          }
-          else
-          {
-            ERROR("== Error - Unknown queuing structure");
-            exit(0);
-          }
-        }
+  if (newBusPacket->stream_type == speedup_stream_x)
+  {
+    if (queuingStructure == PerRank)
+    {
+      speedup_queues[rank][0].push_back(newBusPacket);
+      if (speedup_queues[rank][0].size() > CMD_QUEUE_DEPTH)
+      {
+        ERROR("== Error - Enqueued more than allowed in command queue");
+        ERROR("						Need to call .hasRoomFor(int numberToEnqueue, unsigned rank, unsigned bank) first");
+        exit(0);
+      }
+    }
+    else if (queuingStructure == PerRankPerBank)
+    {
+      speedup_queues[rank][bank].push_back(newBusPacket);
+      if (speedup_queues[rank][bank].size() > CMD_QUEUE_DEPTH)
+      {
+        ERROR("== Error - Enqueued more than allowed in command queue");
+        ERROR("						Need to call .hasRoomFor(int numberToEnqueue, unsigned rank, unsigned bank) first");
+        exit(0);
+      }
+    }
+    else
+    {
+      ERROR("== Error - Unknown queuing structure");
+      exit(0);
+    }
+  }
+  else
+  {
+    if (queuingStructure == PerRank)
+    {
+      queues[rank][0].push_back(newBusPacket);
+      if (queues[rank][0].size() > CMD_QUEUE_DEPTH)
+      {
+        ERROR("== Error - Enqueued more than allowed in command queue");
+        ERROR("						Need to call .hasRoomFor(int numberToEnqueue, unsigned rank, unsigned bank) first");
+        exit(0);
+      }
+    }
+    else if (queuingStructure == PerRankPerBank)
+    {
+      queues[rank][bank].push_back(newBusPacket);
+      if (queues[rank][bank].size() > CMD_QUEUE_DEPTH)
+      {
+        ERROR("== Error - Enqueued more than allowed in command queue");
+        ERROR("						Need to call .hasRoomFor(int numberToEnqueue, unsigned rank, unsigned bank) first");
+        exit(0);
+      }
+    }
+    else
+    {
+      ERROR("== Error - Unknown queuing structure");
+      exit(0);
+    }
+  }
 }
 
 //Removes the next item from the command queue based on the system's
@@ -261,514 +261,514 @@ bool CommandQueue::pop(BusPacket **busPacket) {
                 //if the memory controller set the flags signaling that we need to issue a refresh
                 if (refreshWaiting)
                 {
-                        bool foundActiveOrTooEarly = false;
-                        //look for an open bank
-                        for (size_t b = 0; b < NUM_BANKS; b++)
+                  bool foundActiveOrTooEarly = false;
+                  //look for an open bank
+                  for (size_t b = 0; b < NUM_BANKS; b++)
+                  {
+                    vector<BusPacket *> &speedup_queue = getCommandQueue(refreshRank, b, TRUE);
+
+                    //checks to make sure that all banks are idle
+                    if (bankStates[refreshRank][b].currentBankState == RowActive)
+                    {
+                      foundActiveOrTooEarly = true;
+                      bool packetFound = false;
+
+                      //if the bank is open, make sure there is nothing else
+                      // going there before we close it
+                      for (size_t j = 0; j < speedup_queue.size(); j++)
+                      {
+                        BusPacket *packet = speedup_queue[j];
+                        if (packet->row == bankStates[refreshRank][b].openRowAddress &&
+                            packet->bank == b)
                         {
-                                vector<BusPacket *> &speedup_queue = getCommandQueue(refreshRank, b, TRUE);
+                          if (packet->busPacketType != ACTIVATE && isIssuable(packet))
+                          {
+                            *busPacket = packet;
+                            speedup_queue.erase(speedup_queue.begin() + j);
+                            sendingREF = true;
+                          }
 
-                                //checks to make sure that all banks are idle
-                                if (bankStates[refreshRank][b].currentBankState == RowActive)
-                                {
-                                        foundActiveOrTooEarly = true;
-                                        bool packetFound = false;
-
-                                        //if the bank is open, make sure there is nothing else
-                                        // going there before we close it
-                                        for (size_t j = 0; j < speedup_queue.size(); j++)
-                                        {
-                                                BusPacket *packet = speedup_queue[j];
-                                                if (packet->row == bankStates[refreshRank][b].openRowAddress &&
-                                                    packet->bank == b)
-                                                {
-                                                        if (packet->busPacketType != ACTIVATE && isIssuable(packet))
-                                                        {
-                                                                *busPacket = packet;
-                                                                speedup_queue.erase(speedup_queue.begin() + j);
-                                                                sendingREF = true;
-                                                        }
-
-                                                        packetFound = true;
-                                                        break;
-                                                }
-                                        }
-
-                                        if (!packetFound)
-                                        {
-                                          vector<BusPacket *> &queue = getCommandQueue(refreshRank, b, FALSE);
-
-                                          for (size_t j = 0; j < queue.size(); j++)
-                                          {
-                                            BusPacket *packet = queue[j];
-                                            if (packet->row == bankStates[refreshRank][b].openRowAddress &&
-                                                packet->bank == b)
-                                            {
-                                              if (packet->busPacketType != ACTIVATE && isIssuable(packet))
-                                              {
-                                                *busPacket = packet;
-                                                queue.erase(queue.begin() + j);
-                                                sendingREF = true;
-                                              }
-
-                                              break;
-                                            }
-                                          }
-                                        }
-
-                                        break;
-                                }//	NOTE: checks nextActivate time for each bank to make sure tRP is being
-                                        //				satisfied.	the next ACT and next REF can be issued at the same
-                                        //				point in the future, so just use nextActivate field instead of
-                                        //				creating a nextRefresh field
-                                else if (bankStates[refreshRank][b].nextActivate > currentClockCycle)
-                                {
-                                        foundActiveOrTooEarly = true;
-                                        break;
-                                }
+                          packetFound = true;
+                          break;
                         }
+                      }
 
-                        //if there are no open banks and timing has been met, send out the refresh
-                        //	reset flags and rank pointer
-                        if (!foundActiveOrTooEarly && bankStates[refreshRank][0].currentBankState != PowerDown)
+                      if (!packetFound)
+                      {
+                        vector<BusPacket *> &queue = getCommandQueue(refreshRank, b, FALSE);
+
+                        for (size_t j = 0; j < queue.size(); j++)
                         {
-                                *busPacket = new BusPacket(REFRESH, 0, 0, speedup_stream_u, 0, 0, refreshRank, 0, 0, dramsim_log);
-                                refreshRank = -1;
-                                refreshWaiting = false;
-                                sendingREF = true;
+                          BusPacket *packet = queue[j];
+                          if (packet->row == bankStates[refreshRank][b].openRowAddress &&
+                              packet->bank == b)
+                          {
+                            if (packet->busPacketType != ACTIVATE && isIssuable(packet))
+                            {
+                              *busPacket = packet;
+                              queue.erase(queue.begin() + j);
+                              sendingREF = true;
+                            }
+
+                            break;
+                          }
                         }
+                      }
+
+                      break;
+                    }//	NOTE: checks nextActivate time for each bank to make sure tRP is being
+                    //				satisfied.	the next ACT and next REF can be issued at the same
+                    //				point in the future, so just use nextActivate field instead of
+                    //				creating a nextRefresh field
+                    else if (bankStates[refreshRank][b].nextActivate > currentClockCycle)
+                    {
+                      foundActiveOrTooEarly = true;
+                      break;
+                    }
+                  }
+
+                  //if there are no open banks and timing has been met, send out the refresh
+                  //	reset flags and rank pointer
+                  if (!foundActiveOrTooEarly && bankStates[refreshRank][0].currentBankState != PowerDown)
+                  {
+                    *busPacket = new BusPacket(REFRESH, 0, 0, speedup_stream_u, 0, 0, refreshRank, 0, 0, dramsim_log);
+                    refreshRank = -1;
+                    refreshWaiting = false;
+                    sendingREF = true;
+                  }
                 } // refreshWaiting
 
                 //if we're not sending a REF, proceed as normal
                 if (!sendingREF)
                 {
-                        bool foundIssuable = false;
-                        unsigned startingRank = nextRank;
-                        unsigned startingBank = nextBank;
-                        do
+                  bool foundIssuable = false;
+                  unsigned startingRank = nextRank;
+                  unsigned startingBank = nextBank;
+                  do
+                  {
+                    vector<BusPacket *> &speedup_queue = getCommandQueue(nextRank, nextBank, TRUE);
+                    //make sure there is something in this queue first
+                    //	also make sure a rank isn't waiting for a refresh
+                    //	if a rank is waiting for a refesh, don't issue anything to it until the
+                    //		refresh logic above has sent one out (ie, letting banks close)
+                    if (!speedup_queue.empty() && !((nextRank == refreshRank) && refreshWaiting))
+                    {
+                      if (queuingStructure == PerRank)
+                      {
+
+                        //search from beginning to find first issuable bus packet
+                        for (size_t i = 0; i < speedup_queue.size(); i++)
                         {
-                                vector<BusPacket *> &speedup_queue = getCommandQueue(nextRank, nextBank, TRUE);
-                                //make sure there is something in this queue first
-                                //	also make sure a rank isn't waiting for a refresh
-                                //	if a rank is waiting for a refesh, don't issue anything to it until the
-                                //		refresh logic above has sent one out (ie, letting banks close)
-                                if (!speedup_queue.empty() && !((nextRank == refreshRank) && refreshWaiting))
-                                {
-                                        if (queuingStructure == PerRank)
-                                        {
+                          if (isIssuable(speedup_queue[i]))
+                          {
+                            //check to make sure we aren't removing a read/write that is paired with an activate
+                            if (i > 0 && speedup_queue[i - 1]->busPacketType == ACTIVATE &&
+                                speedup_queue[i - 1]->physicalAddress == speedup_queue[i]->physicalAddress)
+                              continue;
 
-                                                //search from beginning to find first issuable bus packet
-                                                for (size_t i = 0; i < speedup_queue.size(); i++)
-                                                {
-                                                        if (isIssuable(speedup_queue[i]))
-                                                        {
-                                                                //check to make sure we aren't removing a read/write that is paired with an activate
-                                                                if (i > 0 && speedup_queue[i - 1]->busPacketType == ACTIVATE &&
-                                                                    speedup_queue[i - 1]->physicalAddress == speedup_queue[i]->physicalAddress)
-                                                                        continue;
-
-                                                                *busPacket = speedup_queue[i];
-                                                                speedup_queue.erase(speedup_queue.begin() + i);
-                                                                foundIssuable = true;
-                                                                break;
-                                                        }
-                                                }
-                                        }
-                                        else
-                                        {
-                                                if (isIssuable(speedup_queue[0]))
-                                                {
-
-                                                        //no need to search because if the front can't be sent,
-                                                        // then no chance something behind it can go instead
-                                                        *busPacket = speedup_queue[0];
-                                                        speedup_queue.erase(speedup_queue.begin());
-                                                        foundIssuable = true;
-                                                }
-                                        }
-
-                                }
-
-                                vector<BusPacket *> &queue = getCommandQueue(nextRank, nextBank, FALSE);
-
-                                if (!foundIssuable && !queue.empty() && !((nextRank == refreshRank) && refreshWaiting))
-                                {
-                                        if (queuingStructure == PerRank)
-                                        {
-
-                                                //search from beginning to find first issuable bus packet
-                                                for (size_t i = 0; i < queue.size(); i++)
-                                                {
-                                                        if (isIssuable(queue[i]))
-                                                        {
-                                                                //check to make sure we aren't removing a read/write that is paired with an activate
-                                                                if (i > 0 && queue[i - 1]->busPacketType == ACTIVATE &&
-                                                                    queue[i - 1]->physicalAddress == queue[i]->physicalAddress)
-                                                                        continue;
-
-                                                                *busPacket = queue[i];
-                                                                queue.erase(queue.begin() + i);
-                                                                foundIssuable = true;
-                                                                break;
-                                                        }
-                                                }
-                                        }
-                                        else
-                                        {
-                                                if (isIssuable(queue[0]))
-                                                {
-
-                                                        //no need to search because if the front can't be sent,
-                                                        // then no chance something behind it can go instead
-                                                        *busPacket = queue[0];
-                                                        queue.erase(queue.begin());
-                                                        foundIssuable = true;
-                                                }
-                                        }
-
-                                }
-
-                                //if we found something, break out of do-while
-                                if (foundIssuable) break;
-
-                                //rank round robin
-                                if (queuingStructure == PerRank)
-                                {
-                                        nextRank = (nextRank + 1) % NUM_RANKS;
-                                        if (startingRank == nextRank)
-                                        {
-                                                break;
-                                        }
-                                }
-                                else
-                                {
-                                        nextRankAndBank(nextRank, nextBank);
-                                        if (startingRank == nextRank && startingBank == nextBank)
-                                        {
-                                                break;
-                                        }
-                                }
+                            *busPacket = speedup_queue[i];
+                            speedup_queue.erase(speedup_queue.begin() + i);
+                            foundIssuable = true;
+                            break;
+                          }
                         }
-                        while (true);
+                      }
+                      else
+                      {
+                        if (isIssuable(speedup_queue[0]))
+                        {
 
-                        //if we couldn't find anything to send, return false
-                        if (!foundIssuable) return false;
+                          //no need to search because if the front can't be sent,
+                          // then no chance something behind it can go instead
+                          *busPacket = speedup_queue[0];
+                          speedup_queue.erase(speedup_queue.begin());
+                          foundIssuable = true;
+                        }
+                      }
+
+                    }
+
+                    vector<BusPacket *> &queue = getCommandQueue(nextRank, nextBank, FALSE);
+
+                    if (!foundIssuable && !queue.empty() && !((nextRank == refreshRank) && refreshWaiting))
+                    {
+                      if (queuingStructure == PerRank)
+                      {
+
+                        //search from beginning to find first issuable bus packet
+                        for (size_t i = 0; i < queue.size(); i++)
+                        {
+                          if (isIssuable(queue[i]))
+                          {
+                            //check to make sure we aren't removing a read/write that is paired with an activate
+                            if (i > 0 && queue[i - 1]->busPacketType == ACTIVATE &&
+                                queue[i - 1]->physicalAddress == queue[i]->physicalAddress)
+                              continue;
+
+                            *busPacket = queue[i];
+                            queue.erase(queue.begin() + i);
+                            foundIssuable = true;
+                            break;
+                          }
+                        }
+                      }
+                      else
+                      {
+                        if (isIssuable(queue[0]))
+                        {
+
+                          //no need to search because if the front can't be sent,
+                          // then no chance something behind it can go instead
+                          *busPacket = queue[0];
+                          queue.erase(queue.begin());
+                          foundIssuable = true;
+                        }
+                      }
+
+                    }
+
+                    //if we found something, break out of do-while
+                    if (foundIssuable) break;
+
+                    //rank round robin
+                    if (queuingStructure == PerRank)
+                    {
+                      nextRank = (nextRank + 1) % NUM_RANKS;
+                      if (startingRank == nextRank)
+                      {
+                        break;
+                      }
+                    }
+                    else
+                    {
+                      nextRankAndBank(nextRank, nextBank);
+                      if (startingRank == nextRank && startingBank == nextBank)
+                      {
+                        break;
+                      }
+                    }
+                  }
+                  while (true);
+
+                  //if we couldn't find anything to send, return false
+                  if (!foundIssuable) return false;
                 }
         }
         else if (rowBufferPolicy == OpenPage)
         {
-                bool sendingREForPRE = false;
-                if (refreshWaiting)
+          bool sendingREForPRE = false;
+          if (refreshWaiting)
+          {
+            bool sendREF = true;
+            //make sure all banks idle and timing met for a REF
+            for (size_t b = 0; b < NUM_BANKS; b++)
+            {
+              //if a bank is active we can't send a REF yet
+              if (bankStates[refreshRank][b].currentBankState == RowActive)
+              {
+                sendREF = false;
+                bool closeRow = true;
+                bool packetFound = false;
+                //search for commands going to an open row
+                vector <BusPacket *> &speedup_refreshQueue = getCommandQueue(refreshRank, b, TRUE);
+
+                for (size_t j = 0; j < speedup_refreshQueue.size(); j++)
                 {
-                        bool sendREF = true;
-                        //make sure all banks idle and timing met for a REF
-                        for (size_t b = 0; b < NUM_BANKS; b++)
-                        {
-                                //if a bank is active we can't send a REF yet
-                                if (bankStates[refreshRank][b].currentBankState == RowActive)
-                                {
-                                        sendREF = false;
-                                        bool closeRow = true;
-                                        bool packetFound = false;
-                                        //search for commands going to an open row
-                                        vector <BusPacket *> &speedup_refreshQueue = getCommandQueue(refreshRank, b, TRUE);
+                  BusPacket *packet = speedup_refreshQueue[j];
+                  //if a command in the queue is going to the same row . . .
+                  if (bankStates[refreshRank][b].openRowAddress == packet->row &&
+                      b == packet->bank)
+                  {
+                    // . . . and is not an activate . . .
+                    if (packet->busPacketType != ACTIVATE)
+                    {
+                      closeRow = false;
+                      // . . . and can be issued . . .
+                      if (isIssuable(packet))
+                      {
+                        //send it out
+                        *busPacket = packet;
+                        speedup_refreshQueue.erase(speedup_refreshQueue.begin() + j);
+                        sendingREForPRE = true;
+                      }
+                      break;
+                    }
+                    else //command is an activate
+                    {
+                      //if we've encountered another act, no other command will be of interest
+                      break;
+                    }
 
-                                        for (size_t j = 0; j < speedup_refreshQueue.size(); j++)
-                                        {
-                                                BusPacket *packet = speedup_refreshQueue[j];
-                                                //if a command in the queue is going to the same row . . .
-                                                if (bankStates[refreshRank][b].openRowAddress == packet->row &&
-                                                    b == packet->bank)
-                                                {
-                                                        // . . . and is not an activate . . .
-                                                        if (packet->busPacketType != ACTIVATE)
-                                                        {
-                                                                closeRow = false;
-                                                                // . . . and can be issued . . .
-                                                                if (isIssuable(packet))
-                                                                {
-                                                                        //send it out
-                                                                        *busPacket = packet;
-                                                                        speedup_refreshQueue.erase(speedup_refreshQueue.begin() + j);
-                                                                        sendingREForPRE = true;
-                                                                }
-                                                                break;
-                                                        }
-                                                        else //command is an activate
-                                                        {
-                                                                //if we've encountered another act, no other command will be of interest
-                                                                break;
-                                                        }
-
-                                                        packetFound = true;
-                                                }
-                                        }
-                                        
-                                        if (packetFound == false)
-                                        {
-                                          vector <BusPacket *> &refreshQueue = getCommandQueue(refreshRank, b, FALSE);
-
-                                          for (size_t j = 0; j < refreshQueue.size(); j++)
-                                          {
-                                            BusPacket *packet = refreshQueue[j];
-                                            //if a command in the queue is going to the same row . . .
-                                            if (bankStates[refreshRank][b].openRowAddress == packet->row &&
-                                                b == packet->bank)
-                                            {
-                                              // . . . and is not an activate . . .
-                                              if (packet->busPacketType != ACTIVATE)
-                                              {
-                                                closeRow = false;
-                                                // . . . and can be issued . . .
-                                                if (isIssuable(packet))
-                                                {
-                                                  //send it out
-                                                  *busPacket = packet;
-                                                  refreshQueue.erase(refreshQueue.begin() + j);
-                                                  sendingREForPRE = true;
-                                                }
-                                                break;
-                                              }
-                                              else //command is an activate
-                                              {
-                                                //if we've encountered another act, no other command will be of interest
-                                                break;
-                                              }
-                                            }
-                                          }
-                                        }
-
-                                        //if the bank is open and we are allowed to close it, then send a PRE
-                                        if (closeRow && currentClockCycle >= bankStates[refreshRank][b].nextPrecharge)
-                                        {
-                                                rowAccessCounters[refreshRank][b] = 0;
-                                                *busPacket = new BusPacket(PRECHARGE, 0, 0, speedup_stream_u, 0, 0, refreshRank, b, 0, dramsim_log);
-                                                sendingREForPRE = true;
-                                        }
-                                        break;
-                                }//	NOTE: the next ACT and next REF can be issued at the same
-                                        //				point in the future, so just use nextActivate field instead of
-                                        //				creating a nextRefresh field
-                                else if (bankStates[refreshRank][b].nextActivate > currentClockCycle) //and this bank doesn't have an open row
-                                {
-                                        sendREF = false;
-                                        break;
-                                }
-                        }
-
-                        //if there are no open banks and timing has been met, send out the refresh
-                        //	reset flags and rank pointer
-                        if (sendREF && bankStates[refreshRank][0].currentBankState != PowerDown)
-                        {
-                                *busPacket = new BusPacket(REFRESH, 0, 0, speedup_stream_u, 0, 0, refreshRank, 0, 0, dramsim_log);
-                                refreshRank = -1;
-                                refreshWaiting = false;
-                                sendingREForPRE = true;
-                        }
+                    packetFound = true;
+                  }
                 }
 
-                if (!sendingREForPRE)
+                if (packetFound == false)
                 {
-                        unsigned startingRank = nextRank;
-                        unsigned startingBank = nextBank;
-                        bool foundIssuable = false;
-                        do // round robin over queues
+                  vector <BusPacket *> &refreshQueue = getCommandQueue(refreshRank, b, FALSE);
+
+                  for (size_t j = 0; j < refreshQueue.size(); j++)
+                  {
+                    BusPacket *packet = refreshQueue[j];
+                    //if a command in the queue is going to the same row . . .
+                    if (bankStates[refreshRank][b].openRowAddress == packet->row &&
+                        b == packet->bank)
+                    {
+                      // . . . and is not an activate . . .
+                      if (packet->busPacketType != ACTIVATE)
+                      {
+                        closeRow = false;
+                        // . . . and can be issued . . .
+                        if (isIssuable(packet))
                         {
-                                vector<BusPacket *> &speedup_queue = getCommandQueue(nextRank, nextBank, TRUE);
-
-                                //make sure there is something there first
-                                if (!speedup_queue.empty() && !((nextRank == refreshRank) && refreshWaiting))
-                                {
-                                        //search from the beginning to find first issuable bus packet
-                                        for (size_t i = 0; i < speedup_queue.size(); i++)
-                                        {
-                                                BusPacket *packet = speedup_queue[i];
-                                                if (isIssuable(packet))
-                                                {
-                                                        //check for dependencies
-                                                        bool dependencyFound = false;
-                                                        for (size_t j = 0; j < i; j++)
-                                                        {
-                                                                BusPacket *prevPacket = speedup_queue[j];
-                                                                if (prevPacket->busPacketType != ACTIVATE &&
-                                                                    prevPacket->bank == packet->bank &&
-                                                                    prevPacket->row == packet->row)
-                                                                {
-                                                                        dependencyFound = true;
-                                                                        break;
-                                                                }
-                                                        }
-                                                        if (dependencyFound) continue;
-
-                                                        *busPacket = packet;
-
-                                                        //if the bus packet before is an activate, that is the act that was
-                                                        //	paired with the column access we are removing, so we have to remove
-                                                        //	that activate as well (check i>0 because if i==0 then theres nothing before it)
-                                                        if (i > 0 && speedup_queue[i - 1]->busPacketType == ACTIVATE)
-                                                        {
-                                                                (*busPacket)->rowHit = true;
-                                                                rowAccessCounters[(*busPacket)->rank][(*busPacket)->bank]++;
-                                                                // i is being returned, but i-1 is being thrown away, so must delete it here 
-                                                                delete (speedup_queue[i - 1]);
-
-                                                                // remove both i-1 (the activate) and i (we've saved the pointer in *busPacket)
-                                                                speedup_queue.erase(speedup_queue.begin() + i - 1, speedup_queue.begin() + i + 1);
-                                                        }
-                                                        else // there's no activate before this packet
-                                                        {
-                                                                //or just remove the one bus packet
-                                                                speedup_queue.erase(speedup_queue.begin() + i);
-                                                        }
-
-                                                        foundIssuable = true;
-                                                        break;
-                                                }
-                                        }
-                                }
-
-                                vector<BusPacket *> &queue = getCommandQueue(nextRank, nextBank, FALSE);
-                                
-                                if (foundIssuable == false)
-                                {
-                                  //make sure there is something there first
-                                  if (!queue.empty() && !((nextRank == refreshRank) && refreshWaiting))
-                                  {
-                                    //search from the beginning to find first issuable bus packet
-                                    for (size_t i = 0; i < queue.size(); i++)
-                                    {
-                                      BusPacket *packet = queue[i];
-                                      if (isIssuable(packet))
-                                      {
-                                        //check for dependencies
-                                        bool dependencyFound = false;
-                                        for (size_t j = 0; j < i; j++)
-                                        {
-                                          BusPacket *prevPacket = queue[j];
-                                          if (prevPacket->busPacketType != ACTIVATE &&
-                                              prevPacket->bank == packet->bank &&
-                                              prevPacket->row == packet->row)
-                                          {
-                                            dependencyFound = true;
-                                            break;
-                                          }
-                                        }
-                                        if (dependencyFound) continue;
-
-                                        *busPacket = packet;
-
-                                        //if the bus packet before is an activate, that is the act that was
-                                        //	paired with the column access we are removing, so we have to remove
-                                        //	that activate as well (check i>0 because if i==0 then theres nothing before it)
-                                        if (i > 0 && queue[i - 1]->busPacketType == ACTIVATE)
-                                        {
-                                          (*busPacket)->rowHit = true;
-                                          rowAccessCounters[(*busPacket)->rank][(*busPacket)->bank]++;
-                                          // i is being returned, but i-1 is being thrown away, so must delete it here 
-                                          delete (queue[i - 1]);
-
-                                          // remove both i-1 (the activate) and i (we've saved the pointer in *busPacket)
-                                          queue.erase(queue.begin() + i - 1, queue.begin() + i + 1);
-                                        }
-                                        else // there's no activate before this packet
-                                        {
-                                          //or just remove the one bus packet
-                                          queue.erase(queue.begin() + i);
-                                        }
-
-                                        foundIssuable = true;
-                                        break;
-                                      }
-                                    }
-                                  }
-                                }
-
-
-                                //if we found something, break out of do-while
-                                if (foundIssuable) break;
-
-                                //rank round robin
-                                if (queuingStructure == PerRank)
-                                {
-                                        nextRank = (nextRank + 1) % NUM_RANKS;
-                                        if (startingRank == nextRank)
-                                        {
-                                                break;
-                                        }
-                                }
-                                else
-                                {
-                                        nextRankAndBank(nextRank, nextBank);
-                                        if (startingRank == nextRank && startingBank == nextBank)
-                                        {
-                                                break;
-                                        }
-                                }
+                          //send it out
+                          *busPacket = packet;
+                          refreshQueue.erase(refreshQueue.begin() + j);
+                          sendingREForPRE = true;
                         }
-                        while (true);
-
-                        //if nothing was issuable, see if we can issue a PRE to an open bank
-                        //	that has no other commands waiting
-                        if (!foundIssuable)
-                        {
-                                //search for banks to close
-                                bool sendingPRE = false;
-                                unsigned startingRank = nextRankPRE;
-                                unsigned startingBank = nextBankPRE;
-
-                                do // round robin over all ranks and banks
-                                {
-                                        vector <BusPacket *> &queue = getCommandQueue(nextRankPRE, nextBankPRE, FALSE);
-                                        vector <BusPacket *> &speedup_queue = getCommandQueue(nextRankPRE, nextBankPRE, TRUE);
-                                        bool found = false;
-                                        //check if bank is open
-                                        if (bankStates[nextRankPRE][nextBankPRE].currentBankState == RowActive)
-                                        {
-                                                for (size_t i = 0; i < speedup_queue.size(); i++)
-                                                {
-                                                        //if there is something going to that bank and row, then we don't want to send a PRE
-                                                        if (speedup_queue[i]->bank == nextBankPRE &&
-                                                            speedup_queue[i]->row == bankStates[nextRankPRE][nextBankPRE].openRowAddress)
-                                                        {
-                                                                found = true;
-                                                                break;
-                                                        }
-                                                }
-                                                
-                                                if (!found)
-                                                {
-                                                  for (size_t i = 0; i < queue.size(); i++)
-                                                  {
-                                                    //if there is something going to that bank and row, then we don't want to send a PRE
-                                                    if (queue[i]->bank == nextBankPRE &&
-                                                        queue[i]->row == bankStates[nextRankPRE][nextBankPRE].openRowAddress)
-                                                    {
-                                                      found = true;
-                                                      break;
-                                                    }
-                                                  }
-                                                }
-
-                                                // if nothing found going to that bank and row and there are requests to the same
-                                                // bank but different row, close it
-                                                if (!found && (queue.size() || speedup_queue.size()))
-                                                {
-                                                        if (currentClockCycle >= bankStates[nextRankPRE][nextBankPRE].nextPrecharge)
-                                                        {
-                                                                sendingPRE = true;
-                                                                rowAccessCounters[nextRankPRE][nextBankPRE] = 0;
-                                                                *busPacket = new BusPacket(PRECHARGE, 0, 0, speedup_stream_u, 0, 0, nextRankPRE, nextBankPRE, 0, dramsim_log);
-                                                                break;
-                                                        }
-                                                }
-                                        }
-                                        nextRankAndBank(nextRankPRE, nextBankPRE);
-                                }
-                                while (!(startingRank == nextRankPRE && startingBank == nextBankPRE));
-
-                                //if no PREs could be sent, just return false
-                                if (!sendingPRE) return false;
-                        }
+                        break;
+                      }
+                      else //command is an activate
+                      {
+                        //if we've encountered another act, no other command will be of interest
+                        break;
+                      }
+                    }
+                  }
                 }
+
+                //if the bank is open and we are allowed to close it, then send a PRE
+                if (closeRow && currentClockCycle >= bankStates[refreshRank][b].nextPrecharge)
+                {
+                  rowAccessCounters[refreshRank][b] = 0;
+                  *busPacket = new BusPacket(PRECHARGE, 0, 0, speedup_stream_u, 0, 0, refreshRank, b, 0, dramsim_log);
+                  sendingREForPRE = true;
+                }
+                break;
+              }//	NOTE: the next ACT and next REF can be issued at the same
+              //				point in the future, so just use nextActivate field instead of
+              //				creating a nextRefresh field
+              else if (bankStates[refreshRank][b].nextActivate > currentClockCycle) //and this bank doesn't have an open row
+              {
+                sendREF = false;
+                break;
+              }
+            }
+
+            //if there are no open banks and timing has been met, send out the refresh
+            //	reset flags and rank pointer
+            if (sendREF && bankStates[refreshRank][0].currentBankState != PowerDown)
+            {
+              *busPacket = new BusPacket(REFRESH, 0, 0, speedup_stream_u, 0, 0, refreshRank, 0, 0, dramsim_log);
+              refreshRank = -1;
+              refreshWaiting = false;
+              sendingREForPRE = true;
+            }
+          }
+
+          if (!sendingREForPRE)
+          {
+            unsigned startingRank = nextRank;
+            unsigned startingBank = nextBank;
+            bool foundIssuable = false;
+            do // round robin over queues
+            {
+              vector<BusPacket *> &speedup_queue = getCommandQueue(nextRank, nextBank, TRUE);
+
+              //make sure there is something there first
+              if (!speedup_queue.empty() && !((nextRank == refreshRank) && refreshWaiting))
+              {
+                //search from the beginning to find first issuable bus packet
+                for (size_t i = 0; i < speedup_queue.size(); i++)
+                {
+                  BusPacket *packet = speedup_queue[i];
+                  if (isIssuable(packet))
+                  {
+                    //check for dependencies
+                    bool dependencyFound = false;
+                    for (size_t j = 0; j < i; j++)
+                    {
+                      BusPacket *prevPacket = speedup_queue[j];
+                      if (prevPacket->busPacketType != ACTIVATE &&
+                          prevPacket->bank == packet->bank &&
+                          prevPacket->row == packet->row)
+                      {
+                        dependencyFound = true;
+                        break;
+                      }
+                    }
+                    if (dependencyFound) continue;
+
+                    *busPacket = packet;
+
+                    //if the bus packet before is an activate, that is the act that was
+                    //	paired with the column access we are removing, so we have to remove
+                    //	that activate as well (check i>0 because if i==0 then theres nothing before it)
+                    if (i > 0 && speedup_queue[i - 1]->busPacketType == ACTIVATE)
+                    {
+                      (*busPacket)->rowHit = true;
+                      rowAccessCounters[(*busPacket)->rank][(*busPacket)->bank]++;
+                      // i is being returned, but i-1 is being thrown away, so must delete it here 
+                      delete (speedup_queue[i - 1]);
+
+                      // remove both i-1 (the activate) and i (we've saved the pointer in *busPacket)
+                      speedup_queue.erase(speedup_queue.begin() + i - 1, speedup_queue.begin() + i + 1);
+                    }
+                    else // there's no activate before this packet
+                    {
+                      //or just remove the one bus packet
+                      speedup_queue.erase(speedup_queue.begin() + i);
+                    }
+
+                    foundIssuable = true;
+                    break;
+                  }
+                }
+              }
+
+              vector<BusPacket *> &queue = getCommandQueue(nextRank, nextBank, FALSE);
+
+              if (foundIssuable == false)
+              {
+                //make sure there is something there first
+                if (!queue.empty() && !((nextRank == refreshRank) && refreshWaiting))
+                {
+                  //search from the beginning to find first issuable bus packet
+                  for (size_t i = 0; i < queue.size(); i++)
+                  {
+                    BusPacket *packet = queue[i];
+                    if (isIssuable(packet))
+                    {
+                      //check for dependencies
+                      bool dependencyFound = false;
+                      for (size_t j = 0; j < i; j++)
+                      {
+                        BusPacket *prevPacket = queue[j];
+                        if (prevPacket->busPacketType != ACTIVATE &&
+                            prevPacket->bank == packet->bank &&
+                            prevPacket->row == packet->row)
+                        {
+                          dependencyFound = true;
+                          break;
+                        }
+                      }
+                      if (dependencyFound) continue;
+
+                      *busPacket = packet;
+
+                      //if the bus packet before is an activate, that is the act that was
+                      //	paired with the column access we are removing, so we have to remove
+                      //	that activate as well (check i>0 because if i==0 then theres nothing before it)
+                      if (i > 0 && queue[i - 1]->busPacketType == ACTIVATE)
+                      {
+                        (*busPacket)->rowHit = true;
+                        rowAccessCounters[(*busPacket)->rank][(*busPacket)->bank]++;
+                        // i is being returned, but i-1 is being thrown away, so must delete it here 
+                        delete (queue[i - 1]);
+
+                        // remove both i-1 (the activate) and i (we've saved the pointer in *busPacket)
+                        queue.erase(queue.begin() + i - 1, queue.begin() + i + 1);
+                      }
+                      else // there's no activate before this packet
+                      {
+                        //or just remove the one bus packet
+                        queue.erase(queue.begin() + i);
+                      }
+
+                      foundIssuable = true;
+                      break;
+                    }
+                  }
+                }
+              }
+
+
+              //if we found something, break out of do-while
+              if (foundIssuable) break;
+
+              //rank round robin
+              if (queuingStructure == PerRank)
+              {
+                nextRank = (nextRank + 1) % NUM_RANKS;
+                if (startingRank == nextRank)
+                {
+                  break;
+                }
+              }
+              else
+              {
+                nextRankAndBank(nextRank, nextBank);
+                if (startingRank == nextRank && startingBank == nextBank)
+                {
+                  break;
+                }
+              }
+            }
+            while (true);
+
+            //if nothing was issuable, see if we can issue a PRE to an open bank
+            //	that has no other commands waiting
+            if (!foundIssuable)
+            {
+              //search for banks to close
+              bool sendingPRE = false;
+              unsigned startingRank = nextRankPRE;
+              unsigned startingBank = nextBankPRE;
+
+              do // round robin over all ranks and banks
+              {
+                vector <BusPacket *> &queue = getCommandQueue(nextRankPRE, nextBankPRE, FALSE);
+                vector <BusPacket *> &speedup_queue = getCommandQueue(nextRankPRE, nextBankPRE, TRUE);
+                bool found = false;
+                //check if bank is open
+                if (bankStates[nextRankPRE][nextBankPRE].currentBankState == RowActive)
+                {
+                  for (size_t i = 0; i < speedup_queue.size(); i++)
+                  {
+                    //if there is something going to that bank and row, then we don't want to send a PRE
+                    if (speedup_queue[i]->bank == nextBankPRE &&
+                        speedup_queue[i]->row == bankStates[nextRankPRE][nextBankPRE].openRowAddress)
+                    {
+                      found = true;
+                      break;
+                    }
+                  }
+
+                  if (!found)
+                  {
+                    for (size_t i = 0; i < queue.size(); i++)
+                    {
+                      //if there is something going to that bank and row, then we don't want to send a PRE
+                      if (queue[i]->bank == nextBankPRE &&
+                          queue[i]->row == bankStates[nextRankPRE][nextBankPRE].openRowAddress)
+                      {
+                        found = true;
+                        break;
+                      }
+                    }
+                  }
+
+                  // if nothing found going to that bank and row and there are requests to the same
+                  // bank but different row, close it
+                  if (!found && (queue.size() || speedup_queue.size()))
+                  {
+                    if (currentClockCycle >= bankStates[nextRankPRE][nextBankPRE].nextPrecharge)
+                    {
+                      sendingPRE = true;
+                      rowAccessCounters[nextRankPRE][nextBankPRE] = 0;
+                      *busPacket = new BusPacket(PRECHARGE, 0, 0, speedup_stream_u, 0, 0, nextRankPRE, nextBankPRE, 0, dramsim_log);
+                      break;
+                    }
+                  }
+                }
+                nextRankAndBank(nextRankPRE, nextBankPRE);
+              }
+              while (!(startingRank == nextRankPRE && startingBank == nextBankPRE));
+
+              //if no PREs could be sent, just return false
+              if (!sendingPRE) return false;
+            }
+          }
         }
 
         //sendAct is flag used for posted-cas
@@ -777,16 +777,16 @@ bool CommandQueue::pop(BusPacket **busPacket) {
         //  so we send the column access that is paid with this act
         if (AL > 0 && sendAct)
         {
-                sendAct = false;
+          sendAct = false;
         }
         else
         {
-                sendAct = true;
-                nextRankAndBank(nextRank, nextBank);
+          sendAct = true;
+          nextRankAndBank(nextRank, nextBank);
         }
 
         //if its an activate, add a tfaw counter
-        if ((*busPacket)->busPacketType == ACTIVATE)
+        if (*busPacket && (*busPacket)->busPacketType == ACTIVATE)
         {
                 tFAWCountdown[(*busPacket)->rank].push_back(tFAW);
         }
@@ -854,8 +854,7 @@ void CommandQueue::print() {
  * don't always have a per bank queuing structure, sometimes the bank
  * argument is ignored (and the 0th index is returned 
  */
-vector<BusPacket *> &CommandQueue::getCommandQueue(unsigned rank, unsigned bank, bool speedup) 
-{
+vector<BusPacket *> &CommandQueue::getCommandQueue(unsigned rank, unsigned bank, bool speedup) {
   if (speedup)
   {
     if (queuingStructure == PerRankPerBank)
