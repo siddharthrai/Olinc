@@ -27,10 +27,10 @@
 #include "gsdrrip.h"
 #include "zlib.h"
 
-#define PSEL_WIDTH              (10)
+#define PSEL_WIDTH              (30)
 #define PSEL_MIN_VAL            (0x00)  
-#define PSEL_MAX_VAL            (0x3ff)  
-#define PSEL_MID_VAL            (512)
+#define PSEL_MAX_VAL            (1 << PSEL_WIDTH)  
+#define PSEL_MID_VAL            (PSEL_MAX_VAL >> 1)
 
 #define SRRIP_SAMPLED_SET       (0)
 #define BRRIP_SAMPLED_SET       (1)
@@ -70,6 +70,16 @@
 #define GST9_BRRIP_SAMPLED_SET  (18)
 #define GST_FOLLOWER_SET        (19)
 
+#define CPS(i)                    (i == PS)
+#define CPS1(i)                   (i == PS1)
+#define CPS2(i)                   (i == PS2)
+#define CPS3(i)                   (i == PS3)
+#define CPS4(i)                   (i == PS4)
+#define GPGPU_STREAM(i)           (i == GP)
+#define GFX_STREAM(i)             (i < PS)
+#define GPU_STREAM(i)             (GPGPU_STREAM(i) || GFX_STREAM(i))
+#define CPU_STREAM(i)             (CPS(i) || CPS1(i) || CPS2(i) || CPS3(i) || CPS4(i))
+
 /*
  * Private Functions
  */
@@ -96,14 +106,33 @@ do                                                                              
 /* Returns currently followed policy */
 #define GET_CURRENT_POLICY(d, gd, s)  (((d)->following[(s)] == cache_policy_srrip ||    \
                                        ((d)->following[(s)] == cache_policy_gsdrrip &&  \
-                                        SAT_CTR_VAL((gd)->psel[(s)]) < PSEL_MID_VAL)) ? \
+                                        SAT_CTR_VAL((gd)->psel[(s)]) <= PSEL_MID_VAL)) ? \
                                         cache_policy_srrip : cache_policy_brrip)
+
+ub8 fill_count;
 
 static int get_set_type_gsdrrip(long long int indx, ub4 gsdrrip_samples)
 {
   int   lsb_bits;
   int   msb_bits;
   int   mid_bits;
+  unsigned upper = (indx >> 6) & 0xf;
+  unsigned lower = indx & 0xf;
+  unsigned middle = (indx >> 4) & 0x3;
+  unsigned not_lower = (~lower) & 0xf;
+  unsigned alternate1 =  (lower ^ 0xa) & 0xf;
+  unsigned alternate2 = (lower ^ 0x5) & 0xf;
+
+  ub1 sample1 = (((upper == lower) && (middle == 0)) ? 1 : 0);
+  ub1 sample2 = (((upper == not_lower) && (middle == 0)) ? 1 : 0);
+  ub1 sample3 = (((upper == alternate1) && (middle == 0)) ? 1 : 0);
+  ub1 sample4 = (((upper == alternate2) && (middle == 0)) ? 1 : 0);
+  ub1 sample5 = (((upper == lower) && (middle == 0x3)) ? 1 : 0);
+  ub1 sample6 = (((upper == not_lower) && (middle == 0x3)) ? 1 : 0);
+  ub1 sample7 = (((upper == alternate1) && (middle == 0x3)) ? 1 : 0);
+  ub1 sample8 = (((upper == alternate2) && (middle == 0x3)) ? 1 : 0);
+  ub1 sample9 = (((upper == lower) && (middle == 0x1)) ? 1 : 0);
+  ub1 sample10 = (((upper == not_lower) && (middle == 0x1)) ? 1 : 0);
 
   /* BS and PS will always be present */
   assert(gsdrrip_samples >= 1 && gsdrrip_samples <= 18);
@@ -111,6 +140,70 @@ static int get_set_type_gsdrrip(long long int indx, ub4 gsdrrip_samples)
   lsb_bits = indx & 0x07;
   msb_bits = (indx >> 7) & 0x07;
   mid_bits = (indx >> 3) & 0x0f;
+
+#if 0
+  if (((upper == lower) && (middle == 0)) && gsdrrip_samples >= 1)
+  {
+    return GST1_SRRIP_SAMPLED_SET;
+  }
+
+  if (((upper == not_lower) && (middle == 0)) && gsdrrip_samples >= 2)
+  {
+    return GST1_BRRIP_SAMPLED_SET;
+  }
+
+  if (((upper == alternate1) && (middle == 0)) && gsdrrip_samples >= 3)
+  {    
+    /* If there is no GPU this is core sample 2, this is done to avoid problems 
+     * in policy initializatin. */
+    return GST2_SRRIP_SAMPLED_SET;
+  }
+
+  if (((upper == alternate2) && (middle == 0)) && gsdrrip_samples >= 4)
+  {
+    /* If there is no GPU this is core sample 3, this is done to avoid problems 
+     * in policy initializatin. */
+    return GST2_BRRIP_SAMPLED_SET;
+  }
+
+  if (((upper == lower) && (middle == 0x3)) && gsdrrip_samples >= 5)
+  {
+    /* If there is no GPU this is core sample 4, this is done to avoid problems 
+     * in policy initializatin. */
+    return GST3_SRRIP_SAMPLED_SET;
+  }
+
+  if (((upper == not_lower) && (middle == 0x3)) && gsdrrip_samples >= 6)
+  {
+    /* If there is no GPU this is core sample 4, this is done to avoid problems 
+     * in policy initializatin. */
+    return GST3_BRRIP_SAMPLED_SET;
+  }
+
+  if (((upper == alternate1) && (middle == 0x3)) && gsdrrip_samples >= 7)
+  {
+    /* For core sample 7, GPU must be present. */
+    return GST4_SRRIP_SAMPLED_SET;
+  }
+
+  if (((upper == alternate2) && (middle == 0x3)) && gsdrrip_samples >= 8)
+  {
+    /* For core sample 7, GPU must be present. */
+    return GST4_BRRIP_SAMPLED_SET;
+  }
+
+  if (((upper == lower) && (middle == 0x1)) && gsdrrip_samples >= 9)
+  {
+    /* For core sample 7, GPU must be present. */
+    return GST5_SRRIP_SAMPLED_SET;
+  }
+
+  if (((upper == not_lower) && (middle == 0x1)) && gsdrrip_samples >= 10)
+  {
+    /* For core sample 7, GPU must be present. */
+    return GST5_BRRIP_SAMPLED_SET;
+  }
+#endif
 
   if (lsb_bits == msb_bits && mid_bits == 0 && gsdrrip_samples >= 1)
   {
@@ -174,6 +267,7 @@ static int get_set_type_gsdrrip(long long int indx, ub4 gsdrrip_samples)
     return GST5_BRRIP_SAMPLED_SET;
   }
 
+#if 0
   if (lsb_bits == msb_bits && mid_bits == 5 && gsdrrip_samples >= 11)
   {
     /* For core sample 7, GPU must be present. */
@@ -221,6 +315,7 @@ static int get_set_type_gsdrrip(long long int indx, ub4 gsdrrip_samples)
     /* For core sample 7, GPU must be present. */
     return GST9_BRRIP_SAMPLED_SET;
   }
+#endif
 
   return GST_FOLLOWER_SET;
 }
@@ -230,49 +325,71 @@ static ub1 cache_get_gsdrrip_stream(gsdrrip_gdata *global_data, ub1 stream,
 {
   ub1 ret_stream;
   
+  ret_stream = NN;
+
   /* Temporary, until trace generation is fixed */
-  if (stream < PS)
+  if (GFX_STREAM(stream))
   {
     core = 0;
   }
-
-  switch (stream)
+  
+  if (global_data->gsdrrip_gpu_enable)
   {
-    case CS:
-      assert(core == 0);
-      ret_stream = GST1;
-      break;
+    switch (stream)
+    {
+      case CS:
+      case ZS:
+      case TS:
+      case BS:
+      case IS:
+      case HS:
+      case NS:
+      case XS:
+      case DS:
+        assert(core == 0);
+        ret_stream = GST1;
+        break;
 
-    case ZS:
-      assert(core == 0);
-      ret_stream = GST2;
-      break;
+      case PS:
+      case PS1:
+      case PS2:
+      case PS3:
+      case PS4:
+        ret_stream = GST1 + core;
+        break;
 
-    case TS:
-      assert(core == 0);
-      ret_stream = GST3;
-      break;
+      default:
+        panic("Unknown stream type %s %d %d\n", __FUNCTION__, __LINE__, stream);
+    }
+  }
+  else
+  {
+    if (global_data->gsdrrip_gpgpu_enable)
+    {
+      switch (stream)
+      {
+        case GP:
+          assert(core == 0);
+          ret_stream = GST1;
+          break;
 
-    case BS:
-      assert(core == 0);
-      ret_stream = GST4;
-      break;
-    
-    case IS:
-    case HS:
-    case NS:
-    case XS:
-    case DS:
-      assert(core == 0);
-      ret_stream = GST5;
-      break;
+        case PS:
+        case PS1:
+        case PS2:
+        case PS3:
+        case PS4:
+          ret_stream = GST1 + core;
+          break;
 
-    case PS:
-      ret_stream = GST6 + core;
-      break;
-    
-   default:
-      panic("Unknown stream type %s %d\n", __FUNCTION__, __LINE__);
+        default:
+          panic("Unknown stream type %s %d %d\n", __FUNCTION__, __LINE__, stream);
+      }
+    }
+    else
+    {
+      assert(CPU_STREAM(stream) == TRUE);
+      ret_stream = GST1 + core;
+    }
   }
   
   assert(ret_stream <= global_data->gsdrrip_streams);
@@ -332,6 +449,9 @@ void cache_dump_gsdrrip_stats(gsdrrip_stats *stats, ub8 cycle)
       stats->gsdrrip_brrip_samples, stats->gsdrrip_srrip_fill, 
       stats->gsdrrip_brrip_fill, stats->gsdrrip_fill_2, stats->gsdrrip_fill_3);
   
+  printf("Total fill:%ld SRRIP fill: %ld BRRIP fill %ld\n", 
+      fill_count, stats->sample_srrip_fill, stats->sample_brrip_fill);
+
   /* Reset all stat counters */
   stats->gsdrrip_srrip_fill = 0;
   stats->gsdrrip_brrip_fill = 0;
@@ -477,6 +597,18 @@ void cache_init_gsdrrip(long long int set_indx, struct cache_params *params, gsd
     /* TODO: allocate psel for all streams */
     global_data->psel = xcalloc(params->streams + 1, sizeof(sctr));
     assert(global_data->psel);
+    
+    if (params->gsdrrip_gpu_enable)
+    {
+      assert(params->gsdrrip_gpgpu_enable == FALSE);
+      assert(params->streams >= 5);
+    }
+
+    if (params->gsdrrip_gpgpu_enable)
+    {
+      assert(params->gsdrrip_gpu_enable == FALSE);
+      assert(params->streams >= 1);
+    }
 
     /* Initialize policy selection counter for all streams */
     for (ub4 i = 0; i <= params->streams; i++)
@@ -485,8 +617,11 @@ void cache_init_gsdrrip(long long int set_indx, struct cache_params *params, gsd
       SAT_CTR_SET(global_data->psel[i], PSEL_MID_VAL);
     }
     
-    global_data->gsdrrip_streams = params->streams;
-
+    global_data->gsdrrip_streams      = params->streams;
+    global_data->gsdrrip_gpu_enable   = params->gsdrrip_gpu_enable;
+    global_data->gsdrrip_gpgpu_enable = params->gsdrrip_gpgpu_enable;
+    global_data->gsdrrip_cpu_enable   = params->gsdrrip_cpu_enable;
+    
     global_data->stats.gsdrrip_srrip_samples = 0;
     global_data->stats.gsdrrip_brrip_samples = 0;
     global_data->stats.gsdrrip_srrip_fill    = 0;
@@ -497,7 +632,7 @@ void cache_init_gsdrrip(long long int set_indx, struct cache_params *params, gsd
     global_data->stats.sample_brrip_fill     = 0;
     global_data->stats.sample_srrip_hit      = 0;
     global_data->stats.sample_brrip_hit      = 0;
-
+  
 #define BRRIP_CTR_WIDTH     (8)    
 #define BRRIP_PSEL_MIN_VAL  (0)    
 #define BRRIP_PSEL_MAX_VAL  (255)    
@@ -506,6 +641,9 @@ void cache_init_gsdrrip(long long int set_indx, struct cache_params *params, gsd
     SAT_CTR_INI(global_data->brrip.access_ctr, BRRIP_CTR_WIDTH, 
       BRRIP_PSEL_MIN_VAL, BRRIP_PSEL_MAX_VAL);
     global_data->brrip.threshold = params->threshold;
+
+    SAT_CTR_INI(global_data->access_count, BRRIP_CTR_WIDTH, 
+      BRRIP_PSEL_MIN_VAL, BRRIP_PSEL_MAX_VAL);
 
 #undef BRRIP_CTR_WIDTH
 #undef BRRIP_PSEL_MIN_VAL
@@ -775,6 +913,7 @@ void cache_init_gsdrrip(long long int set_indx, struct cache_params *params, gsd
       /* Initialize SRRIP and BRRIP per policy data using GSDRRIP data */
       cache_init_srrip_from_gsdrrip(params, &(policy_data->srrip), policy_data);
       cache_init_brrip_from_gsdrrip(params, &(policy_data->brrip), policy_data);
+      cache_set_following_gsdrrip(policy_data, global_data);
       
       /* Set policy followed by sample */
       cache_set_following_brrip(policy_data, global_data, GST8);
@@ -822,6 +961,8 @@ void cache_init_gsdrrip(long long int set_indx, struct cache_params *params, gsd
     default:
       panic("Unknown set type %s %d\n", __FUNCTION__, __LINE__);
   }
+
+  policy_data->set_type = get_set_type_gsdrrip(set_indx, global_data->gsdrrip_streams * PS_SAMPLES);
 
 #undef PS_SAMPLES
 }
@@ -898,18 +1039,27 @@ void cache_fill_block_gsdrrip(gsdrrip_data *policy_data, gsdrrip_gdata *global_d
     policy_data->following[GSSTRM(global_data, info)] == cache_policy_brrip || 
     policy_data->following[GSSTRM(global_data, info)] == cache_policy_gsdrrip);
 
-  if (info->pc)
+  if (info && info->fill)
   {
+    fill_count++;
+
+    assert(GSSTRM(global_data, info) == GST1 || GSSTRM(global_data, info) == GST2);
+
+#if 0
     switch (policy_data->following[GSSTRM(global_data, info)])
     {
       case cache_policy_srrip:
         /* Increment fill stats for SRRIP */
+#if 0
         global_data->stats.sample_srrip_fill += 1;
+#endif
         SAT_CTR_INC(global_data->psel[GSSTRM(global_data, info)]);
         break;
 
       case cache_policy_brrip:
+#if 0
         global_data->stats.sample_brrip_fill += 1;
+#endif
         SAT_CTR_DEC(global_data->psel[GSSTRM(global_data, info)]);
         break;
 
@@ -920,9 +1070,62 @@ void cache_fill_block_gsdrrip(gsdrrip_data *policy_data, gsdrrip_gdata *global_d
       default:
         panic("Invalid policy function %s line %d\n", __FUNCTION__, __LINE__);
     }
+#endif
+    switch (policy_data->set_type)
+    {
+      case GST1_SRRIP_SAMPLED_SET:
+        SAT_CTR_INC(global_data->psel[GST1]);
+        break;
+
+      case GST1_BRRIP_SAMPLED_SET:
+        SAT_CTR_DEC(global_data->psel[GST1]);
+        break;
+
+      case GST2_SRRIP_SAMPLED_SET:
+        SAT_CTR_INC(global_data->psel[GST2]);
+        break;
+
+      case GST2_BRRIP_SAMPLED_SET:
+        SAT_CTR_DEC(global_data->psel[GST2]);
+        break;
+
+      case GST3_SRRIP_SAMPLED_SET:
+        SAT_CTR_INC(global_data->psel[GST3]);
+        break;
+
+      case GST3_BRRIP_SAMPLED_SET:
+        SAT_CTR_DEC(global_data->psel[GST3]);
+        break;
+
+      case GST4_SRRIP_SAMPLED_SET:
+        SAT_CTR_INC(global_data->psel[GST4]);
+        break;
+
+      case GST4_BRRIP_SAMPLED_SET:
+        SAT_CTR_DEC(global_data->psel[GST4]);
+        break;
+
+      case GST5_SRRIP_SAMPLED_SET:
+        SAT_CTR_INC(global_data->psel[GST5]);
+        break;
+
+      case GST5_BRRIP_SAMPLED_SET:
+        SAT_CTR_DEC(global_data->psel[GST5]);
+        break;
+
+      default:
+        break;
+    }
+
+    if ((policy_data->set_type == GST1_SRRIP_SAMPLED_SET) || 
+        (policy_data->set_type == GST2_SRRIP_SAMPLED_SET))
+    {
+      global_data->stats.sample_srrip_fill += 1;
+    }
   }
 
 #define CTR_VAL(d)    (SAT_CTR_VAL((d)->brrip.access_ctr))
+#define ACTR_VAL(d)   (SAT_CTR_VAL((d)->access_count))
 #define THRESHOLD(d)  ((d)->brrip.threshold)
 
   /* Fill block in all component policies */
@@ -930,8 +1133,8 @@ void cache_fill_block_gsdrrip(gsdrrip_data *policy_data, gsdrrip_gdata *global_d
   {
     case cache_policy_srrip:
       cache_fill_block_srrip(&(policy_data->srrip), &(global_data->srrip), way, tag, state, strm, 
-        info);
-      
+          info);
+
       /* For GSDRRIP, BRRIP access counter is incremented on access to all sets
        * irrespective of the followed policy. So, if followed policy is SRRIP
        * we increment counter here. */
@@ -945,10 +1148,12 @@ void cache_fill_block_gsdrrip(gsdrrip_data *policy_data, gsdrrip_gdata *global_d
       }
 
       /* Increment fill stats for SRRIP */
-      global_data->stats.gsdrrip_srrip_fill += 1;
+      if (CPU_STREAM(info->stream))
+        global_data->stats.gsdrrip_srrip_fill += 1;
+
       global_data->stats.gsdrrip_fill_2     += 1; 
       break;
-    
+
     case cache_policy_brrip:
       /* Find fill RRPV to update stats */
       if (CTR_VAL(global_data) == 0) 
@@ -960,11 +1165,26 @@ void cache_fill_block_gsdrrip(gsdrrip_data *policy_data, gsdrrip_gdata *global_d
         global_data->stats.gsdrrip_fill_3 += 1; 
       }
 
+      if (info && info->fill)
+      {
+        SAT_CTR_INC(global_data->access_count);
+
+        if (ACTR_VAL(global_data) == THRESHOLD(global_data))
+        {
+          SAT_CTR_RST(global_data->access_count);
+        }
+      }
+
+      CTR_VAL(global_data) = ACTR_VAL(global_data);
+
       cache_fill_block_brrip(&(policy_data->brrip), &(global_data->brrip), way,
-        tag, state, strm, info);
+          tag, state, strm, info);
 
       /* Increment fill stats for SRRIP */
-      global_data->stats.gsdrrip_brrip_fill += 1;
+      if (CPU_STREAM(info->stream))
+      {
+        global_data->stats.gsdrrip_brrip_fill += 1;
+      }
       break;
 
     default:
@@ -972,6 +1192,7 @@ void cache_fill_block_gsdrrip(gsdrrip_data *policy_data, gsdrrip_gdata *global_d
   }
 
 #undef CTR_VAL
+#undef ACTR_VAL
 #undef THRESHOLD
 #undef GSSTRM
 }
@@ -1161,4 +1382,13 @@ struct cache_block_t cache_get_block_gsdrrip(gsdrrip_data *policy_data,
 #undef GST9_SRRIP_SAMPLED_SET
 #undef GST9_BRRIP_SAMPLED_SET
 #undef GST_FOLLOWER_SET
+#undef CPS
+#undef CPS1
+#undef CPS2
+#undef CPS3
+#undef CPS4
+#undef GPGPU_STREAM
+#undef GFX_STREAM
+#undef GPU_STREAM
+#undef CPU_STREAM
 

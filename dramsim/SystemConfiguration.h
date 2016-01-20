@@ -72,6 +72,7 @@ extern bool USE_LOW_POWER;
 extern bool VIS_FILE_OUTPUT;
 
 extern bool SPEEDUP_HINT;
+extern bool CPU_SPEEDUP_HINT;
 
 extern uint64_t TOTAL_STORAGE;
 extern unsigned NUM_BANKS;

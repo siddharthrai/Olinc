@@ -74,7 +74,8 @@ typedef double          uf8;
 #define DBS     (17)        /* Dynamic blitter  */
 #define DPS     (18)        /* Dynamic processor*/
 #define OS      (19)        /* Mixed stream (DS, DS, XS, NS, HS etc.) */
-#define TST     (19)        /* Total streams */
+#define GP      (20)        /* Mixed stream (DS, DS, XS, NS, HS etc.) */
+#define TST     (20)        /* Total streams */
 
 #define UNKNOWN (0)
 #define IC      (1)
@@ -86,13 +87,14 @@ typedef double          uf8;
 #define BT      (7)
 #define DU      (8)
 #define IX      (9)
-#define SIC     (10)
-#define SCC     (11)
-#define SZC     (12)
-#define STC     (13)
-#define SHZ     (14)
-#define SNC     (15)
-#define TUC     (16)
+#define GU      (10)
+#define SIC     (11)
+#define SCC     (12)
+#define SZC     (13)
+#define STC     (14)
+#define SHZ     (15)
+#define SNC     (16)
+#define TUC     (17)
 #define TCL0    (TUC + 1) 
 
 /* Temporary: Set type recognized by SDP (Stall Directed Policy) */

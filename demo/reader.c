@@ -244,23 +244,28 @@ int main(int argc, char **argv)
       assert(trace.stream > NN && trace.stream < TST + 5);
 #if 0
       if (trace.stream == TS && trace.spill == TRUE)
-      if (trace.spill == TRUE)
       if (trace.spill == FALSE && trace.sap_stream == sappriority_stream_q)
-#endif
       if (trace.sap_stream == sappriority_stream_x)
+      if (trace.spill == TRUE)
+#endif
+      if (trace.sap_stream == sappriority_stream_p || trace.sap_stream == sappriority_stream_q || 
+          trace.sap_stream == sappriority_stream_r)
       {
+#if 0
         if (old_cycle > trace.cycle)
         {
           printf("O:%ld N:%ld\n", old_cycle, trace.cycle); 
           assert(0);
         }
 
-
         old_cycle = trace.cycle;
+#endif
 
         printf("Original Stream %2s ", stream_name[trace.stream]);
         printf("core %2d ", trace.core);
+#if 0
         printf("cycle %2ld ", trace.cycle);
+#endif
         printf("pid %2d ", trace.pid);
         printf("Phy Address %10ld ", trace.address);
         printf("Vtl Address %10ld ", trace.vtl_addr);

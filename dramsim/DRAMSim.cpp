@@ -243,6 +243,7 @@ int dramsim_init(const char *deviceIniFilename, unsigned int megsOfMemory, unsig
                 (kv_map)[string("Vdd")] = string("1.5");
 
                 (kv_map)[string("SPEEDUP_HINT")] = string("false");
+                (kv_map)[string("CPU_SPEEDUP_HINT")] = string("false");
         }
 
         /* Initialize Receiver */
@@ -278,7 +279,7 @@ int dramsim_init(const char *deviceIniFilename, unsigned int megsOfMemory, unsig
 
 extern "C"
 void dramsim_done() {
-        dramsim_stats("DRAM-stats.log");
+        dramsim_stats((char *)"DRAM-stats.log");
         delete memSystem;
         delete receiver;
         delete read_cb;
@@ -322,8 +323,28 @@ extern "C"
 void dramsim_request(int isWrite, uint64_t addr, char stream, memory_trace *info) {
         bool result;
         speedup_stream_type  new_stream;
+        speedup_stream_type  stream_type;
+         
+        stream_type = (speedup_stream_type)(info->sap_stream);
 
-        new_stream = memSystem->isSpeedupHintEnable() ? (speedup_stream_type)(info->sap_stream) : speedup_stream_u;
+#define GPU_HINT    (true)
+#define CPU_HINT    (false)
+#define CPU_PSET(s) ((s) == speedup_stream_p)
+#define CPU_QSET(s) ((s) == speedup_stream_q)
+
+        if (memSystem->isSpeedupHintEnable(CPU_HINT))
+        {
+          new_stream =  ((CPU_PSET(stream_type)) || (CPU_QSET(stream_type))) ? speedup_stream_x : speedup_stream_u;
+        }
+        else
+        {
+          new_stream = memSystem->isSpeedupHintEnable(GPU_HINT) ? stream_type : speedup_stream_u;
+        }
+
+#undef GPU_HINT
+#undef CPU_HINT
+#undef CPU_PSET
+#undef CPU_QSET
 
         result = memSystem->addTransaction(isWrite ? true : false, addr, stream, new_stream);
         assert(result);

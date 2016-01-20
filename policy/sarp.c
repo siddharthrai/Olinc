@@ -2239,7 +2239,6 @@ void cache_fill_block_sarp(sarp_data *policy_data,
 #undef CTR_VAL
         break;
     }
-
   }
 
   /* 

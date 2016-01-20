@@ -107,9 +107,10 @@ csvOut(new CSVWriter(visDataOut)) {
                 channels.push_back(channel);
         }
 
-        speedup_hint_enable = SPEEDUP_HINT;
+        speedup_hint_enable     = SPEEDUP_HINT;
+        cpu_speedup_hint_enable = CPU_SPEEDUP_HINT;
 
-        printf("Speedup enable %d\n", speedup_hint_enable);
+        printf("Speedup enable GPU:%d CPU:%d\n", speedup_hint_enable, cpu_speedup_hint_enable);
 }
 
 
@@ -509,7 +510,7 @@ ub8 MultiChannelMemorySystem::getOpenRow(ub8 address)
         return channels[chan]->getOpenRow(rank, bank);
 }
 
-bool MultiChannelMemorySystem::isSpeedupHintEnable()
+bool MultiChannelMemorySystem::isSpeedupHintEnable(bool is_gpu)
 {
-  return speedup_hint_enable;
+  return (is_gpu) ? speedup_hint_enable : cpu_speedup_hint_enable;
 }

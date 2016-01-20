@@ -5,10 +5,10 @@
 
 #define INTERVAL_SIZE             (1 << 19)
 #define CYCLE_INTERVAL            (5000000)
-#define ROW_ACCESS_INTERVAL       (5000)
+#define ROW_ACCESS_INTERVAL       (1 << 19)
 #define ROW_SET_SIZE              (6)
 #define USE_INTER_STREAM_CALLBACK (FALSE)
-#define MAX_CORES                 (128)
+#define MAX_CORES                 (4)
 #define MAX_RRPV                  (3)
 #define MAX_MSHR                  (128)
 #define TQ_SIZE                   (128)
@@ -42,6 +42,7 @@ ub8 shadow_access;
 ub8 shadow_miss;
 ub1 access_shadow_tag;
 ub8 access_jumped;
+ub8 total_interval = 0;
 
 extern  sb1 *stream_names[TST + 1];  
 
@@ -310,6 +311,24 @@ extern  sb1 *stream_names[TST + 1];
   NumericStatistic <ub8> *p_xrevct;    /* X stream evict by T */
   NumericStatistic <ub8> *p_xhit;      /* CPU inter stream hit */
 
+  NumericStatistic <ub8> *g_access;    /* GPGPU stream access */ 
+  NumericStatistic <ub8> *g_miss;      /* GPGPU stream miss */
+  NumericStatistic <ub8> *g_raccess;   /* GPGPU stream access */ 
+  NumericStatistic <ub8> *g_rmiss;     /* GPGPU stream miss */
+  NumericStatistic <ub8> *g_blocks;    /* GPGPU stream blocks */
+  NumericStatistic <ub8> *g_xevct;     /* GPGPU inter stream evict */
+  NumericStatistic <ub8> *g_sevct;     /* GPGPU intra stream evict */
+  NumericStatistic <ub8> *g_zevct;     /* GPGPU evict without reuse */
+  NumericStatistic <ub8> *g_soevct;    /* Blocks self-evicted without reuse */
+  NumericStatistic <ub8> *g_xoevct;    /* Blocks cross-evicted without reuse */
+  NumericStatistic <ub8> *g_xcevct;    /* X stream evict by C */
+  NumericStatistic <ub8> *g_xzevct;    /* X stream evict by Z */
+  NumericStatistic <ub8> *g_xtevct;    /* X stream evict by T */
+  NumericStatistic <ub8> *g_xrevct;    /* X stream evict by T */
+  NumericStatistic <ub8> *g_xpevct;    /* X stream evict by T */
+  NumericStatistic <ub8> *g_xhit;      /* GPGPU inter stream hit */
+  NumericStatistic <ub8> *g_xblocks;   /* GPGPU inter stream hit */
+
   ub8 *per_way_evct[TST + 1];          /* Eviction seen by each way for each stream */
   ub8 reuse_hist[TST + 1][MAX_REUSE + 1]; /* Reuse distance histogram */
   
@@ -363,7 +382,9 @@ void cachesim_dump_per_bank_stats(cachesim_cache *cache, cachesim_cache *shadow_
 
   row_count = 0;
 
+#if 0
   printf("\n Average Bank stats per interval \n");
+#endif
 
   for (channel_itr = cache->dramsim_channels.begin(); channel_itr != cache->dramsim_channels.end(); channel_itr++)
   {
@@ -395,10 +416,11 @@ void cachesim_dump_per_bank_stats(cachesim_cache *cache, cachesim_cache *shadow_
 
         shadow_bank = (dram_bank *)(sbnk_itr->second);
 #endif
+
+#if 0
         printf ("\n");
 
         row_count = 0;
-
         for (rw_itr = current_bank->bank_rows.begin(); rw_itr != current_bank->bank_rows.end(); rw_itr++)
         {
           current_row = (dram_row *)(rw_itr->second);
@@ -435,11 +457,12 @@ void cachesim_dump_per_bank_stats(cachesim_cache *cache, cachesim_cache *shadow_
             }
           }
         }
+#endif
 
+#if 0
         printf ("\n");
 
         row_count = 0;
-
         for (rw_itr = current_bank->bank_rows.begin(); rw_itr != current_bank->bank_rows.end(); rw_itr++)
         {
           current_row = (dram_row *)(rw_itr->second);
@@ -484,9 +507,14 @@ void cachesim_dump_per_bank_stats(cachesim_cache *cache, cachesim_cache *shadow_
             }
           }
         }
+#endif
+
+        printf("%5ld; ", current_bank->row_reopen);
 
         printf("\n");
         
+        fflush(stdout);
+
         current_bank->predicted_rows.clear();
 #if 0
         printf("\n \n");
@@ -659,6 +687,8 @@ void cachesim_update_row_reopen(cachesim_cache *cache)
       {
         current_bank = (dram_bank *)(bnk_itr->second);
         assert(current_bank);
+
+        current_bank->row_reopen    = 0;
 
         for (rw_itr = current_bank->bank_rows.begin(); rw_itr != current_bank->bank_rows.end(); rw_itr++)
         {
@@ -1737,6 +1767,7 @@ static void update_dramsim_open_row_stats(cachesim_cache *cache, cachesim_cache 
     current_row = new dram_row();
     assert(current_row);
     
+    current_bank->row_reopen            = 0;
     current_row->global_row_access      = 0;
     current_row->global_row_critical    = 0;
     current_row->global_row_open        = 0;
@@ -1787,6 +1818,8 @@ static void update_dramsim_open_row_stats(cachesim_cache *cache, cachesim_cache 
         current_bank = new dram_bank();
         assert(current_bank);
 
+        current_bank->row_reopen  = 0;
+    
         current_rank->banks.insert(pair<ub8, ub8>(newTransactionBank, (ub8)current_bank));
       }
       else
@@ -1842,6 +1875,8 @@ static void update_dramsim_open_row_stats(cachesim_cache *cache, cachesim_cache 
       current_row = new dram_row();
       assert(current_row);
         
+      current_bank->row_reopen            = 0;
+
       current_row->global_row_access      = 0;
       current_row->global_row_critical    = 0;
       current_row->global_row_open        = 0;
@@ -1956,11 +1991,11 @@ static void update_dramsim_open_row_stats(cachesim_cache *cache, cachesim_cache 
 
   if (++cache->dram_access_count >= ROW_ACCESS_INTERVAL)
   {
-    cache->dram_access_count = 0;
-
     cachesim_dump_per_bank_stats(cache, shadow_tags);
 
     cachesim_update_row_reopen(cache);
+
+    cache->dram_access_count = 0;
   }
 }
 
@@ -2367,6 +2402,7 @@ static void update_dramsim_open_row_response_stats(cachesim_cache *cache, memory
   else
   {
     current_row->row_reopen += 1;
+    current_bank->row_reopen += 1;
   }
 
 #if 0
@@ -2556,68 +2592,76 @@ cache_access_status cachesim_fill_block(cachesim_cache *cache, memory_trace *inf
     vctm_block = cache_get_block(cache->cache, indx, way, &vctm_tag, &vctm_state, 
         &vctm_stream);
 
-    assert(vctm_stream >= 0 && vctm_stream <= TST + MAX_CORES - 1);
-
-    ret.way       = way;
-    ret.fate      = CACHE_ACCESS_MISS;
-
-    /* If current block is valid */
-    if (vctm_state != cache_block_invalid)
+    if (way != BYPASS_WAY)
     {
-      ret.tag       = vctm_block.tag;
-      ret.vtl_addr  = vctm_block.vtl_addr;
-      ret.stream    = vctm_stream;
-      ret.dirty     = vctm_block.dirty;
-      ret.epoch     = vctm_block.epoch;
-      ret.access    = vctm_block.access;
-      ret.last_rrpv = vctm_block.last_rrpv;
-      ret.fill_rrpv = vctm_block.fill_rrpv;
+      assert(vctm_stream >= 0 && vctm_stream <= TST);
+    
+      ret.way       = way;
+      ret.fate      = CACHE_ACCESS_MISS;
 
-      if (vctm_block.dirty && cache->dramsim_enable && !cache->shadow_tag)
+      /* If current block is valid */
+      if (vctm_state != cache_block_invalid)
       {
-        info_out = (memory_trace *)calloc(1, sizeof(memory_trace));
-        assert(info_out);
+        ret.tag       = vctm_block.tag;
+        ret.vtl_addr  = vctm_block.vtl_addr;
+        ret.stream    = vctm_stream;
+        ret.dirty     = vctm_block.dirty;
+        ret.epoch     = vctm_block.epoch;
+        ret.access    = vctm_block.access;
+        ret.last_rrpv = vctm_block.last_rrpv;
+        ret.fill_rrpv = vctm_block.fill_rrpv;
 
-        info_out->address     = vctm_block.tag;
-        info_out->stream      = vctm_stream;
-        info_out->spill       = TRUE;
-        info_out->sap_stream  = vctm_block.sap_stream;
-        info_out->vtl_addr    = info_out->address;
-        info_out->prefetch    = FALSE;
+        if (vctm_block.dirty && cache->dramsim_enable && !cache->shadow_tag)
+        {
+          info_out = (memory_trace *)calloc(1, sizeof(memory_trace));
+          assert(info_out);
 
-        /* As mshr have been freed for the completed fill. So, it must be available. */
-        mshr_alloc = cs_alloc_mshr(cache, info_out);
-        assert(mshr_alloc == CS_MSHR_ALLOC);
+          info_out->address     = vctm_block.tag;
+          info_out->stream      = vctm_stream;
+          info_out->spill       = TRUE;
+          info_out->sap_stream  = vctm_block.sap_stream;
+          info_out->vtl_addr    = info_out->address;
+          info_out->prefetch    = FALSE;
 
-        dramsim_request(TRUE, BLCKALIGN(info_out->address), info_out->stream, info_out); 
+          /* As mshr have been freed for the completed fill. So, it must be available. */
+          mshr_alloc = cs_alloc_mshr(cache, info_out);
+          assert(mshr_alloc == CS_MSHR_ALLOC);
 
-        ret.fate  = CACHE_ACCESS_RPLC;
+          dramsim_request(TRUE, BLCKALIGN(info_out->address), info_out->stream, info_out); 
 
-        pending_requests += 1;
+          ret.fate  = CACHE_ACCESS_RPLC;
+
+          pending_requests += 1;
+        }
+        else
+        {
+          ret.fate  = CACHE_ACCESS_RPLC;
+        }
+
+        cache_set_block(cache->cache, indx, way, vctm_tag, cache_block_invalid, 
+            vctm_stream, info);
+
+        cache_fill_block(cache->cache, indx, way, addr, cache_block_exclusive,
+            info->stream, info);
+
+        /* Update per-stream per-way eviction */
+        per_way_evct[vctm_stream][way] += 1;
       }
       else
       {
-        ret.fate  = CACHE_ACCESS_RPLC;
+        assert(vctm_stream == NN);
+
+        if (way != BYPASS_WAY)
+        {
+          cache_fill_block(cache->cache, indx, way, addr, cache_block_exclusive,
+              info->stream, info);
+        }
       }
-
-      cache_set_block(cache->cache, indx, way, vctm_tag, cache_block_invalid, 
-          vctm_stream, info);
-
-      cache_fill_block(cache->cache, indx, way, addr, cache_block_exclusive,
-        info->stream, info);
-
-      /* Update per-stream per-way eviction */
-      per_way_evct[vctm_stream][way] += 1;
     }
     else
     {
-      assert(vctm_stream == NN);
-      
-      if (way != BYPASS_WAY)
-      {
-        cache_fill_block(cache->cache, indx, way, addr, cache_block_exclusive,
-            info->stream, info);
-      }
+      ret.way       = way;
+      ret.fate      = CACHE_ACCESS_HIT;
     }
 
     ub8 index;         /* Histogram bucket index */
@@ -2876,12 +2920,12 @@ cache_access_status cachesim_incl_cache(cachesim_cache *cache, cachesim_cache *s
   ret.stream  = NN;
   ret.dirty   = 0;
   
-  if (strm == NN || strm > TST + MAX_CORES - 1)
+  if (strm == NN || strm > TST)
   {
     cout << "Illegal stream " << (int)strm << endl;
   }
 
-  assert(strm != NN && strm <= TST + MAX_CORES - 1);
+  assert(strm != NN && strm <= TST);
 
   block = cache_find_block(cache->cache, indx, addr, info);
 
@@ -2916,7 +2960,7 @@ cache_access_status cachesim_incl_cache(cachesim_cache *cache, cachesim_cache *s
         info_out->prefetch    = FALSE;
 
         ret.fate = CACHE_ACCESS_MISS;
-        
+
         ub8 speedup_chn_id;
         ub8 speedup_rnk_id;
         ub8 speedup_bnk_id;
@@ -2942,7 +2986,7 @@ cache_access_status cachesim_incl_cache(cachesim_cache *cache, cachesim_cache *s
           else
           {
             get_d_row_id(cache, info, speedup_chn_id, speedup_rnk_id, speedup_bnk_id, speedup_row_id, speedup_col_id);
-          
+
             if (speedup_row_id != get_row_id(info->address))
             {
               info_out->address = change_row_id(info->address, speedup_row_id, speedup_col_id);
@@ -2985,7 +3029,7 @@ cache_access_status cachesim_incl_cache(cachesim_cache *cache, cachesim_cache *s
             }
           }
         }
-        
+
         if (cache->shuffle_row)
         {
           update_dramsim_open_row_stats(cache, shadow_tags, access_remapped, info_out);
@@ -2994,6 +3038,16 @@ cache_access_status cachesim_incl_cache(cachesim_cache *cache, cachesim_cache *s
         dramsim_request(FALSE, BLCKALIGN(info_out->address), info_out->stream, info_out); 
 
         pending_requests += 1;
+#if 0
+        if (++(cache->cache_access_count) >= INTERVAL_SIZE)
+        {
+          /* Finalize component simulators */
+          cache->cache_access_count = 0;
+
+          printf("Interval %ld\n", total_interval++);
+          fflush(stdout);
+        }
+#endif
       }
       else
       {
@@ -3067,16 +3121,6 @@ cache_access_status cachesim_incl_cache(cachesim_cache *cache, cachesim_cache *s
   
   cachesim_update_hint_count(cache, info);
   
-  if (++(cache->cache_access_count) >= INTERVAL_SIZE)
-  {
-    /* Finalize component simulators */
-    cache->cache_access_count = 0;
-
-    printf(".");
-
-    fflush(stdout);
-  }
-
   return ret;
 }
 
@@ -3092,12 +3136,12 @@ void cachesim_shadow_cache_lookup(cachesim_cache *cache, ub8 addr,
   indx        = ADDR_NDX(cache, addr);
   addr        = BLCKALIGN(addr); 
 
-  if (strm == NN || strm > TST + MAX_CORES - 1)
+  if (strm == NN || strm > TST)
   {
     cout << "Illegal stream " << (int)strm << endl;
   }
 
-  assert(strm != NN && strm <= TST + MAX_CORES - 1);
+  assert(strm != NN && strm <= TST);
 
   block = cache_find_block(cache->cache, indx, addr, info);
 
@@ -3149,12 +3193,12 @@ cache_access_status cachesim_only_dram(cachesim_cache *cache, ub8 addr,
   ret.stream  = NN;
   ret.dirty   = 0;
 
-  if (strm == NN || strm > TST + MAX_CORES - 1)
+  if (strm == NN || strm > TST)
   {
     cout << "Illegal stream " << (int)strm << endl;
   }
 
-  assert(strm != NN && strm <= TST + MAX_CORES - 1);
+  assert(strm != NN && strm <= TST);
 
   assert(info->prefetch == FALSE);
 
@@ -3218,6 +3262,9 @@ void set_cache_params(struct cache_params *params, LChParameters *lcP,
   params->ways                  = cache_way;
   params->stream                = lcP->stream;
   params->streams               = lcP->streams;
+  params->gsdrrip_cpu_enable    = lcP->cpu_enable;
+  params->gsdrrip_gpu_enable    = lcP->gpu_enable;
+  params->gsdrrip_gpgpu_enable  = lcP->gpgpu_enable;
   params->bs_epoch              = lcP->useBs;
   params->speedup_enabled       = lcP->speedupEnabled;
   params->remap_crtcl           = lcP->remapCrtcl;
@@ -3536,6 +3583,24 @@ static void initStatistics(StatisticsManager *sm)
   p_xtevct    = &sm->getNumericStatistic<ub8>("CH_XTevict", ub8(0), "UC", "P");  /* Input stream access */
   p_xrevct    = &sm->getNumericStatistic<ub8>("CH_XRevict", ub8(0), "UC", "P");  /* Input stream access */
   p_xhit      = &sm->getNumericStatistic<ub8>("CH_Xhit", ub8(0), "UC", "P");     /* Input stream access */
+
+  g_access    = &sm->getNumericStatistic<ub8>("CH_Access", ub8(0), "UC", "G");  /* Input stream access */
+  g_miss      = &sm->getNumericStatistic<ub8>("CH_Miss", ub8(0), "UC", "G");    /* Input stream access */
+  g_raccess   = &sm->getNumericStatistic<ub8>("CH_RAccess", ub8(0), "UC", "G"); /* Input stream access */
+  g_rmiss     = &sm->getNumericStatistic<ub8>("CH_RMiss", ub8(0), "UC", "G");   /* Input stream access */
+  g_blocks    = &sm->getNumericStatistic<ub8>("CH_Blocks", ub8(0), "UC", "G");  /* Input stream access */
+  g_xevct     = &sm->getNumericStatistic<ub8>("CH_Xevict", ub8(0), "UC", "G");  /* Input stream access */
+  g_sevct     = &sm->getNumericStatistic<ub8>("CH_Sevict", ub8(0), "UC", "G");  /* Input stream access */
+  g_zevct     = &sm->getNumericStatistic<ub8>("CH_Zevict", ub8(0), "UC", "G");  /* Input stream access */
+  g_soevct    = &sm->getNumericStatistic<ub8>("CH_SOevict", ub8(0), "UC", "G"); /* Input stream access */
+  g_xoevct    = &sm->getNumericStatistic<ub8>("CH_XOevict", ub8(0), "UC", "G"); /* Input stream access */
+  g_xcevct    = &sm->getNumericStatistic<ub8>("CH_XCevict", ub8(0), "UC", "G"); /* Input stream access */
+  g_xzevct    = &sm->getNumericStatistic<ub8>("CH_XZevict", ub8(0), "UC", "G"); /* Input stream access */
+  g_xtevct    = &sm->getNumericStatistic<ub8>("CH_XTevict", ub8(0), "UC", "G"); /* Input stream access */
+  g_xrevct    = &sm->getNumericStatistic<ub8>("CH_XRevict", ub8(0), "UC", "G"); /* Input stream access */
+  g_xpevct    = &sm->getNumericStatistic<ub8>("CH_XPevict", ub8(0), "UC", "G"); /* Input stream access */
+  g_xhit      = &sm->getNumericStatistic<ub8>("CH_Xhit", ub8(0), "UC", "G");    /* Input stream access */
+  g_xblocks   = &sm->getNumericStatistic<ub8>("CH_XBlocks", ub8(0), "UC", "G"); /* Input stream access */
 }
 
 void closeStatisticsStream(gzofstream &out_stream)
@@ -4344,6 +4409,27 @@ static void resetStatistics()
   p_xtevct->setValue(0);
   p_xrevct->setValue(0);
   p_xhit->setValue(0);
+
+  g_access->setValue(0);
+  g_miss->setValue(0);
+  g_raccess->setValue(0);
+  g_rmiss->setValue(0);
+  g_blocks->setValue(0);
+  g_xevct->setValue(0);
+  g_sevct->setValue(0);
+  g_zevct->setValue(0);
+  g_soevct->setValue(0);
+  g_xoevct->setValue(0);
+  g_xcevct->setValue(0);
+  g_xzevct->setValue(0);
+  g_xtevct->setValue(0);
+  g_xcevct->setValue(0);
+  g_xzevct->setValue(0);
+  g_xtevct->setValue(0);
+  g_xrevct->setValue(0);
+  g_xpevct->setValue(0);
+  g_xhit->setValue(0);
+  g_xblocks->setValue(0);
 }
 
 static void periodicReset()
@@ -4620,6 +4706,26 @@ static void periodicReset()
   p_xtevct->setValue(0);
   p_xrevct->setValue(0);
   p_xhit->setValue(0);
+
+  g_access->setValue(0);
+  g_miss->setValue(0);
+  g_raccess->setValue(0);
+  g_rmiss->setValue(0);
+  g_xevct->setValue(0);
+  g_sevct->setValue(0);
+  g_zevct->setValue(0);
+  g_soevct->setValue(0);
+  g_xoevct->setValue(0);
+  g_xcevct->setValue(0);
+  g_xzevct->setValue(0);
+  g_xtevct->setValue(0);
+  g_xcevct->setValue(0);
+  g_xzevct->setValue(0);
+  g_xtevct->setValue(0);
+  g_xrevct->setValue(0);
+  g_xpevct->setValue(0);
+  g_xhit->setValue(0);
+  g_xblocks->setValue(0);
 }
 
 void update_access_stats(cachesim_cache *cache, memory_trace *info, cache_access_status ret)
@@ -4631,7 +4737,7 @@ void update_access_stats(cachesim_cache *cache, memory_trace *info, cache_access
     {
       cache->miss[info->stream]++;
 
-      if (info->stream >= PS && info->stream <= PS + MAX_CORES - 1)
+      if (info->stream >= PS && info->stream <= PS + MAX_CORES)
       {
         (*p_rmiss)++;
 
@@ -4674,6 +4780,10 @@ void update_access_stats(cachesim_cache *cache, memory_trace *info, cache_access
 
           case XS:
             (*x_rmiss)++;
+            break;
+
+          case GP:
+            (*g_rmiss)++;
             break;
 
           default:
@@ -4734,7 +4844,7 @@ void update_access_stats(cachesim_cache *cache, memory_trace *info, cache_access
     
     cache->access[info->stream]++;
 
-    if (info->stream >= PS && info->stream <= PS + MAX_CORES - 1)
+    if (info->stream >= PS && info->stream <= PS + MAX_CORES)
     {
       (*p_raccess)++;
     }
@@ -4779,6 +4889,10 @@ void update_access_stats(cachesim_cache *cache, memory_trace *info, cache_access
           (*x_raccess)++;
           break;
 
+        case GP:
+          (*g_raccess)++;
+          break;
+
         default:
           cout << "Illegal stream " << (int)info->stream << " for address ";
           cout << hex << info->address << " type : ";
@@ -4790,7 +4904,7 @@ void update_access_stats(cachesim_cache *cache, memory_trace *info, cache_access
 
   if (ret.fate == CACHE_ACCESS_MISS || ret.fate == CACHE_ACCESS_RPLC)
   {
-    if (info->stream >= PS && info->stream <= PS + MAX_CORES - 1)
+    if (info->stream >= PS && info->stream <= PS + MAX_CORES)
     {
       (*p_miss)++;
 
@@ -4865,6 +4979,14 @@ void update_access_stats(cachesim_cache *cache, memory_trace *info, cache_access
             (*x_blocks)++;
           break;
 
+
+        case GP:
+          (*g_miss)++;
+
+          if (ret.stream != info->stream)
+            (*g_blocks)++;
+          break;
+
         default:
           cout << "Illegal stream " << (int)(info->stream) << " for address ";
           cout << hex << info->address << " type : ";
@@ -4889,7 +5011,7 @@ void update_access_stats(cachesim_cache *cache, memory_trace *info, cache_access
 
       if (ret.stream != info->stream)
       {
-        if (ret.stream >= PS && ret.stream <= PS + MAX_CORES - 1)
+        if (ret.stream >= PS && ret.stream <= PS + MAX_CORES)
         {
           if (info->stream != PS)
             (*p_xevct)++;
@@ -5270,10 +5392,49 @@ void update_access_stats(cachesim_cache *cache, memory_trace *info, cache_access
                   }
                 }
               }
+
 #if 0
               assert(x_blocks->getValue());
               (*x_blocks)--;
 #endif
+              break;
+
+            case GP:
+              (*g_xevct)++;
+
+              if (info->stream == CS)
+              {
+                (*g_xcevct)++;
+              }
+              else
+              {
+                if (info->stream == ZS)
+                {
+                  (*g_xzevct)++;
+                }
+                else
+                {
+                  if (info->stream == TS)
+                  {
+                    (*g_xtevct)++;
+                  }
+                  else
+                  {
+                    if (info->stream == PS)
+                    {
+                      (*g_xpevct)++;
+                    }
+                    else
+                    {
+                      if (info->stream != XS)
+                      {
+                        (*g_xrevct)++;
+                      }
+                    }
+                  }
+                }
+              }
+
               break;
 
             default:
@@ -5286,7 +5447,7 @@ void update_access_stats(cachesim_cache *cache, memory_trace *info, cache_access
       }
       else
       {
-        if (info->stream >= PS && info->stream <= PS + MAX_CORES - 1)
+        if (info->stream >= PS && info->stream <= PS + MAX_CORES)
         {
           (*p_sevct)++;
         }
@@ -5330,6 +5491,10 @@ void update_access_stats(cachesim_cache *cache, memory_trace *info, cache_access
               (*x_sevct)++;
               break;
 
+            case GP:
+              (*g_sevct)++;
+              break;
+
             default:
               cout << "Illegal stream " << (int)(info->stream) << " for address ";
               cout << hex << info->address << " type : ";
@@ -5341,7 +5506,7 @@ void update_access_stats(cachesim_cache *cache, memory_trace *info, cache_access
 
       if (ret.access == 0)
       {
-        if (ret.stream >= PS && ret.stream <= PS + MAX_CORES - 1)
+        if (ret.stream >= PS && ret.stream <= PS + MAX_CORES)
         {
           (*p_zevct)++;
 
@@ -5475,6 +5640,19 @@ void update_access_stats(cachesim_cache *cache, memory_trace *info, cache_access
               }
               break;
 
+            case GP:
+              (*g_zevct)++;
+
+              if (info->stream != ret.stream)
+              {
+                (*g_xoevct)++;
+              }
+              else
+              {
+                (*g_soevct)++;
+              }
+              break;
+
             default:
               cout << "Illegal stream " << (int)(ret.stream);
               assert(1);
@@ -5497,7 +5675,7 @@ void update_access_stats(cachesim_cache *cache, memory_trace *info, cache_access
     /* Update stats for incoming stream */
     if (info->stream != ret.stream)
     {
-      if (info->stream >= PS && info->stream <= PS + MAX_CORES - 1)
+      if (info->stream >= PS && info->stream <= PS + MAX_CORES)
       {
         (*p_xhit)++;
         (*p_blocks)++;
@@ -5655,6 +5833,11 @@ void update_access_stats(cachesim_cache *cache, memory_trace *info, cache_access
 
             break;
 
+          case GP:
+            (*g_xhit)++;
+            (*g_xblocks)++;
+            break;
+
           default:
             cout << "Illegal stream " << (int)info->stream << " for address ";
             cout << hex << info->address << " type : ";
@@ -5752,7 +5935,7 @@ void update_access_stats(cachesim_cache *cache, memory_trace *info, cache_access
     }
   }
 
-  if (info->stream >= PS && info->stream <= PS + MAX_CORES - 1)
+  if (info->stream >= PS && info->stream <= PS + MAX_CORES)
   {
     (*p_access)++;
   }
@@ -5806,6 +5989,10 @@ void update_access_stats(cachesim_cache *cache, memory_trace *info, cache_access
         (*x_access)++;
         break;
 
+      case GP:
+        (*g_access)++;
+        break;
+
       default:
         cout << "Illegal stream " << (int)info->stream << " for address ";
         cout << hex << info->address << " type : ";
@@ -5851,7 +6038,7 @@ ub1 dram_cycle(cachesim_cache *cache, ub8 dramcycle)
     if (info->fill)
     {
       dram_request_cycle[info->stream] += dramcycle - info->cycle;
-      
+
       ret = cachesim_fill_block(cache, info);
 
       update_access_stats(cache, info, ret);
@@ -6380,12 +6567,13 @@ int main(int argc, char **argv)
           
           l3cache.cachecycle          += 1;
           l3cache.cachecycle_interval += 1;
-
+#if 0
           if (l3cache.cachecycle % 1000000 == 0)
           {
             printf("Cycle times : %ld %ld\n", l3cache.cachecycle, shadow_tags.cachecycle);
             printf("Real miss:%ld:%ld Shadow miss: %ld:%ld\n", real_access, real_miss, shadow_access, shadow_miss);
           }
+#endif
         }
 
         if (!shadow_tag_next_cycle)
@@ -6421,7 +6609,7 @@ int main(int argc, char **argv)
         {
           sm->dumpValues(cache_sizes[c_cache], 0, CH, stats_stream);
           periodicReset();
-
+          fflush(stdout);
         }
       }while(!cache_done || !dram_done);
       

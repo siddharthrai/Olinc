@@ -62,7 +62,7 @@ namespace DRAMSim
                 unsigned findChannelNumber(uint64_t addr, char stream);
                 ub8 getOpenRow(ub8 address);
 
-                bool isSpeedupHintEnable();
+                bool isSpeedupHintEnable(bool is_gpu);
 
                 //output file
                 std::ofstream visDataOut;
@@ -81,6 +81,7 @@ namespace DRAMSim
                 CSVWriter *csvOut;
 
                 bool speedup_hint_enable;
+                bool cpu_speedup_hint_enable;
 
         };
 }

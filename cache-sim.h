@@ -113,6 +113,7 @@ typedef struct dram_bank
   map<ub8, ub8> remap_rows;     /* Remapped rows */
   map<ub8, ub8> predicted_rows; /* Predicted rows for reuse */
   list<ub8>     access_list;    /* Sequential list of accessed rows */
+  ub8           row_reopen;     /* Total row conflicts */
 
 #if 0
   map<ub8, ub8> row_access;

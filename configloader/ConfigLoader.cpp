@@ -334,6 +334,15 @@ bool ConfigLoader::parseLCSectionParameter(LChParameters *lcP)
     if (!parseDecimalParameter("Streams", id, lcP->streams))
         return FALSE;
 
+    if (!parseBooleanParameter("GPUEnable", id, lcP->gpu_enable))
+        return FALSE;
+
+    if (!parseBooleanParameter("CPUEnable", id, lcP->cpu_enable))
+        return FALSE;
+
+    if (!parseBooleanParameter("GPGPUEnable", id, lcP->gpgpu_enable))
+        return FALSE;
+
     if (!parseCachePolicy("Policy", id, lcP->policy))
         return FALSE;
 

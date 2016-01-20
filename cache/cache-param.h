@@ -46,6 +46,9 @@ struct cache_params
   ub1     rpl_on_miss;            /* Src stream for stride LRU */
   ub1     use_long_bv;            /* Src stream for stride LRU */
   ub4     gsdrrip_streams;        /* Streams for graphics stream aware DRRIP */
+  ub1     gsdrrip_cpu_enable;     /* TRUE, if CPU is running */
+  ub1     gsdrrip_gpu_enable;     /* TRUE, if GPU is running */
+  ub1     gsdrrip_gpgpu_enable;   /* TRUE, if GPGPU is running */
   ub1     bs_epoch;               /* TRUE, if only baseline samples are used for epoch */
   ub1     use_step;               /* TRUE, if step function is to be used in sappridepri */
   ub4     ship_shct_size;         /* Ship signature history table size */

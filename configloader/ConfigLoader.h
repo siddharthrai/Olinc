@@ -81,6 +81,9 @@ struct LChParameters
   ub4   samplerSets;            /* Sampler sets in sampler based policy */
   ub4   samplerWays;            /* Sampler ways in sampler based policy */
   ub4   streams;                /* Total number of streams to be simulated */
+  bool  cpu_enable;             /* True, if CPU is enable */
+  bool  gpu_enable;             /* True, if GPU is enable */
+  bool  gpgpu_enable;           /* True, if GPGPU is enable */
   sb1  *statFile;               /* Statistics collection file */
   ub1   stream;                 /* Stream to be simulated */
   bool  useVa;                  /* True, if va is to be used */

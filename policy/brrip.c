@@ -474,7 +474,7 @@ int cache_get_fill_rrpv_brrip(brrip_data *policy_data,
 
       /* Block is inserted with long reuse prediction value only if counter 
        * value is 0. */
-      if (CTR_VAL(global_data) == 0)
+      if (CTR_VAL(global_data) == 0 || info->spill)
       {
         new_rrpv = BRRIP_DATA_MAX_RRPV(policy_data) - 1;
       }

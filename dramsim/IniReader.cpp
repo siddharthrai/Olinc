@@ -114,6 +114,7 @@ bool USE_LOW_POWER;
 bool VIS_FILE_OUTPUT;
 
 bool SPEEDUP_HINT;
+bool CPU_SPEEDUP_HINT;
 
 bool VERIFICATION_OUTPUT;
 
@@ -185,6 +186,7 @@ namespace DRAMSim
 
                                         //Speedup hint
                                         DEFINE_BOOL_PARAM(SPEEDUP_HINT, SYS_PARAM),
+                                        DEFINE_BOOL_PARAM(CPU_SPEEDUP_HINT, SYS_PARAM),
 
                                         DEFINE_STRING_PARAM(ROW_BUFFER_POLICY, SYS_PARAM),
                                         DEFINE_STRING_PARAM(SCHEDULING_POLICY, SYS_PARAM),

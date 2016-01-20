@@ -73,6 +73,7 @@ typedef struct cache_policy_gsdrrip_stats_t
 /* GSDRRIP specific data */
 typedef struct cache_policy_gsdrrip_data_t
 {
+  ub1                   set_type;   /* Set type */
   cache_policy_t       *following;  /* Currently followed policy */
   srrip_data            srrip;      /* SRRIP policy specific data */
   brrip_data            brrip;      /* BRRIP policy specific data */
@@ -87,7 +88,11 @@ typedef struct cache_policy_gsdrrip_data_t
 typedef struct cache_policy_gsdrrip_gdata_t
 {
   ub1           gsdrrip_streams;      /* Number of streams */
+  ub1           gsdrrip_cpu_enable;   /* True, if CPU is present */
+  ub1           gsdrrip_gpu_enable;   /* True, if GPU is present */
+  ub1           gsdrrip_gpgpu_enable; /* True, if GPGPU is present */
   sctr         *psel;                 /* Policy selection counter */
+  sctr          access_count;         /* Access to decide bimodal insertion  */
   gsdrrip_stats stats;                /* GSDRRIP statistics */
   brrip_gdata   brrip;                /* BRRIP cache wide data */
   srrip_gdata   srrip;                /* BRRIP cache wide data */
