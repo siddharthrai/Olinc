@@ -77,11 +77,13 @@ typedef struct cache_policy_srrip_data_t
 /* SRRIP cache-wide data */
 typedef struct cache_policy_srrip_gdata_t
 {
-  ub1    epoch_count; /* Total supported epochs */
-  ub1    max_epoch;   /* Maximum supported epochs */
-  sctr **epoch_fctr;  /* Epoch-wise fill counter */
-  sctr **epoch_hctr;  /* Epoch-wise hit counter */
-  ub1   *epoch_valid; /* Valid epoch list */
+  ub1    epoch_count;             /* Total supported epochs */
+  ub1    max_epoch;               /* Maximum supported epochs */
+  sctr **epoch_fctr;              /* Epoch-wise fill counter */
+  sctr **epoch_hctr;              /* Epoch-wise hit counter */
+  ub1   *epoch_valid;             /* Valid epoch list */
+  ub8    stream_blocks[TST + 1];  /* Per-stream blocks */
+  ub8    stream_reuse[TST + 1];   /* Per-stream reuse */
 }srrip_gdata;
 
 /*

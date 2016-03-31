@@ -28,11 +28,33 @@
 #include "cache-param.h"
 #include "cache-block.h"
 
-/* For the time being only 5 cores are supported. */
-#define REPOCH_CNT    (1)
-#define MIN_EPOCH     (0)
-#define MAX_EPOCH     (3)
-#define EPOCH_COUNT   (MAX_EPOCH - MIN_EPOCH + 1)
+/* Head node of a list, which corresponds to a particular RRPV */
+typedef struct cache_list_head_srriphint_t
+{
+  ub4 rrpv;
+  struct cache_block_t *head;
+}srriphint_list;
+
+#define SRRIPHINT_DATA_CFPOLICY(data)     ((data)->current_fill_policy)
+#define SRRIPHINT_DATA_DFPOLICY(data)     ((data)->default_fill_policy)
+#define SRRIPHINT_DATA_CAPOLICY(data)     ((data)->current_access_policy)
+#define SRRIPHINT_DATA_DAPOLICY(data)     ((data)->default_access_policy)
+#define SRRIPHINT_DATA_CRPOLICY(data)     ((data)->current_replacement_policy)
+#define SRRIPHINT_DATA_DRPOLICY(data)     ((data)->default_replacement_policy)
+#define SRRIPHINT_DATA_MAX_RRPV(data)     ((data)->max_rrpv)
+#define SRRIPHINT_DATA_SPILL_RRPV(data)   ((data)->spill_rrpv)
+#define SRRIPHINT_DATA_BLOCKS(data)       ((data)->blocks)
+#define SRRIPHINT_DATA_VALID_HEAD(data)   ((data)->valid_head)
+#define SRRIPHINT_DATA_VALID_TAIL(data)   ((data)->valid_tail)
+#define SRRIPHINT_DATA_CVALID_HEAD(data)  ((data)->cpu_valid_head)
+#define SRRIPHINT_DATA_CVALID_TAIL(data)  ((data)->cpu_valid_tail)
+#define SRRIPHINT_DATA_GVALID_HEAD(data)  ((data)->gpu_valid_head)
+#define SRRIPHINT_DATA_GVALID_TAIL(data)  ((data)->gpu_valid_tail)
+#define SRRIPHINT_DATA_FREE_HLST(data)    ((data)->free_head)
+#define SRRIPHINT_DATA_FREE_TLST(data)    ((data)->free_tail)
+#define SRRIPHINT_DATA_FREE_HEAD(data)    ((data)->free_head->head)
+#define SRRIPHINT_DATA_FREE_TAIL(data)    ((data)->free_tail->head)
+#define SRRIPHINT_DATA_USE_EPOCH(data)    ((data)->use_epoch)
 
 /* 
  *  Sampler entry:
@@ -43,6 +65,8 @@
  *  Time-stamp is the miss count to the target cache set 
  *
  **/
+
+#define REPOCH_CNT                    (3)
 
 #define SMPLRPERF_MREUSE(p)           ((p)->max_reuse)
 #define SMPLRPERF_FILL(p, s)          ((p)->fill_count[s])
@@ -61,7 +85,7 @@
 #define SMPLRPERF_FRRPV(p, s)         ((p)->stream_fill_rrpv[s])
 #define SMPLRPERF_HRRPV(p, s)         ((p)->stream_hit_rrpv[s])
 
-typedef struct sh_sampler_perfctr
+typedef struct srriphint_sampler_perfctr
 {
   ub8 sampler_fill;
   ub8 sampler_hit;
@@ -92,7 +116,7 @@ typedef struct sh_sampler_perfctr
   ub8 stream_hit_rrpv[TST + 1][MAX_RRPV];
 
 #undef MAX_RRPV
-}sh_sampler_perfctr;
+}srriphint_sampler_perfctr;
 
 /* 
  * There is one sampler entry for the entire 4KB page. The entry tracks the page on 
@@ -109,7 +133,7 @@ typedef struct sh_sampler_perfctr
  *
  * */
 
-typedef struct sh_sampler_entry
+typedef struct srriphint_sampler_entry
 {
   ub8  page;          /* Tag: page id */
   ub8 *timestamp;     /* Timestamp of last access */
@@ -121,61 +145,26 @@ typedef struct sh_sampler_entry
   ub1 *dynamic_depth; /* True, if dynamic ZS */
   ub1 *dynamic_blit;  /* True, if dynamic BS */
   ub1 *dynamic_proc;  /* True, if dynamic PS */
-}sh_sampler_entry;
+}srriphint_sampler_entry;
 
 /*
  * Sampler used for measuring reuses
  *
  */
 
-typedef struct sh_sampler_cache
+typedef struct srriphint_sampler_cache
 {
-  ub4                sets;                     /* # sampler sets */
-  ub1                ways;                     /* # sampler ways */
-  ub1                entry_size;               /* Sampler entry size */
-  ub1                log_grain_size;           /* Log of sampler entry size */
-  ub1                log_block_size;           /* Log of sampler entry size */
-  ub8                epoch_length;             /* Length of sampler epoch */
-  ub8                epoch_count;              /* Total epochs seen by the sampler */
-  ub4                stream_occupancy[TST + 1];/* Block array */
-  sh_sampler_entry **blocks;                   /* Block array */
-  sh_sampler_perfctr perfctr;                  /* Performance counter used in sampler */
-}sh_sampler_cache;
-
-/* Streams specific to SAP. SAP controller remaps global stream id to SAP 
- * specific ids */
-typedef enum srriphint_stream
-{
-  srriphint_stream_x = 1,
-  srriphint_stream_y,
-  srriphint_stream_p,
-  srriphint_stream_q,
-  srriphint_stream_r
-}srriphint_stream;
-
-/* Head node of a list, which corresponds to a particular RRPV */
-typedef struct cache_list_head_srriphint_t
-{
-  ub4 rrpv;
-  struct cache_block_t *head;
-}srriphint_list;
-
-#define SRRIPHINT_DATA_CFPOLICY(data)   ((data)->current_fill_policy)
-#define SRRIPHINT_DATA_DFPOLICY(data)   ((data)->default_fill_policy)
-#define SRRIPHINT_DATA_CAPOLICY(data)   ((data)->current_access_policy)
-#define SRRIPHINT_DATA_DAPOLICY(data)   ((data)->default_access_policy)
-#define SRRIPHINT_DATA_CRPOLICY(data)   ((data)->current_replacement_policy)
-#define SRRIPHINT_DATA_DRPOLICY(data)   ((data)->default_replacement_policy)
-#define SRRIPHINT_DATA_MAX_RRPV(data)   ((data)->max_rrpv)
-#define SRRIPHINT_DATA_SPILL_RRPV(data) ((data)->spill_rrpv)
-#define SRRIPHINT_DATA_BLOCKS(data)     ((data)->blocks)
-#define SRRIPHINT_DATA_VALID_HEAD(data) ((data)->valid_head)
-#define SRRIPHINT_DATA_VALID_TAIL(data) ((data)->valid_tail)
-#define SRRIPHINT_DATA_FREE_HLST(data)  ((data)->free_head)
-#define SRRIPHINT_DATA_FREE_TLST(data)  ((data)->free_tail)
-#define SRRIPHINT_DATA_FREE_HEAD(data)  ((data)->free_head->head)
-#define SRRIPHINT_DATA_FREE_TAIL(data)  ((data)->free_tail->head)
-#define SRRIPHINT_DATA_USE_EPOCH(data)  ((data)->use_epoch)
+  ub4             sets;                     /* # sampler sets */
+  ub1             ways;                     /* # sampler ways */
+  ub1             entry_size;               /* Sampler entry size */
+  ub1             log_grain_size;           /* Log of sampler entry size */
+  ub1             log_block_size;           /* Log of sampler entry size */
+  ub8             epoch_length;             /* Length of sampler epoch */
+  ub8             epoch_count;              /* Total epochs seen by the sampler */
+  ub4             stream_occupancy[TST + 1];/* Block array */
+  srriphint_sampler_entry **blocks;         /* Block array */
+  srriphint_sampler_perfctr perfctr;        /* Performance counter used in sampler */
+}shnt_sampler_cache;
 
 /* RRIP specific data */
 typedef struct cache_policy_srriphint_data_t
@@ -192,12 +181,16 @@ typedef struct cache_policy_srriphint_data_t
   ub4            spill_rrpv;                  /* Spill RRPV supported */
   rrip_list     *valid_head;                  /* Head pointers of RRPV specific list */
   rrip_list     *valid_tail;                  /* Tail pointers of RRPV specific list */
+  rrip_list     *cpu_valid_head;              /* CPU head pointers of RRPV specific list */
+  rrip_list     *cpu_valid_tail;              /* CPU tail pointers of RRPV specific list */
+  rrip_list     *gpu_valid_head;              /* GPU head pointers of RRPV specific list */
+  rrip_list     *gpu_valid_tail;              /* GPU tail pointers of RRPV specific list */
   list_head_t   *free_head;                   /* Free list head */
   list_head_t   *free_tail;                   /* Free list tail */
-  ub1            use_epoch;                   /* TRUE, if epoch is used in the policy */
-  ub8            miss_count;                  /* # miss in a set */
-  ub8            hit_count;                   /* # hits in a set */
-  brrip_data     brrip;                       /* BRRIP policy specific data */
+  ub8            miss_count;                  /* # miss in the set */
+  ub8            hit_count;                   /* # hit in the set */
+  ub8            cpu_blocks;                  /* # CPU blocks */
+  ub8            gpu_blocks;                  /* # GPU blocks */
   struct cache_block_t *blocks;               /* Actual blocks */
 }srriphint_data;
 
@@ -205,43 +198,27 @@ typedef struct cache_policy_srriphint_data_t
 typedef struct cache_policy_srriphint_gdata_t
 {
   ub4    ways;                                /* Associativity */
-  ub1    epoch_count;                         /* Total supported epochs */
-  ub1    max_epoch;                           /* Maximum supported epochs */
-  sctr **epoch_fctr;                          /* Epoch-wise fill counter */
-  sctr **epoch_hctr;                          /* Epoch-wise hit counter */
-  ub1   *epoch_valid;                         /* Valid epoch list */
-  ub8    policy_fill;                         /* Fill in the policy sample */
-  ub8    sample_fill;                         /* Fill in srrip sample */
-  ub8    policy_miss;                         /* Miss in policy sample */
-  ub8    reuse_miss;                          /* Miss in reuse sample */
-  ub8    sample_miss;                         /* Miss in srrip sample */
-  sctr   sarp_hint[TST + 1];                  /* Accumulation counter for per-stream speedup */
-  ub1    speedup_stream[TST + 1];             /* True, if stream is sped-up */
-  ub8    fill_no_reuse[TST + 1];              /* Eviction without reuse */   
-  ub8    spill_no_reuse[TST + 1];             /* Eviction without reuse */   
-  ub8    stream_fill[TST + 1];                /* # per-stream fill */   
-  ub8    stream_spill[TST + 1];               /* # per-stream fill */   
-  ub8    ct_reuse;                            /* # CT reuse blocks */
-  ub8    bt_reuse;                            /* # BT reuse blocks */
   ub8    cache_access;                        /* # access count */
-  ub8    current_fill_bucket;                 /* Current fill bucket number */
-  ub8    zero_evict_bucket_bs[TST + 1];       /* # Zero eviction in current bucket */
-  ub8    non_zero_evict_bucket_bs[TST + 1];   /* # Non-zero eviction in current bucket */
-  ub8    zero_evict_bucket_ps[TST + 1];       /* # Zero eviction in current bucket */
-  ub8    non_zero_evict_bucket_ps[TST + 1];   /* # Non-zero eviction in current bucket */
-  ub8    x_zero_evict_bucket_bs[TST + 1];     /* # Zero eviction in current bucket */
-  ub8    x_non_zero_evict_bucket_bs[TST + 1]; /* # Non-zero eviction in current bucket */
-  ub8    x_zero_evict_bucket_ps[TST + 1];     /* # Zero eviction in current bucket */
-  ub8    x_non_zero_evict_bucket_ps[TST + 1]; /* # Non-zero eviction in current bucket */
-  ub8   *fill_recall_table[TST + 1];          /* # Fill block is recall table */ 
-  ub1   *fill_recall_table_valid[TST + 1];    /* # Fill block is recall valid entry */ 
-  ub8    total_fill_recall[TST + 1];          /* # Fills recalled */
-  ub8   *spill_recall_table[TST + 1];         /* # Spill block is recall table */ 
-  ub1   *spill_recall_table_valid[TST + 1];   /* # Spill block recall valid entry */ 
-  ub8    total_spill_recall[TST + 1];         /* # Spill recalled */
-  sh_sampler_cache *sampler;                  /* # Sampler cache for working-set sampling */
-  brrip_gdata brrip;                          /* BRRIP specific cache-wide data */
-  sctr   psel;                                /* Policy selection counter */
+  ub8    stream_blocks[TST + 1];              /* # per-stream block count */   
+  ub8    stream_reuse[TST + 1];               /* # per-stream reuse */   
+  ub4    cpu_rpsel;                           /* CPU counter used to choose CPU or GPU first at replacement */
+  ub4    gpu_rpsel;                           /* GPU counter used to choose CPU or GPU first at replacement */
+  ub4    cpu_rpthr;                           /* CPU threshold used to choose CPU or GPU first at replacement */
+  ub4    gpu_rpthr;                           /* GPU threshold  used to choose CPU or GPU first at replacement */
+  ub4    cpu_zevct;                           /* CPU counter used to choose CPU or GPU first at replacement */
+  ub4    gpu_zevct;                           /* GPU counter used to choose CPU or GPU first at replacement */
+  ub4    sign_size;                           /* # Ship signature size */
+  ub4    shct_size;                           /* # Counter table entries */
+  ub4    core_size;                           /* # Core count */
+  ub8    ship_access;                         /* # Access to ship sampler */
+  ub8    ship_inc;                            /* # Access to ship sampler */
+  ub8    ship_dec;                            /* # Access to ship sampler */
+  ub1   *ship_shct;                           /* SHiP signature counter table */
+  ub8    cpu_blocks;                          /* CPU blocks in cache */
+  ub8    gpu_blocks;                          /* GPU blocks in cache */
+  ub1    cpu_bmc;                             /* CPU bimodal fill counter */
+  shnt_sampler_cache *sampler;                /* Sampler cache used for tracking reuses */
+  shnt_sampler_cache *cpu_sampler;            /* Sampler cache used for tracking reuses */
 }srriphint_gdata;
 
 /*
@@ -313,7 +290,7 @@ void cache_free_srriphint(srriphint_data *policy_data);
  */
 
 struct cache_block_t * cache_find_block_srriphint(srriphint_data *policy_data, 
-    srriphint_gdata *global_data, long long tag);
+    srriphint_gdata *global_data, memory_trace *info, long long tag);
 
 /*
  *

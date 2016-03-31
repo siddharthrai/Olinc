@@ -97,6 +97,16 @@ typedef double          uf8;
 #define TUC     (17)
 #define TCL0    (TUC + 1) 
 
+#define CPS(i)          (i == PS)
+#define CPS1(i)         (i == PS1)
+#define CPS2(i)         (i == PS2)
+#define CPS3(i)         (i == PS3)
+#define CPS4(i)         (i == PS4)
+#define GPGPU_STREAM(i) (i == GP)
+#define GFX_STREAM(i)   (i < PS)
+#define GPU_STREAM(i)   (GPGPU_STREAM(i) || GFX_STREAM(i))
+#define CPU_STREAM(i)   (CPS(i) || CPS1(i) || CPS2(i) || CPS3(i) || CPS4(i))
+
 /* Temporary: Set type recognized by SDP (Stall Directed Policy) */
 #define SDP_SAMPLED_NN      (0)
 #define SDP_BS_SAMPLED_SET  (1)
@@ -704,6 +714,16 @@ typedef enum speedup_stream_type
   speedup_stream_q,
   speedup_stream_r
 }speedup_stream_type;
+
+typedef struct dram_queue_time
+{
+  ub8 tq_start;     /* Transaction queue start time */
+  ub8 tq_end;       /* Transaction queue end time */
+  ub8 cq_start;     /* Commnad queue start time */
+  ub8 cq_end;       /* Command queue end time */
+  ub8 tq_time;      /* Transaction queue time */
+  ub8 cq_time;      /* Command queue time */
+}dram_queue_time;
 
 int gcd_ab(int a, int b);
 

@@ -1326,7 +1326,6 @@ int cache_get_fill_rrpv_sarp(sarp_data *policy_data, sarp_gdata *global_data,
   perfctr   = &((global_data->sampler)->perfctr);
   ret_rrpv  = 2;
 
-
   if (GPU_STREAM(info->stream))
   {
 #define CHK_SCRTCL(g, i) ((g)->speedup_enabled ? CRITICAL_STREAM(g, i) : TRUE)
@@ -2668,7 +2667,6 @@ int cache_replace_block_sarp(sarp_data *policy_data, sarp_gdata *global_data,
 
           if (min_wayid != ~(0))
           {
-
             if (block->ship_sign_valid)
             {
               CACHE_DEC_SHCT(block, global_data);
@@ -3135,7 +3133,7 @@ void set_per_stream_policy_sarp(sarp_data *policy_data, sarp_gdata *global_data,
   }
 }
 
-/* UPdate */
+/* Update */
 void update_sampler_fill_perfctr(sampler_cache *sampler, ub4 index, ub4 way, memory_trace *info)
 {
   ub1 offset;

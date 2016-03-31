@@ -475,6 +475,19 @@ struct cache_t* cache_init(struct cache_params *params)
 void cache_free(struct cache_t *cache)
 {
   struct cache_set_t *cache_set;
+  int cpu_sets;
+  int gpu_sets;
+  int cpu_min_blocks;
+  int gpu_min_blocks;
+  int cpu_max_blocks;
+  int gpu_max_blocks;
+  
+  cpu_sets = 0;
+  gpu_sets = 0;
+  cpu_min_blocks = 16;
+  gpu_min_blocks = 16;
+  cpu_max_blocks = 0;
+  gpu_max_blocks = 0;
 
   /* Initialize array of sets */
   for (int set = 0; set < cache->num_sets; set++)
@@ -526,6 +539,36 @@ void cache_free(struct cache_t *cache)
         break;
 
       case cache_policy_srriphint:
+        if (CACHE_SET_DATA_SRRIPHINT(cache_set)->gpu_blocks)
+        {
+          cpu_sets += 1;
+
+          if (CACHE_SET_DATA_SRRIPHINT(cache_set)->gpu_blocks > gpu_max_blocks)
+          {
+            gpu_max_blocks = CACHE_SET_DATA_SRRIPHINT(cache_set)->gpu_blocks;
+          }
+
+          if (CACHE_SET_DATA_SRRIPHINT(cache_set)->gpu_blocks < gpu_min_blocks)
+          {
+            gpu_min_blocks = CACHE_SET_DATA_SRRIPHINT(cache_set)->gpu_blocks;
+          }
+        }
+        
+        if (CACHE_SET_DATA_SRRIPHINT(cache_set)->cpu_blocks)
+        {
+          gpu_sets += 1;
+
+          if (CACHE_SET_DATA_SRRIPHINT(cache_set)->cpu_blocks > cpu_max_blocks)
+          {
+            cpu_max_blocks = CACHE_SET_DATA_SRRIPHINT(cache_set)->cpu_blocks;
+          }
+
+          if (CACHE_SET_DATA_SRRIPHINT(cache_set)->cpu_blocks < cpu_min_blocks)
+          {
+            cpu_min_blocks = CACHE_SET_DATA_SRRIPHINT(cache_set)->cpu_blocks;
+          }
+        }
+        
         cache_free_srriphint(CACHE_SET_DATA_SRRIPHINT(cache_set));
         break;
 
@@ -683,6 +726,10 @@ void cache_free(struct cache_t *cache)
     region_cache_fini(zt_regions);
     region_cache_fini(tt_regions);
   }
+
+  printf("CPU sets:%4d GPU sets:%4d\n", cpu_sets, gpu_sets);
+  printf("CPU MAX:%4d GPU MAX:%4d\n", cpu_max_blocks, gpu_max_blocks);
+  printf("CPU MIN:%4d GPU MIN:%4d\n", cpu_min_blocks, gpu_min_blocks);
 }
 
 struct cache_block_t * cache_find_block(struct cache_t *cache, int set,
@@ -738,7 +785,7 @@ struct cache_block_t * cache_find_block(struct cache_t *cache, int set,
 
     case cache_policy_srriphint:
       return cache_find_block_srriphint(CACHE_SET_DATA_SRRIPHINT(CACHE_SET(cache, set)), 
-          CACHE_SRRIPHINT_GDATA(cache), tag);
+          CACHE_SRRIPHINT_GDATA(cache), info, tag);
       break;
 
     case cache_policy_srripbypass:

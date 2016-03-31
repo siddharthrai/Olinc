@@ -147,9 +147,15 @@ void MemoryController::receiveFromBus(BusPacket *bpacket) {
 
 
 void MemoryController::returnReadData(const Transaction *trans) {
+  dram_queue_time time;
         if (parentMemorySystem->ReturnReadData != NULL)
         {
-                (*parentMemorySystem->ReturnReadData)(parentMemorySystem->systemID, trans->address, trans->rowHit, currentClockCycle);
+                time.tq_start = trans->tq_start;
+                time.tq_end   = trans->tq_end;
+                time.cq_start = trans->cq_start;
+                time.cq_end   = trans->cq_end;
+
+                (*parentMemorySystem->ReturnReadData)(parentMemorySystem->systemID, trans->address, trans->rowHit, (uint64_t)(&time));
         }
 }
 
@@ -544,7 +550,7 @@ void MemoryController::update() {
 #undef LOW_WM
 
         transactionQueue = &read_transactionQueue;
-
+#if 0
         if (write_drain)
         {
           transactionQueue = &write_transactionQueue;   
@@ -556,7 +562,7 @@ void MemoryController::update() {
             transactionQueue = &priority_transactionQueue;   
           }
         }
-
+#endif
         for (size_t i = 0; i < transactionQueue->size(); i++)
         {
                 //pop off top transaction from queue
@@ -639,6 +645,8 @@ void MemoryController::update() {
                         if (transaction->transactionType == DATA_READ)
                         {
                                 pendingReadTransactions.push_back(transaction);
+                                transaction->setEventTime(TQ_END_EVENT, currentClockCycle);
+                                transaction->setEventTime(CQ_START_EVENT, currentClockCycle);
                         }
                         else
                         {
@@ -772,6 +780,7 @@ void MemoryController::update() {
                                 insertHistogram(currentClockCycle - pendingReadTransactions[i]->timeAdded, returnTransaction[0]->stream, rank, bank);
                                 //return latency
                                 pendingReadTransactions[i]->rowHit = returnTransaction[0]->rowHit;
+                                 pendingReadTransactions[i]->setEventTime(CQ_END_EVENT, currentClockCycle);
                                 returnReadData(pendingReadTransactions[i]);
 
                                 delete pendingReadTransactions[i];
@@ -864,6 +873,8 @@ bool MemoryController::addTransaction(Transaction *trans) {
                 trans->timeAdded = currentClockCycle;
 
                 read_transactionQueue.push_back(trans);
+
+                trans->setEventTime(TQ_START_EVENT, currentClockCycle);
 
                 return true;
         }

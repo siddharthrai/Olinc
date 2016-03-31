@@ -271,7 +271,10 @@ struct cachesim_cache
   ub1                   shadow_tag;                               /* TRUE, if cache is used for shadow tags */
   cache_t              *cache;                                    /* Tag array */
   cs_qnode              rdylist;                                  /* Ready memory requests */
+  cs_qnode              gpu_rdylist;                              /* GPU ready memory requests */
   cs_qnode              plist;                                    /* Pending memory requests */
+  ub4                   gpu_fill;                                 /* # GPU accesses */
+  ub4                   gpu_fill_frequency;                       /* # frequency of GPU accesses */
   ub4                   total_mshr;                               /* # total MSHR */
   ub4                   free_mshr;                                /* # available MSHR */
   ub4                   clock_period;                             /* # Cache clock time period */

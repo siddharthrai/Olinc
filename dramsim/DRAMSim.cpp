@@ -87,6 +87,9 @@ public:
         {
           memory_trace *info;
           Requests::iterator it;
+          dram_queue_time *time;
+          
+          time = (dram_queue_time *)done_cycle;
 
           it = pendingReadRequests.find(address);
           if (it == pendingReadRequests.end() || it->second.size() == 0)
@@ -95,6 +98,19 @@ public:
           info = pendingReadRequests[address].front();
           
           info->prefetch = rowHit;
+          
+          if (info->policy_data)
+          {
+            dram_queue_time *dram_data = (dram_queue_time*)(info->policy_data);
+            
+            assert(dram_data->tq_time == 0 && dram_data->cq_time == 0);
+
+            assert(time->tq_end >= time->tq_start);  
+            dram_data->tq_time = time->tq_end - time->tq_start;
+
+            assert(time->cq_end >= time->cq_start);  
+            dram_data->cq_time = time->cq_end - time->cq_start;
+          }
 
           pendingReadRequests[address].pop_front();
 
@@ -331,20 +347,29 @@ void dramsim_request(int isWrite, uint64_t addr, char stream, memory_trace *info
 #define CPU_HINT    (false)
 #define CPU_PSET(s) ((s) == speedup_stream_p)
 #define CPU_QSET(s) ((s) == speedup_stream_q)
+#define CPU_RSET(s) ((s) == speedup_stream_r)
+#define CPU_PQ(s)   (CPU_PSET(s) || CPU_QSET(s))
+#define CPU_PQR(s)  (CPU_PSET(s) || CPU_QSET(s) || CPU_RSET(s))
 
         if (memSystem->isSpeedupHintEnable(CPU_HINT))
         {
-          new_stream =  ((CPU_PSET(stream_type)) || (CPU_QSET(stream_type))) ? speedup_stream_x : speedup_stream_u;
+          new_stream = CPU_PQ(stream_type) ? speedup_stream_x : speedup_stream_u;
         }
         else
         {
           new_stream = memSystem->isSpeedupHintEnable(GPU_HINT) ? stream_type : speedup_stream_u;
+#if 0
+          new_stream = memSystem->isSpeedupHintEnable(GPU_HINT) ? speedup_stream_x : speedup_stream_u;
+#endif
         }
 
 #undef GPU_HINT
 #undef CPU_HINT
 #undef CPU_PSET
 #undef CPU_QSET
+#undef CPU_RSET
+#undef CPU_PQ
+#undef CPU_PQR
 
         result = memSystem->addTransaction(isWrite ? true : false, addr, stream, new_stream);
         assert(result);

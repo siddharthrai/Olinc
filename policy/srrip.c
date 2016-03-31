@@ -149,6 +149,9 @@ void cache_init_srrip(ub4 set_indx, struct cache_params *params, srrip_data *pol
         global_data->epoch_hctr   = NULL;
         global_data->epoch_valid  = NULL;
       }
+
+      global_data->stream_reuse[s]  = 0;
+      global_data->stream_blocks[s] = 0;
     }
 
     global_data->epoch_count  = EPOCH_COUNT;
@@ -325,6 +328,8 @@ void cache_fill_block_srrip(srrip_data *policy_data, srrip_gdata *global_data,
       CACHE_APPEND_TO_QUEUE(block, 
           SRRIP_DATA_VALID_HEAD(policy_data)[rrpv], 
           SRRIP_DATA_VALID_TAIL(policy_data)[rrpv]);
+
+      global_data->stream_blocks[strm] += 1;
     }
   }
 
@@ -345,7 +350,7 @@ int cache_replace_block_srrip(srrip_data *policy_data, srrip_gdata *global_data,
     min_wayid = BYPASS_WAY;
     goto end;
   }
-
+  
   /* Try to find an invalid block always from head of the free list. */
   for (block = SRRIP_DATA_FREE_HEAD(policy_data); block; block = block->prev)
   {

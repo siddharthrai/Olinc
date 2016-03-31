@@ -35,7 +35,9 @@ long long dram_size     = 1LL << 32; /* 4GB default dram size. */
 ub8 read_stall;
 ub8 write_stall;
 ub8 mshr_stall;
-ub8 dram_request_cycle[TST + 1];
+ub8 dram_request_cycle[TST + 1];    /* Total DRAM request cycles */
+ub8 dram_tq_cycle[TST + 1];         /* DRAM transaction queue cycles */
+ub8 dram_cq_cycle[TST + 1];         /* DRAM command queue cycles */
 ub8 real_access;
 ub8 real_miss;
 ub8 shadow_access;
@@ -340,20 +342,6 @@ speedup_stream_type get_srriphint_stream(cachesim_cache *cache, memory_trace *in
 {
   return (speedup_stream_type)(info->sap_stream);
 }
-
-#define SPEEDUP(n) (n == srriphint_stream_x)
-
-static void cachesim_update_hint_count(cachesim_cache *cache, memory_trace *info)
-{
-  assert(info->stream <= TST);
-
-  if (SPEEDUP(get_srriphint_stream(cache, info)))
-  {
-    SAT_CTR_INC(cache->sarp_hint[info->stream]);
-  }
-}
-
-#undef SPEEDUP
 
 void cachesim_dump_per_bank_stats(cachesim_cache *cache, cachesim_cache *shadow_tags, ub1 global_stat = FALSE)
 {
@@ -1260,6 +1248,7 @@ ub8 cs_init(cachesim_cache *cache, cache_params params, sb1 *trc_file_name)
   assert(cache);
 
   cs_qinit(&(cache->rdylist));
+  cs_qinit(&(cache->gpu_rdylist));
   cs_qinit(&(cache->plist));
 
   cache->total_mshr = MAX_MSHR;
@@ -1296,6 +1285,9 @@ ub8 cs_init(cachesim_cache *cache, cache_params params, sb1 *trc_file_name)
   /* Allocate and initialize sampler cache */
   cache->cache_access_count   = 0;
   cache->dram_access_count    = 0;
+  
+  cache->gpu_fill           = 0;
+  cache->gpu_fill_frequency = 1;
 
   return cache->clock_period;
 }
@@ -2627,6 +2619,9 @@ cache_access_status cachesim_fill_block(cachesim_cache *cache, memory_trace *inf
           mshr_alloc = cs_alloc_mshr(cache, info_out);
           assert(mshr_alloc == CS_MSHR_ALLOC);
 
+          /* Allocate DRAM timing stats structure before issuing a DRAM request */
+          info_out->policy_data = (void *)calloc(1, sizeof(dram_queue_time));
+
           dramsim_request(TRUE, BLCKALIGN(info_out->address), info_out->stream, info_out); 
 
           ret.fate  = CACHE_ACCESS_RPLC;
@@ -2660,8 +2655,8 @@ cache_access_status cachesim_fill_block(cachesim_cache *cache, memory_trace *inf
     }
     else
     {
-      ret.way       = way;
-      ret.fate      = CACHE_ACCESS_HIT;
+      ret.way   = way;
+      ret.fate  = CACHE_ACCESS_MISS;
     }
 
     ub8 index;         /* Histogram bucket index */
@@ -3034,6 +3029,9 @@ cache_access_status cachesim_incl_cache(cachesim_cache *cache, cachesim_cache *s
         {
           update_dramsim_open_row_stats(cache, shadow_tags, access_remapped, info_out);
         }
+        
+        /* Allocate DRAM timing stats structure before issuing a DRAM request */
+        info_out->policy_data = (void *)calloc(1, sizeof(dram_queue_time));
 
         dramsim_request(FALSE, BLCKALIGN(info_out->address), info_out->stream, info_out); 
 
@@ -3118,8 +3116,6 @@ cache_access_status cachesim_incl_cache(cachesim_cache *cache, cachesim_cache *s
 
     real_access++;
   }
-  
-  cachesim_update_hint_count(cache, info);
   
   return ret;
 }
@@ -3215,11 +3211,15 @@ cache_access_status cachesim_only_dram(cachesim_cache *cache, ub8 addr,
       assert(info_out);
 
       info_out->address     = info->address;
+      info_out->vtl_addr    = info->vtl_addr;
       info_out->stream      = info->stream;
       info_out->sap_stream  = info->sap_stream;
       info_out->fill        = TRUE;
 
       ret.fate = CACHE_ACCESS_MISS;
+
+      /* Allocate DRAM timing stats structure before issuing a DRAM request */
+      info_out->policy_data = (void *)calloc(1, sizeof(dram_queue_time));
 
       dramsim_request(info->dirty, BLCKALIGN(info_out->address), info_out->stream, info_out); 
 
@@ -3622,10 +3622,20 @@ void dumpOverallStats(cachesim_cache *cache, ub8 cycle, ub8 cachecycle, ub8 dram
   fprintf(fout, "CacheCycles = %ld\n", cachecycle);
   fprintf(fout, "DramCycles = %ld\n", dramcycle);
   fprintf(fout, "CSDramRquestCycles = %ld\n", dram_request_cycle[CS]);
+  fprintf(fout, "CSDramTxQueueCycles = %ld\n", dram_tq_cycle[CS]);
+  fprintf(fout, "CSDramCmdQueueCycles = %ld\n", dram_cq_cycle[CS]);
   fprintf(fout, "ZSDramRquestCycles = %ld\n", dram_request_cycle[ZS]);
+  fprintf(fout, "ZSDramTxQueueCycles = %ld\n", dram_tq_cycle[ZS]);
+  fprintf(fout, "ZSDramCmdQueueCycles = %ld\n", dram_cq_cycle[ZS]);
   fprintf(fout, "TSDramRquestCycles = %ld\n", dram_request_cycle[TS]);
+  fprintf(fout, "TSDramTxQueueCycles = %ld\n", dram_tq_cycle[TS]);
+  fprintf(fout, "TSDramCmdQueueCycles = %ld\n", dram_cq_cycle[TS]);
   fprintf(fout, "BSDramRquestCycles = %ld\n", dram_request_cycle[BS]);
+  fprintf(fout, "BSDramTxQueueCycles = %ld\n", dram_tq_cycle[BS]);
+  fprintf(fout, "BSDramCmdQueueCycles = %ld\n", dram_cq_cycle[BS]);
   fprintf(fout, "PSDramRquestCycles = %ld\n", dram_request_cycle[PS]);
+  fprintf(fout, "PSDramTxQueueCycles = %ld\n", dram_tq_cycle[PS]);
+  fprintf(fout, "PSDramCmdQueueCycles = %ld\n", dram_cq_cycle[PS]);
   fprintf(fout, "OSDramRquestCycles = %ld\n", 
       dram_request_cycle[IS] + dram_request_cycle[NS] + dram_request_cycle[XS] + 
       dram_request_cycle[DS] + dram_request_cycle[HS]);
@@ -5738,9 +5748,9 @@ void update_access_stats(cachesim_cache *cache, memory_trace *info, cache_access
           case TS:
             (*t_xhit)++;
             (*t_blocks)++;
-
+#if 0
             assert(info->spill == 0);
-
+#endif
             switch (ret.stream)
             {
               case CS:
@@ -5748,8 +5758,11 @@ void update_access_stats(cachesim_cache *cache, memory_trace *info, cache_access
 
                 if (ret.dirty)
                 {
+#if 0
                   assert(info->spill == 0);
+#endif
                   assert(c_ccons->getValue(1) < c_cprod->getValue(1));
+
                   (*c_ccons)++;
                 }
                 break;
@@ -5763,8 +5776,11 @@ void update_access_stats(cachesim_cache *cache, memory_trace *info, cache_access
 
                 if (ret.dirty)
                 {
+#if 0
                   assert(info->spill == 0 && info->fill == 1);
+#endif
                   assert(b_bcons->getValue(1) < b_bprod->getValue(1));
+
                   (*b_bcons)++;
                 }
                 break;
@@ -6008,6 +6024,7 @@ ub1 dram_cycle(cachesim_cache *cache, ub8 dramcycle)
   cache_access_status  ret;
   row_stats           *row_info;
   ub8                  row_id;
+  dram_queue_time     *dram_time;
 
   map<ub8, ub8>::iterator row_itr;
 
@@ -6020,12 +6037,14 @@ ub1 dram_cycle(cachesim_cache *cache, ub8 dramcycle)
   if (info)
   {
     assert(pending_requests);
-    
+
+#if 0    
     if (info->fill && cache->shuffle_row)
     {
       update_dramsim_open_row_response_stats(cache, info);
     }
-    
+#endif    
+
     /* Restore old physical address */
     info->address = info->vtl_addr;
 
@@ -6039,9 +6058,22 @@ ub1 dram_cycle(cachesim_cache *cache, ub8 dramcycle)
     {
       dram_request_cycle[info->stream] += dramcycle - info->cycle;
 
+      if (info->policy_data)
+      {
+        dram_time = (dram_queue_time *)(info->policy_data);
+
+        dram_tq_cycle[info->stream] += dram_time->tq_time;
+        dram_cq_cycle[info->stream] += dram_time->cq_time;
+      }
+
       ret = cachesim_fill_block(cache, info);
 
       update_access_stats(cache, info, ret);
+    }
+    
+    if (info->policy_data)
+    {
+      free(info->policy_data);
     }
 
     free(info);
@@ -6057,16 +6089,19 @@ ub1 cache_cycle(cachesim_cache *cache, cachesim_cache *shadow_tag, ub8 cachecycl
   memory_trace         *info;           /* Generic structure used for requests between units */
   memory_trace         *new_info;       /* Generic structure used for requests between units */
   cache_access_status   ret;            /* Cache access status */
+  ub1                   sim_end;
   
   memset(&ret, 0, sizeof(cache_access_status));
+  
+  sim_end = TRUE;
 
-  if (!gzeof(cache->trc_file) || !cs_qempty(&(cache->rdylist)) || !cs_qempty(&(cache->plist)))
+  if (!gzeof(cache->trc_file) || !cs_qempty(&(cache->rdylist)) || !cs_qempty(&(cache->gpu_rdylist)) || !cs_qempty(&(cache->plist)))
   {
     info          = NULL;
     current_queue = NULL;
     current_node  = NULL;
 
-    if (cs_qempty(&(cache->rdylist)) && !gzeof(cache->trc_file))
+    if ((cs_qempty(&(cache->rdylist)) || cs_qempty(&(cache->gpu_rdylist))) && !gzeof(cache->trc_file))
     {
       new_info = (memory_trace *)calloc(1, sizeof(memory_trace));
       assert(new_info);
@@ -6075,7 +6110,18 @@ ub1 cache_cycle(cachesim_cache *cache, cachesim_cache *shadow_tag, ub8 cachecycl
 
       if (!gzeof(cache->trc_file))
       {
+#if 0
         cs_qappend(&(cache->rdylist), (ub1 *)new_info);  
+#endif
+
+        if (GPU_STREAM(new_info->stream))
+        {
+          cs_qappend(&(cache->gpu_rdylist), (ub1 *)new_info);  
+        }
+        else
+        {
+          cs_qappend(&(cache->rdylist), (ub1 *)new_info);  
+        }
       }
       else
       {
@@ -6090,12 +6136,38 @@ ub1 cache_cycle(cachesim_cache *cache, cachesim_cache *shadow_tag, ub8 cachecycl
 
     if (cs_qempty(&(cache->plist)))
     {
-      if (!cs_qempty(&(cache->rdylist)))
+      /* Enqueue GPU accesses based on access rate */
+      if (!cs_qempty(&(cache->gpu_rdylist)))
       {
-        current_queue = &(cache->rdylist);
-        current_node  = (cs_qnode*)QUEUE_HEAD(&(cache->rdylist));
+        if (++(cache->gpu_fill) == cache->gpu_fill_frequency)
+        {
+          current_queue = &(cache->gpu_rdylist);
+          current_node  = (cs_qnode*)QUEUE_HEAD(&(cache->gpu_rdylist));
 
-        info = (memory_trace *)QUEUE_HEAD_DATA(&(cache->rdylist));
+          info = (memory_trace *)QUEUE_HEAD_DATA(&(cache->gpu_rdylist));
+
+          cache->gpu_fill = 0;
+        }
+        else
+        {
+          if (!cs_qempty(&(cache->rdylist)))
+          {
+            current_queue = &(cache->rdylist);
+            current_node  = (cs_qnode*)QUEUE_HEAD(&(cache->rdylist));
+
+            info = (memory_trace *)QUEUE_HEAD_DATA(&(cache->rdylist));
+          }
+        }
+      }
+      else
+      {
+        if (!cs_qempty(&(cache->rdylist)))
+        {
+          current_queue = &(cache->rdylist);
+          current_node  = (cs_qnode*)QUEUE_HEAD(&(cache->rdylist));
+
+          info = (memory_trace *)QUEUE_HEAD_DATA(&(cache->rdylist));
+        }
       }
     }
     else
@@ -6183,9 +6255,11 @@ ub1 cache_cycle(cachesim_cache *cache, cachesim_cache *shadow_tag, ub8 cachecycl
         cache->cachecycle_interval = 0;
       }
     }
+
+    sim_end = FALSE;
   }
 
-  return (gzeof(cache->trc_file));
+  return sim_end;
 }
 
 ub1 shadow_tag_cycle(cachesim_cache *cache, ub8 shadowtag_cycle, ub8 cachecycle)
@@ -6523,7 +6597,7 @@ int main(int argc, char **argv)
       cache_next_cycle    = cache_ctime;
       l3cache.shadow_tag  = FALSE; 
 
-#define SHADOW_TAG_CTIME (240)
+#define SHADOW_TAG_CTIME (250)
 
       /* Initialize shadow tags */
       shadow_tag_ctime        = cs_init(&shadow_tags, params, trc_file_name);

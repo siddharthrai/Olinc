@@ -475,6 +475,7 @@ void MultiChannelMemorySystem::printStats(bool finalStats, char *file_name) {
 
 
         (*csvOut) << "ms" << currentClockCycle * tCK * 1E-6;
+        PRINT("==== Cycles [" << currentClockCycle << "] ====");
         for (size_t i = 0; i < NUM_CHANS; i++)
         {
                 /* Print short DRAM stats */

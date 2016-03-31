@@ -47,6 +47,39 @@
 
 using namespace DRAMSim;
 
+/* Returns TRUE if random number falls in range [lo, hi] */
+static ub1 get_prob_in_range(uf8 lo, uf8 hi)
+{
+  uf8 val;
+  ub1 ret;
+
+  val = (uf8)random() / RAND_MAX;
+
+  if (lo == 1.0F && hi == 1.0F)
+  {
+    ret = TRUE;
+  }
+  else
+  {
+    if (lo == 0.0F && hi == 0.0F)
+    {
+      ret = FALSE;
+    }
+    else
+    {
+      if (val >= lo && val < hi)
+      {
+        ret = TRUE;
+      }
+      else
+      {
+        ret = FALSE;
+      }
+    }
+  }
+
+  return ret;
+}
 
 CommandQueue::CommandQueue(vector< vector<BankState> > &states, ostream &dramsim_log_) :
 dramsim_log(dramsim_log_),
@@ -424,7 +457,6 @@ bool CommandQueue::pop(BusPacket **busPacket) {
                           foundIssuable = true;
                         }
                       }
-
                     }
 
                     //if we found something, break out of do-while
@@ -791,7 +823,14 @@ bool CommandQueue::pop(BusPacket **busPacket) {
                 tFAWCountdown[(*busPacket)->rank].push_back(tFAW);
         }
 
-        return true;
+        if (*busPacket)
+        {
+          return true;
+        }
+        else
+        {
+          return false;
+        }
 }
 
 //check if a rank/bank queue has room for a certain number of bus packets
@@ -1029,3 +1068,264 @@ void CommandQueue::update() {
         //needed for SimulatorObject
         //TODO: make CommandQueue not a SimulatorObject
 }
+
+/* Allocate and initialize per-bank queues */
+void init_sms(sms *sched, size_t bank_queue, size_t queue_size)
+{
+  BusPacket1D actualQueue;
+  BusPacket2D perBankQueue;
+
+#define INVALID_ROW (-1)    
+
+  for (int u = NN + 1; u <= TST; u++)
+  {
+    sched->source_queue[u].queue          = BusPacket1D();
+    sched->source_queue[u].queue_size     = queue_size;
+    sched->source_queue[u].queue_entries  = 0;
+    sched->source_queue[u].current_row_id = INVALID_ROW;
+    sched->source_queue[u].ready          = FALSE;
+    sched->source_queue[u].age            = 0;
+  }
+
+  sched->batch_queue.mode       = batching_mode_pick;
+  sched->batch_queue.src        = NN;
+  sched->batch_queue.psjf       = .9;
+  sched->batch_queue.rr_next    = NN;
+
+  for (int u = NN + 1; u <= TST; u++)
+  {
+    sched->batch_queue.src_req[u] = 0;
+  }
+  
+  /* Allocate common batch queue for all sources */
+  sched->batch_queue.queue = BusPacket3D();
+
+  perBankQueue = BusPacket2D();
+
+  for (size_t rank = 0; rank < NUM_RANKS; rank++)
+  {
+    //this loop will run only once for per-rank and NUM_BANKS times for per-rank-per-bank
+    for (size_t bank = 0; bank < bank_queue; bank++)
+    {
+      actualQueue = BusPacket1D();
+      perBankQueue.push_back(actualQueue);
+    }
+
+    sched->batch_queue.queue.push_back(perBankQueue);
+  }
+}
+
+bool has_room_for_sms(sms *sched, int stream)
+{
+  assert(sched);
+  assert(stream > NN && stream <= TST);
+  assert(sched->source_queue);
+
+  if (sched->source_queue[stream].queue_entries < sched->source_queue[stream].queue_size)
+  {
+    return true;
+  }
+
+  return false;
+}
+
+/* First stage of SMS */
+void enqueue_sms(sms *sched, int stream, BusPacket *newBusPacket)
+{
+  assert(sched);
+  assert(newBusPacket);
+  assert(stream > NN && stream <= TST);
+  assert(sched->source_queue[stream].queue_entries < sched->source_queue[stream].queue_size);
+  
+  /* Enqueue new request into the source queue */
+  sched->source_queue[stream].queue.push_back(newBusPacket);
+  sched->source_queue[stream].queue_entries += 1;
+  
+  /* Update batch state based on the row-id of current request */
+#define BATCH_READY(s, st)    ((s)->source_queue[st].ready == TRUE)
+#define QUEUE_SIZE(s, st)     ((s)->source_queue[st].queue_size)
+#define QUEUE_ENTRY(s, st)    ((s)->source_queue[st].queue_entries)
+#define QUEUE_FULL(s, st)     (QUEUE_SIZE(s, st) == QUEUE_ENTRY(s, st))
+#define CURRENT_ROW(s, st)    ((s)->source_queue[st].current_row_id)
+#define BATCH_BEGIN(s, st)    (CURRENT_ROW(s, st) != INVALID_ROW)
+#define ROW_CHANGE(s, st, p)  ((s)->source_queue[st].current_row_id != (p)->row)
+
+  if (BATCH_BEGIN(sched, stream) && !BATCH_READY(sched, stream))
+  {
+    if (ROW_CHANGE(sched, stream, newBusPacket) || QUEUE_FULL(sched, stream))
+    {
+      sched->source_queue[stream].ready = TRUE;
+      sched->source_queue[stream].age   = sched->cycle;
+    }
+  }
+  else
+  {
+    if (!BATCH_BEGIN(sched, stream))
+    {
+      CURRENT_ROW(sched, stream) = newBusPacket->row;
+    }
+  }
+
+#undef BATCH_READY
+#undef QUEUE_SIZE
+#undef QUEUE_ENTRY
+#undef QUEUE_FULL
+#undef CURRENT_ROW
+#undef BATCH_BEGIN
+#undef ROW_CHANGE
+
+  if (sched->source_queue[stream].queue.size() > CMD_QUEUE_DEPTH)
+  {
+    ERROR("== Error - Enqueued more than allowed in command queue");
+    ERROR("						Need to call .hasRoomFor(int numberToEnqueue, unsigned rank, unsigned bank) first");
+    exit(0);
+  }
+}
+
+void execute_batching_sms(sms *sched, unsigned rank, unsigned bank)
+{
+  /* Find out sources with ready batches 
+   * Select one batch based on the policy and enqueue request to batch queue 
+   * */ 
+  int        min_batch_size;
+  long int   min_age;
+  int        tgt_queue;
+  int        qcount;
+  BusPacket *newBusPacket;  
+
+  min_batch_size  = CMD_QUEUE_DEPTH * 4;
+  min_age         = 0xffffffffffff;
+  tgt_queue       = NN;
+  
+  /* Increment scheduler cycle */
+  sched->cycle += 1;
+
+#define BATCH_READY(s, st)  ((s)->source_queue[st].ready == TRUE)
+#define SOURCE_SIZE(s, st)  ((s)->source_queue[st].queue_entries + (s)->batch_queue.src_req[st])
+#define BATCH_AGE(s, st)    ((s)->source_queue[st].age)
+
+  if (sched->batch_queue.mode == batching_mode_pick)
+  {
+    /* Chooses between SJF and Round Robin */
+    if (get_prob_in_range(0.0, 0.9))
+    {
+      for (int stream = NN + 1; stream <= TST; stream++)
+      {
+        if (BATCH_READY(sched, stream)) 
+        {
+#define CHK_TIE(sc, st, m, ma) (SOURCE_SIZE(sc, st) == m && BATCH_AGE(sc, st) < ma)
+
+          /* Choose next ready batch */
+          if (SOURCE_SIZE(sched, stream) <= min_batch_size || CHK_TIE(sched, stream, min_batch_size, min_age))
+          {
+            tgt_queue       = stream;
+            min_age         = BATCH_AGE(sched, stream); 
+            min_batch_size  = SOURCE_SIZE(sched, stream);
+          }
+
+#undef CHK_TIE
+        }
+      }
+    }
+    else
+    {
+      qcount    = 0;
+      tgt_queue = (sched->batch_queue.rr_next + 1) % (TST + 1);
+      
+      /* Find next ready batch from the source in round-robin order */
+      while (!BATCH_READY(sched, tgt_queue) && qcount++ <= TST)
+      {
+        tgt_queue = (sched->batch_queue.rr_next + 1) % (TST + 1);
+      }
+    }
+
+    sched->batch_queue.src = tgt_queue;
+
+    if (tgt_queue != NN)
+    {
+      sched->batch_queue.mode = batching_mode_drain;
+    }
+  }
+  else
+  {
+    assert(sched->batch_queue.src > NN && sched->batch_queue.src <= TST);
+
+    /* Dequeue next request from the target queue and enqueue into the 
+     * batch queue */ 
+    assert(sched->source_queue[sched->batch_queue.src].queue.size());
+    assert(sched->source_queue[sched->batch_queue.src].ready == TRUE);
+
+    newBusPacket = sched->source_queue[sched->batch_queue.src].queue[0];
+
+    assert(newBusPacket);
+    assert(newBusPacket->row == sched->source_queue[sched->batch_queue.src].current_row_id);
+
+    /* Move request from source queue to per-bank batch queue */
+    sched->source_queue[sched->batch_queue.src].queue.erase(sched->source_queue[sched->batch_queue.src].queue.begin());
+    sched->source_queue[sched->batch_queue.src].queue_entries -= 1;
+
+    sched->batch_queue.queue[rank][bank].push_back(newBusPacket);
+    sched->batch_queue.src_req[sched->batch_queue.src] += 1;
+
+    if (sched->source_queue[sched->batch_queue.src].queue_entries == 0)
+    {
+      sched->source_queue[sched->batch_queue.src].ready           = FALSE;
+      sched->source_queue[sched->batch_queue.src].current_row_id  = INVALID_ROW;
+      sched->source_queue[sched->batch_queue.src].age             = 0;
+    }
+    else
+    {
+      /* If there are requests in the queue, find state of the batch */
+      newBusPacket = sched->source_queue[sched->batch_queue.src].queue[0];
+      
+      if (newBusPacket->row != sched->source_queue[sched->batch_queue.src].current_row_id)
+      {
+        sched->source_queue[sched->batch_queue.src].current_row_id = newBusPacket->row;
+
+        /* Iterate through all entries and if a request with different row 
+         * is found, make batch ready  */
+        for (size_t j = 0; j < sched->source_queue[sched->batch_queue.src].queue.size(); j++)
+        {
+          newBusPacket = sched->source_queue[sched->batch_queue.src].queue[j];
+
+          if (newBusPacket->row != sched->source_queue[sched->batch_queue.src].current_row_id)
+          {
+            sched->source_queue[sched->batch_queue.src].ready = TRUE;
+            sched->source_queue[sched->batch_queue.src].age = sched->cycle;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+#undef BATCH_READY
+#undef BATCH_AGE
+}
+
+vector<BusPacket *> get_command_queue_sms(sms *sched, unsigned rank, unsigned bank) 
+{
+  if (queuingStructure == PerRankPerBank)
+  {
+    return sched->batch_queue.queue[rank][bank];
+  }
+  else if (queuingStructure == PerRank)
+  {
+    return sched->batch_queue.queue[rank][0];
+  }
+  else
+  {
+    ERROR("Unknown queue structure");
+    abort();
+  }
+}
+
+void remove_request_sms(sms *sched, BusPacket *newBusPacket)
+{
+  assert(newBusPacket->stream != NN);    
+  assert(sched->batch_queue.src_req[newBusPacket->stream]);
+
+  sched->batch_queue.src_req[newBusPacket->stream] -= 1;
+}
+
+#undef INVALID_ROW

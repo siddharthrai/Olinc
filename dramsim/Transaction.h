@@ -41,6 +41,12 @@
 
 using std::ostream;
 
+#define UNKNOWN_EVENT   (0)
+#define TQ_START_EVENT  (1)
+#define TQ_END_EVENT    (2)
+#define CQ_START_EVENT  (3)
+#define CQ_END_EVENT    (4)
+
 namespace DRAMSim
 {
 
@@ -66,6 +72,10 @@ namespace DRAMSim
                 void *data;
                 uint64_t timeAdded;
                 uint64_t timeReturned;
+                uint64_t tq_start;      /* Transaction queue start */
+                uint64_t tq_end;        /* Transaction queue end */
+                uint64_t cq_start;      /* Command queue start */
+                uint64_t cq_end;        /* Command queue end */
 
 
                 friend ostream &operator<<(ostream &os, const Transaction &t);
@@ -111,6 +121,33 @@ namespace DRAMSim
                                         ERROR("This transaction type doesn't have a corresponding bus packet type");
                                         abort();
                         }
+                }
+
+                void setEventTime(uint8_t event, uint64_t cycle)
+                {
+                  switch (event)
+                  {
+                    case CQ_START_EVENT:
+                      cq_start = cycle;
+                      break;
+
+                    case TQ_START_EVENT:
+                      tq_start = cycle;
+                      break;
+
+                    case CQ_END_EVENT:
+                      cq_end = cycle;
+                      break;
+
+                    case TQ_END_EVENT:
+                      tq_end = cycle;
+                      break;
+
+                    default:
+                      ERROR("This event is invalid");
+                      abort();
+                      break;
+                  }
                 }
         };
 

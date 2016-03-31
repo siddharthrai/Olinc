@@ -245,11 +245,12 @@ int main(int argc, char **argv)
 #if 0
       if (trace.stream == TS && trace.spill == TRUE)
       if (trace.spill == FALSE && trace.sap_stream == sappriority_stream_q)
-      if (trace.sap_stream == sappriority_stream_x)
       if (trace.spill == TRUE)
-#endif
+      if (trace.dirty == TRUE)
+      if (trace.sap_stream == sappriority_stream_x)
       if (trace.sap_stream == sappriority_stream_p || trace.sap_stream == sappriority_stream_q || 
           trace.sap_stream == sappriority_stream_r)
+#endif
       {
 #if 0
         if (old_cycle > trace.cycle)
