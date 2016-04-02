@@ -110,9 +110,6 @@
 #define FILL_FOLLOW_SHIP(g)       (SAT_CTR_VAL((g)->fill_ctr) <= PSEL_MID_VAL)
 #define FILL_WITH_SHIP(p, g)      (FILL_FOLLOW_SET(p) && FILL_FOLLOW_SHIP(g))
 #define GET_FILL_POLICY(p, g)     ((FILL_SHIP_SET(p) || FILL_WITH_SHIP(p, g)) ? FILL_TEST_SHIP : FILL_TEST_SRRIP)
-#if 0
-#define GET_FILL_POLICY(p, g)     (FILL_TEST_SRRIP)
-#endif
 
 #define CACHE_UPDATE_BLOCK_STATE(block, tag, va, state_in)        \
 do                                                                \
@@ -381,41 +378,6 @@ void shnt_sampler_cache_reset(srriphint_gdata *global_data, shnt_sampler_cache *
       sampler->perfctr.spill_reuse_distance_high[DBS]);
 #endif
 
-  if (sampler->perfctr.fill_reuse_count[PS] > sampler->perfctr.fill_count[PS] / 4)
-  {
-#if 0
-    global_data->gpu_rpthr  = 16;
-#endif
-    global_data->gpu_rpthr  = 32;
-    global_data->cpu_rpthr  = 2;
-  }
-  else
-  {
-    if (sampler->perfctr.fill_reuse_count[PS] > sampler->perfctr.fill_count[PS] / 8)
-    {
-#if 0
-      global_data->gpu_rpthr  = 8;
-#endif
-      global_data->gpu_rpthr  = 32;
-#if 0
-      global_data->cpu_rpthr  = 4;
-#endif
-      global_data->cpu_rpthr  = 2;
-
-    }
-    else
-    {
-#if 0
-      global_data->gpu_rpthr  = 2;
-#endif
-      global_data->gpu_rpthr  = 32;
-#if 0
-      global_data->cpu_rpthr  = 16;
-#endif
-      global_data->cpu_rpthr  = 2;
-    }
-  }
-
   /* Reset sampler */
   for (ub4 i = 0; i < sampler->sets; i++)
   {
@@ -517,8 +479,6 @@ void cache_init_srriphint(ub4 set_indx, struct cache_params *params, srriphint_d
 
     global_data->cpu_rpsel  = 0;
     global_data->gpu_rpsel  = 0;
-    global_data->cpu_rpthr  = 8;
-    global_data->gpu_rpthr  = 4;
     global_data->cpu_zevct  = 0;
     global_data->gpu_zevct  = 0;
     global_data->cpu_blocks = 0;
@@ -813,38 +773,8 @@ void cache_fill_block_srriphint(srriphint_data *policy_data, srriphint_gdata *gl
         }
 
         global_data->cache_access = 0;
-#if 0
-        if (global_data->rpthr == 0)
-        {
-          global_data->rpthr = 8;
-        }
-        else
-        {
-          global_data->rpthr -= 1;
-        }
-
-        if (global_data->cpu_zevct > global_data->gpu_zevct)
-        {
-          global_data->gpu_rpthr  = 4;
-          global_data->cpu_rpthr  = 12;
-        }
-        else
-        {
-          if (global_data->cpu_zevct < global_data->gpu_zevct)
-          {
-            global_data->gpu_rpthr  = 4;
-            global_data->cpu_rpthr  = 12;
-          }
-          else
-          {
-            global_data->gpu_rpthr  = 4;
-            global_data->cpu_rpthr  = 12;
-          }
-        }
-#endif
-
-        global_data->cpu_zevct  = 0;
-        global_data->gpu_zevct  = 0;
+        global_data->cpu_zevct    = 0;
+        global_data->gpu_zevct    = 0;
       }
 
     case cache_policy_srriphint:
@@ -997,8 +927,6 @@ int cache_replace_block_srriphint(srriphint_data *policy_data, srriphint_gdata *
 
 #define PU_STR(g, s) ((g)->sampler->perfctr.fill_reuse_count[(s)])
 #define PU_STF(g, s) ((g)->sampler->perfctr.fill_count[(s)])
-#define GPU_FREUSE(g) (PU_STR(g, CS) + PU_STR(g, ZS) + PU_STR(g, TS) + PU_STR(g, BS) + PU_STR(g, IS))
-#define GPU_FCOUNT(g) (PU_STF(g, CS) + PU_STF(g, ZS) + PU_STF(g, TS) + PU_STF(g, BS) + PU_STF(g, IS))
 #define CPU_FREUSE(g) (PU_STR(g, PS) + PU_STR(g, PS1) + PU_STR(g, PS2) + PU_STR(g, PS3))
 #define CPU_FCOUNT(g) (PU_STF(g, PS) + PU_STF(g, PS1) + PU_STF(g, PS2) + PU_STF(g, PS3))
 
@@ -1062,65 +990,10 @@ int cache_replace_block_srriphint(srriphint_data *policy_data, srriphint_gdata *
           default:
             panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
         }
-#if 0
-
-        if (GPU_STR(global_data, info->stream) < GPU_STF(global_data, info->stream) / 2)
-        {
-          if (GPU_STR(global_data, PS) > GPU_STF(global_data, PS) / 2)
-          {
-            if (!SRRIPHINT_DATA_GVALID_HEAD(policy_data)[rrpv].head)
-            {
-              /* All blocks which are already pinned are promoted to RRPV 0 
-               * and are unpinned. So we iterate through the blocks at RRPV 3 
-               * and move all the blocks which are pinned to RRPV 0 */
-              CACHE_SRRIPHINT_INCREMENT_RRPV(SRRIPHINT_DATA_GVALID_HEAD(policy_data), 
-                  SRRIPHINT_DATA_GVALID_TAIL(policy_data), rrpv);
-            }
-
-            for (block = SRRIPHINT_DATA_GVALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
-            {
-              if (!block->busy && (block->way < min_wayid))
-              {
-                min_wayid = block->way;
-                vctm_block  = block;
-              }
-            }
-          }
-        }
-#endif
-
-#if 0
-        else
-        {
-          if (GPU_STR(global_data, PS) > GPU_STF(global_data, PS) / 2)
-            if (GPU_STR(global_data, info->stream) < GPU_STF(global_data, info->stream) / 2)
-            {
-              if (!SRRIPHINT_DATA_GVALID_HEAD(policy_data)[rrpv].head)
-              {
-                /* All blocks which are already pinned are promoted to RRPV 0 
-                 * and are unpinned. So we iterate through the blocks at RRPV 3 
-                 * and move all the blocks which are pinned to RRPV 0 */
-                CACHE_SRRIPHINT_INCREMENT_RRPV(SRRIPHINT_DATA_GVALID_HEAD(policy_data), 
-                    SRRIPHINT_DATA_GVALID_TAIL(policy_data), rrpv);
-              }
-
-              for (block = SRRIPHINT_DATA_GVALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
-              {
-                if (!block->busy && (block->way < min_wayid))
-                {
-                  min_wayid = block->way;
-                  vctm_block  = block;
-                }
-              }
-            }
-        }
-#endif
       }
 
 #undef GPU_STR
 #undef GPU_STF
-#undef GPU_FREUSE
-#undef GPU_FCOUNT
 #undef CPU_FREUSE
 #undef CPU_FCOUNT
 
@@ -1146,23 +1019,7 @@ int cache_replace_block_srriphint(srriphint_data *policy_data, srriphint_gdata *
       }
 
       break;
-#if 0
-    case cache_policy_srrip:
-      for (block = SRRIPHINT_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
-      {
-        if (!block->busy && (block->way < min_wayid))
-        {
-          min_wayid   = block->way;
-          vctm_block  = block;
-        }
-      }
 
-      if (min_wayid != ~(0))
-      {
-        global_data->stream_blocks[vctm_block->stream] -= 1;
-      }
-      break;
-#endif
     default:
       panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
   }
@@ -1547,19 +1404,6 @@ int cache_get_new_rrpv_srriphint(srriphint_data *policy_data, srriphint_gdata *g
         }
       }
     }
-  }
-  else
-  {
-#if 0
-    if (RRPV3(perfctr, strm))
-    {
-      ret_rrpv = 2;
-    }
-    else
-    {
-      ret_rrpv = 2;
-    }
-#endif
   }
 
   return (info && !(info->fill)) ? old_rrpv : ret_rrpv;
