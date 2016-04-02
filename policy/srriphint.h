@@ -28,6 +28,13 @@
 #include "cache-param.h"
 #include "cache-block.h"
 
+#define SRRIPHINT_SRRIP_SET       (0)
+#define SRRIPHINT_GPU_SET         (1)
+#define SRRIPHINT_GPU_COND_SET    (2)
+#define SRRIPHINT_SHIP_FILL_SET   (3)
+#define SRRIPHINT_SRRIP_FILL_SET  (4)
+#define SRRIPHINT_FOLLOWER_SET    (5)
+
 /* Head node of a list, which corresponds to a particular RRPV */
 typedef struct cache_list_head_srriphint_t
 {
@@ -135,16 +142,16 @@ typedef struct srriphint_sampler_perfctr
 
 typedef struct srriphint_sampler_entry
 {
-  ub8  page;          /* Tag: page id */
-  ub8 *timestamp;     /* Timestamp of last access */
-  ub1 *spill_or_fill; /* Is the last access to the block a spill or a fill? */
-  ub1 *stream;        /* Id of the last stream to access this block */
-  ub1 *valid;         /* Valid or invalid */
-  ub1 *hit_count;     /* Current reuse epoch id */
-  ub1 *dynamic_color; /* True, if dynamic CS */
-  ub1 *dynamic_depth; /* True, if dynamic ZS */
-  ub1 *dynamic_blit;  /* True, if dynamic BS */
-  ub1 *dynamic_proc;  /* True, if dynamic PS */
+  ub8   page;           /* Tag: page id */
+  ub8  *timestamp;      /* Timestamp of last access */
+  ub1  *spill_or_fill;  /* Is the last access to the block a spill or a fill? */
+  ub1  *stream;         /* Id of the last stream to access this block */
+  ub1  *valid;          /* Valid or invalid */
+  ub1  *hit_count;      /* Current reuse epoch id */
+  ub1  *dynamic_color;  /* True, if dynamic CS */
+  ub1  *dynamic_depth;  /* True, if dynamic ZS */
+  ub1  *dynamic_blit;   /* True, if dynamic BS */
+  ub1  *dynamic_proc;   /* True, if dynamic PS */
 }srriphint_sampler_entry;
 
 /*
@@ -217,6 +224,8 @@ typedef struct cache_policy_srriphint_gdata_t
   ub8    cpu_blocks;                          /* CPU blocks in cache */
   ub8    gpu_blocks;                          /* GPU blocks in cache */
   ub1    cpu_bmc;                             /* CPU bimodal fill counter */
+  sctr   rpl_ctr;                             /* Replacement policy selection counter */
+  sctr   fill_ctr;                            /* Fill policy selection counter */
   shnt_sampler_cache *sampler;                /* Sampler cache used for tracking reuses */
   shnt_sampler_cache *cpu_sampler;            /* Sampler cache used for tracking reuses */
 }srriphint_gdata;

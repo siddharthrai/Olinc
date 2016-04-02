@@ -25,6 +25,11 @@
 #include "srriphint.h"
 #include "sap.h"
 
+#define RPL_GPU_FIRST             (0)
+#define RPL_GPU_COND_FIRST        (1)
+#define FILL_TEST_SHIP            (2)
+#define FILL_TEST_SRRIP           (3)
+
 #define CACHE_SET(cache, set)     (&((cache)->sets[set]))
 #define CACHE_BLOCK(set, way)     (&((set)->blocks[way]))
 #define BYPASS_RRPV               (-1)
@@ -50,8 +55,6 @@
 #define SHTH_DENM                 (16)
 #define BYPASS_ACCESS_TH          (128 * 1024)
 
-#define SRRIPHINT_SRRIP_SET       (0)
-#define SRRIPHINT_FOLLOWER_SET    (4)
 
 #define SARP_SAMPLER_INVALID_TAG  (0xfffffffffffffffULL)
 #define STREAM_OCC_THRESHOLD      (32)
@@ -92,6 +95,24 @@
 #define IS_INTERS(g, i)           ((i)->spill && (CTC_CNT(g, i)|| BTC_CNT(g, i)))
 #define INSTRS_CRTCL(g, i)        (CHK_CRTCL(g, TS) || CHK_CRTCL(g, GST(i)))
 #define CRITICAL_STREAM(g, i)     (IS_INTERS(g, i) ? INSTRS_CRTCL(g, i) : CHK_CRTCL(g, GST(i)))
+
+#define R_GPU_SET(p)              ((p)->set_type == SRRIPHINT_GPU_SET)
+#define R_CPU_SET(p)              ((p)->set_type == SRRIPHINT_GPU_COND_SET)
+#define F_R_SET(p)                (!R_GPU_SET(p) && !R_CPU_SET(p))
+#define R_GPU_FIRST(g)            (SAT_CTR_VAL((g)->rpl_ctr) <= PSEL_MID_VAL)
+#define R_GPU_COND(g)             (SAT_CTR_VAL((g)->rpl_ctr) > PSEL_MID_VAL)
+#define F_GPU_FIRST(p, g)         (F_R_SET(p) && R_GPU_FIRST(g))
+#define GET_RPOLICY(p, g)         ((R_GPU_SET(p) || F_GPU_FIRST(p, g)) ? RPL_GPU_FIRST : RPL_GPU_COND_FIRST)
+
+#define FILL_SHIP_SET(p)          ((p)->set_type == SRRIPHINT_SHIP_FILL_SET)
+#define FILL_SRRIP_SET(p)         ((p)->set_type == SRRIPHINT_SRRIP_FILL_SET)
+#define FILL_FOLLOW_SET(p)        (!FILL_SHIP_SET(p) && !FILL_SRRIP_SET(p))
+#define FILL_FOLLOW_SHIP(g)       (SAT_CTR_VAL((g)->fill_ctr) <= PSEL_MID_VAL)
+#define FILL_WITH_SHIP(p, g)      (FILL_FOLLOW_SET(p) && FILL_FOLLOW_SHIP(g))
+#define GET_FILL_POLICY(p, g)     ((FILL_SHIP_SET(p) || FILL_WITH_SHIP(p, g)) ? FILL_TEST_SHIP : FILL_TEST_SRRIP)
+#if 0
+#define GET_FILL_POLICY(p, g)     (FILL_TEST_SRRIP)
+#endif
 
 #define CACHE_UPDATE_BLOCK_STATE(block, tag, va, state_in)        \
 do                                                                \
@@ -227,7 +248,22 @@ static ub4 get_set_type_srriphint(long long int indx)
 
   if (lsb_bits == msb_bits && mid_bits == 0)
   {
-    return SRRIPHINT_SRRIP_SET;
+    return SRRIPHINT_GPU_SET;
+  }
+
+  if (lsb_bits == (~msb_bits & 0x0f) && mid_bits == 0)
+  {
+    return SRRIPHINT_GPU_COND_SET;
+  }
+
+  if (lsb_bits == msb_bits && mid_bits == 1)
+  {
+    return SRRIPHINT_SHIP_FILL_SET;
+  }
+
+  if (lsb_bits == (~msb_bits & 0xf) && mid_bits == 1)
+  {
+    return SRRIPHINT_SRRIP_FILL_SET;
   }
 
   return SRRIPHINT_FOLLOWER_SET;
@@ -259,16 +295,16 @@ void shnt_sampler_cache_init(shnt_sampler_cache *sampler, ub4 sets, ub4 ways)
 
     for (ub4 j = 0; j < ways; j++)
     {
-      (sampler->blocks)[i][j].page           = SARP_SAMPLER_INVALID_TAG;
-      (sampler->blocks)[i][j].timestamp      = (ub8 *)xcalloc(BLK_PER_ENTRY, sizeof(ub8));
-      (sampler->blocks)[i][j].spill_or_fill  = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
-      (sampler->blocks)[i][j].stream         = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
-      (sampler->blocks)[i][j].valid          = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
-      (sampler->blocks)[i][j].hit_count      = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
-      (sampler->blocks)[i][j].dynamic_color  = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
-      (sampler->blocks)[i][j].dynamic_depth  = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
-      (sampler->blocks)[i][j].dynamic_blit   = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
-      (sampler->blocks)[i][j].dynamic_proc   = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
+      (sampler->blocks)[i][j].page          = SARP_SAMPLER_INVALID_TAG;
+      (sampler->blocks)[i][j].timestamp     = (ub8 *)xcalloc(BLK_PER_ENTRY, sizeof(ub8));
+      (sampler->blocks)[i][j].spill_or_fill = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
+      (sampler->blocks)[i][j].stream        = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
+      (sampler->blocks)[i][j].valid         = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
+      (sampler->blocks)[i][j].hit_count     = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
+      (sampler->blocks)[i][j].dynamic_color = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
+      (sampler->blocks)[i][j].dynamic_depth = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
+      (sampler->blocks)[i][j].dynamic_blit  = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
+      (sampler->blocks)[i][j].dynamic_proc  = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
     }
   }
   
@@ -347,26 +383,36 @@ void shnt_sampler_cache_reset(srriphint_gdata *global_data, shnt_sampler_cache *
 
   if (sampler->perfctr.fill_reuse_count[PS] > sampler->perfctr.fill_count[PS] / 4)
   {
+#if 0
     global_data->gpu_rpthr  = 16;
+#endif
+    global_data->gpu_rpthr  = 32;
     global_data->cpu_rpthr  = 2;
   }
   else
   {
     if (sampler->perfctr.fill_reuse_count[PS] > sampler->perfctr.fill_count[PS] / 8)
     {
-      global_data->gpu_rpthr  = 8;
 #if 0
-      global_data->gpu_rpthr  = 16;
+      global_data->gpu_rpthr  = 8;
 #endif
+      global_data->gpu_rpthr  = 32;
+#if 0
       global_data->cpu_rpthr  = 4;
+#endif
+      global_data->cpu_rpthr  = 2;
+
     }
     else
     {
-      global_data->gpu_rpthr  = 2;
 #if 0
-      global_data->gpu_rpthr  = 16;
+      global_data->gpu_rpthr  = 2;
 #endif
+      global_data->gpu_rpthr  = 32;
+#if 0
       global_data->cpu_rpthr  = 16;
+#endif
+      global_data->cpu_rpthr  = 2;
     }
   }
 
@@ -486,6 +532,14 @@ void cache_init_srriphint(ub4 set_indx, struct cache_params *params, srriphint_d
     {
       global_data->ship_shct[i] = 0;
     }
+
+    /* Initialize replacement policy selection counter */
+    SAT_CTR_INI(global_data->rpl_ctr, PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
+    SAT_CTR_SET(global_data->rpl_ctr, PSEL_MID_VAL);
+
+    /* Initialize fill policy selection counter */
+    SAT_CTR_INI(global_data->fill_ctr, PSEL_WIDTH, PSEL_MIN_VAL, PSEL_MAX_VAL);
+    SAT_CTR_SET(global_data->fill_ctr, PSEL_MID_VAL);
   }
 
   policy_data->set_type   = get_set_type_srriphint(set_indx);
@@ -507,6 +561,10 @@ void cache_init_srriphint(ub4 set_indx, struct cache_params *params, srriphint_d
       break;
 
     case SRRIPHINT_FOLLOWER_SET:
+    case SRRIPHINT_GPU_SET:
+    case SRRIPHINT_GPU_COND_SET:
+    case SRRIPHINT_SHIP_FILL_SET:
+    case SRRIPHINT_SRRIP_FILL_SET:
       policy_data->following = cache_policy_srriphint;
 
       /* Set current and default fill policy to SRRIP */
@@ -682,6 +740,43 @@ struct cache_block_t* cache_find_block_srriphint(srriphint_data *policy_data,
   }
 
 end:
+  if (!node)
+  {
+    if (info->fill)
+    {
+      switch (policy_data->set_type)
+      {
+        case SRRIPHINT_GPU_SET:
+          SAT_CTR_INC(global_data->rpl_ctr);
+          break;
+
+        case SRRIPHINT_GPU_COND_SET:
+          SAT_CTR_DEC(global_data->rpl_ctr);
+          break;
+
+        case SRRIPHINT_SHIP_FILL_SET:
+          if (CPU_STREAM(info->stream))
+          {
+            SAT_CTR_INC(global_data->fill_ctr);
+          }
+          break;
+
+        case SRRIPHINT_SRRIP_FILL_SET:
+          if (CPU_STREAM(info->stream))
+          {
+            SAT_CTR_DEC(global_data->fill_ctr);
+          }
+          break;
+
+        case SRRIPHINT_FOLLOWER_SET:
+          break;
+
+        default:
+          panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
+      }
+    }
+  }
+
   return node;
 }
 
@@ -858,36 +953,6 @@ int cache_replace_block_srriphint(srriphint_data *policy_data, srriphint_gdata *
     goto end;
   }
 
-#define FLWR_SET(p)           ((p)->set_type == SRRIPHINT_FOLLOWER_SET)
-#define SRRIP_SET(p)          ((p)->set_type == SRRIPHINT_SRRIP_SET)
-#define BLOCK_COUNT(g, s)     ((g)->stream_blocks[s])
-#define BLOCK_REUSE(g, s)     ((g)->stream_reuse[s])
-#define GREUSE_TH             (4)
-#define CREUSE_TH             (4)
-#define STRMREUSE_LOW(g, s)   (BLOCK_REUSE(g, s) < GREUSE_TH * BLOCK_COUNT(g, s))
-#define CPUREUSE_LOW(g)       (BLOCK_REUSE(g, PS) < BLOCK_COUNT(g, PS))
-  
-  if (FLWR_SET(policy_data))
-  {
-#if 0
-    if (GPU_STREAM(info->stream) && STRMREUSE_LOW(global_data, info->stream) && !CPUREUSE_LOW(global_data))
-    if (GPU_STREAM(info->stream) && STRMREUSE_LOW(global_data, info->stream))
-    {
-      min_wayid = BYPASS_WAY;
-      goto end;
-    }
-#endif
-  }
-
-#undef FLWR_SET
-#undef SRRIP_SET
-#undef BLOCK_COUNT
-#undef BLOCK_REUSE
-#undef GREUSE_TH
-#undef CREUSE_TH
-#undef STRMREUSE_LOW
-#undef CPUREUSE_LOW
-
   /* Try to find an invalid block always from head of the free list. */
   for (block = SRRIPHINT_DATA_FREE_HEAD(policy_data); block; block = block->prev)
   {
@@ -902,7 +967,7 @@ int cache_replace_block_srriphint(srriphint_data *policy_data, srriphint_gdata *
 
   /* If there is no block with required RRPV, increment RRPV of all the blocks
    * until we get one with the required RRPV */
-  if (GPU_STREAM(info->stream))
+  if (!SRRIPHINT_DATA_GVALID_HEAD(policy_data)[rrpv].head && !SRRIPHINT_DATA_CVALID_HEAD(policy_data)[rrpv].head)
   {
     if (!SRRIPHINT_DATA_GVALID_HEAD(policy_data)[rrpv].head)
     {
@@ -912,9 +977,7 @@ int cache_replace_block_srriphint(srriphint_data *policy_data, srriphint_gdata *
       CACHE_SRRIPHINT_INCREMENT_RRPV(SRRIPHINT_DATA_GVALID_HEAD(policy_data), 
           SRRIPHINT_DATA_GVALID_TAIL(policy_data), rrpv);
     }
-  }
-  else
-  {
+
     if (!SRRIPHINT_DATA_CVALID_HEAD(policy_data)[rrpv].head)
     {
       /* All blocks which are already pinned are promoted to RRPV 0 
@@ -925,214 +988,85 @@ int cache_replace_block_srriphint(srriphint_data *policy_data, srriphint_gdata *
     }
   }
 
-#define PMAX_RRPV(p) (SRRIPHINT_DATA_MAX_RRPV(p))
-
-  /* For both CPU and GPU lists, count blocks at RRPV 3 with ship counter set of 0 */
-  for (int crrpv = 0; crrpv <= PMAX_RRPV(policy_data); crrpv++)
-  {
-    for (block = SRRIPHINT_DATA_GVALID_TAIL(policy_data)[crrpv].head; block; block = block->next)
-    {
-      if (block->ship_sign_valid)
-      {
-        if (!global_data->ship_shct[block->ship_sign])
-        {
-          gpu_zblocks += 1; 
-        }
-      }
-    }
-
-    for (block = SRRIPHINT_DATA_CVALID_TAIL(policy_data)[crrpv].head; block; block = block->next)
-    {
-      if (block->ship_sign_valid)
-      {
-        if (!global_data->ship_shct[block->ship_sign])
-        {
-          cpu_zblocks += 1; 
-        }
-      }
-    }
-  }
-
-#if 0  
-  if (gpu_zblocks && gpu_zblocks > gpu_blocks / 2)
-  {
-    gpu_zblocks = 1;
-  }
-
-  if (cpu_zblocks && cpu_zblocks > cpu_blocks / 2)
-  {
-    gpu_zblocks = 0;
-    cpu_zblocks = 1;
-  }
-#endif
-
-#undef PMAX_RRPV
-
-#if 0
-  /* If there is no block with required RRPV, increment RRPV of all the blocks
-   * until we get one with the required RRPV */
-  if (SRRIPHINT_DATA_VALID_HEAD(policy_data)[rrpv].head == NULL)
-  {
-    CACHE_SRRIPHINT_INCREMENT_RRPV(SRRIPHINT_DATA_VALID_HEAD(policy_data), 
-        SRRIPHINT_DATA_VALID_TAIL(policy_data), rrpv);
-  }
-#endif
 
   switch (SRRIPHINT_DATA_CRPOLICY(policy_data))
   {
     case cache_policy_srriphint:
     case cache_policy_cpulast:
     case cache_policy_srrip:
-#if 0
-      /* First try to find a GPU block */
-      for (block = SRRIPHINT_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
-      {
-        if (!block->busy && (block->way < min_wayid && GPU_STREAM(block->stream)))
-          min_wayid = block->way;
-      }
 
-      /* If there so no GPU replacement candidate, replace CPU block */
-      if (min_wayid == ~(0) && (CPU_STREAM(info->stream)))
-      {
-        for (block = SRRIPHINT_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
-        {
-          if (!block->busy && (block->way < min_wayid))
-            min_wayid = block->way;
-        }
-      }
-      else
-      {
-        if (min_wayid == ~(0))
-        {
-          min_wayid = BYPASS_WAY;
-          goto end;
-        }
-      }
-#endif
+#define PU_STR(g, s) ((g)->sampler->perfctr.fill_reuse_count[(s)])
+#define PU_STF(g, s) ((g)->sampler->perfctr.fill_count[(s)])
+#define GPU_FREUSE(g) (PU_STR(g, CS) + PU_STR(g, ZS) + PU_STR(g, TS) + PU_STR(g, BS) + PU_STR(g, IS))
+#define GPU_FCOUNT(g) (PU_STF(g, CS) + PU_STF(g, ZS) + PU_STF(g, TS) + PU_STF(g, BS) + PU_STF(g, IS))
+#define CPU_FREUSE(g) (PU_STR(g, PS) + PU_STR(g, PS1) + PU_STR(g, PS2) + PU_STR(g, PS3))
+#define CPU_FCOUNT(g) (PU_STF(g, PS) + PU_STF(g, PS1) + PU_STF(g, PS2) + PU_STF(g, PS3))
 
       if (GPU_STREAM(info->stream)) 
       {
-        if (info->fill && (info->stream == CS || info->stream == ZS))
+        assert(policy_data->set_type == SRRIPHINT_GPU_SET || 
+            policy_data->set_type == SRRIPHINT_GPU_COND_SET || 
+            SRRIPHINT_FOLLOWER_SET);
+
+        switch(GET_RPOLICY(policy_data, global_data))
         {
-          min_wayid = BYPASS_WAY;
-          goto end;
-        }
-
-        if (++(global_data->gpu_rpsel) >= global_data->gpu_rpthr)
-        {
-          global_data->gpu_rpsel = 0;
-
-          if (!SRRIPHINT_DATA_CVALID_HEAD(policy_data)[rrpv].head)
-          {
-            /* All blocks which are already pinned are promoted to RRPV 0 
-             * and are unpinned. So we iterate through the blocks at RRPV 3 
-             * and move all the blocks which are pinned to RRPV 0 */
-            CACHE_SRRIPHINT_INCREMENT_RRPV(SRRIPHINT_DATA_CVALID_HEAD(policy_data), 
-                SRRIPHINT_DATA_CVALID_TAIL(policy_data), rrpv);
-          }
-
-          for (block = SRRIPHINT_DATA_CVALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
-          {
-            if (!block->busy && (block->way < min_wayid))
+          case RPL_GPU_FIRST:
+            if (PU_STR(global_data, info->stream) < PU_STF(global_data, info->stream) / 2)
             {
-              min_wayid = block->way;
-              vctm_block  = block;
-            }
-          }
-
-          if (min_wayid == ~(0))
-          {
-            for (block = SRRIPHINT_DATA_GVALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
-            {
-              if (!block->busy && (block->way < min_wayid))
+              if (!SRRIPHINT_DATA_GVALID_HEAD(policy_data)[rrpv].head)
               {
-                min_wayid = block->way;
-                vctm_block  = block;
+                /* All blocks which are already pinned are promoted to RRPV 0 
+                 * and are unpinned. So we iterate through the blocks at RRPV 3 
+                 * and move all the blocks which are pinned to RRPV 0 */
+                CACHE_SRRIPHINT_INCREMENT_RRPV(SRRIPHINT_DATA_GVALID_HEAD(policy_data), 
+                    SRRIPHINT_DATA_GVALID_TAIL(policy_data), rrpv);
+              }
+
+              for (block = SRRIPHINT_DATA_GVALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
+              {
+                if (!block->busy && (block->way < min_wayid))
+                {
+                  min_wayid = block->way;
+                  vctm_block  = block;
+                }
               }
             }
-          }
-        }
-        else
-        {
-          for (block = SRRIPHINT_DATA_GVALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
-          {
-            if (!block->busy && (block->way < min_wayid))
-            {
-              min_wayid = block->way;
-              vctm_block  = block;
-            }
-          }
+            break;
 
-          if (min_wayid == ~(0))
-          {
-            if (!SRRIPHINT_DATA_CVALID_HEAD(policy_data)[rrpv].head)
+          case RPL_GPU_COND_FIRST:
+            if (PU_STR(global_data, info->stream) < PU_STF(global_data, info->stream) / 2)
             {
-              /* All blocks which are already pinned are promoted to RRPV 0 
-               * and are unpinned. So we iterate through the blocks at RRPV 3 
-               * and move all the blocks which are pinned to RRPV 0 */
-              CACHE_SRRIPHINT_INCREMENT_RRPV(SRRIPHINT_DATA_CVALID_HEAD(policy_data), 
-                  SRRIPHINT_DATA_CVALID_TAIL(policy_data), rrpv);
-            }
-
-            for (block = SRRIPHINT_DATA_CVALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
-            {
-              if (!block->busy && (block->way < min_wayid))
+              if (CPU_FREUSE(global_data) > CPU_FCOUNT(global_data) / 2)
               {
-                min_wayid = block->way;
-                vctm_block  = block;
+                if (!SRRIPHINT_DATA_GVALID_HEAD(policy_data)[rrpv].head)
+                {
+                  /* All blocks which are already pinned are promoted to RRPV 0 
+                   * and are unpinned. So we iterate through the blocks at RRPV 3 
+                   * and move all the blocks which are pinned to RRPV 0 */
+                  CACHE_SRRIPHINT_INCREMENT_RRPV(SRRIPHINT_DATA_GVALID_HEAD(policy_data), 
+                      SRRIPHINT_DATA_GVALID_TAIL(policy_data), rrpv);
+                }
+
+                for (block = SRRIPHINT_DATA_GVALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
+                {
+                  if (!block->busy && (block->way < min_wayid))
+                  {
+                    min_wayid = block->way;
+                    vctm_block  = block;
+                  }
+                }
               }
             }
-          }
+            break;
+
+          default:
+            panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
         }
-      }
-      else
-      {
-        if (++(global_data->cpu_rpsel) >= global_data->cpu_rpthr)
+#if 0
+
+        if (GPU_STR(global_data, info->stream) < GPU_STF(global_data, info->stream) / 2)
         {
-          global_data->cpu_rpsel = 0;
-
-          if (!SRRIPHINT_DATA_GVALID_HEAD(policy_data)[rrpv].head)
-          {
-            /* All blocks which are already pinned are promoted to RRPV 0 
-             * and are unpinned. So we iterate through the blocks at RRPV 3 
-             * and move all the blocks which are pinned to RRPV 0 */
-            CACHE_SRRIPHINT_INCREMENT_RRPV(SRRIPHINT_DATA_GVALID_HEAD(policy_data), 
-                SRRIPHINT_DATA_GVALID_TAIL(policy_data), rrpv);
-          }
-
-          for (block = SRRIPHINT_DATA_GVALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
-          {
-            if (!block->busy && (block->way < min_wayid))
-            {
-              min_wayid   = block->way;
-              vctm_block  = block;
-            }
-          }
-
-          if (min_wayid == ~(0))
-          {
-            for (block = SRRIPHINT_DATA_CVALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
-            {
-              if (!block->busy && (block->way < min_wayid))
-              {
-                min_wayid   = block->way;
-                vctm_block  = block;
-              }
-            }
-          }
-        }
-        else
-        {
-          for (block = SRRIPHINT_DATA_CVALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
-          {
-            if (!block->busy && (block->way < min_wayid))
-            {
-              min_wayid = block->way;
-              vctm_block  = block;
-            }
-          }
-
-          if (min_wayid == ~(0))
+          if (GPU_STR(global_data, PS) > GPU_STF(global_data, PS) / 2)
           {
             if (!SRRIPHINT_DATA_GVALID_HEAD(policy_data)[rrpv].head)
             {
@@ -1151,6 +1085,62 @@ int cache_replace_block_srriphint(srriphint_data *policy_data, srriphint_gdata *
                 vctm_block  = block;
               }
             }
+          }
+        }
+#endif
+
+#if 0
+        else
+        {
+          if (GPU_STR(global_data, PS) > GPU_STF(global_data, PS) / 2)
+            if (GPU_STR(global_data, info->stream) < GPU_STF(global_data, info->stream) / 2)
+            {
+              if (!SRRIPHINT_DATA_GVALID_HEAD(policy_data)[rrpv].head)
+              {
+                /* All blocks which are already pinned are promoted to RRPV 0 
+                 * and are unpinned. So we iterate through the blocks at RRPV 3 
+                 * and move all the blocks which are pinned to RRPV 0 */
+                CACHE_SRRIPHINT_INCREMENT_RRPV(SRRIPHINT_DATA_GVALID_HEAD(policy_data), 
+                    SRRIPHINT_DATA_GVALID_TAIL(policy_data), rrpv);
+              }
+
+              for (block = SRRIPHINT_DATA_GVALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
+              {
+                if (!block->busy && (block->way < min_wayid))
+                {
+                  min_wayid = block->way;
+                  vctm_block  = block;
+                }
+              }
+            }
+        }
+#endif
+      }
+
+#undef GPU_STR
+#undef GPU_STF
+#undef GPU_FREUSE
+#undef GPU_FCOUNT
+#undef CPU_FREUSE
+#undef CPU_FCOUNT
+
+      if (min_wayid == ~(0))
+      {
+        for (block = SRRIPHINT_DATA_GVALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
+        {
+          if (!block->busy && (block->way < min_wayid))
+          {
+            min_wayid = block->way;
+            vctm_block  = block;
+          }
+        }
+
+        for (block = SRRIPHINT_DATA_CVALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
+        {
+          if (!block->busy && (block->way < min_wayid))
+          {
+            min_wayid = block->way;
+            vctm_block  = block;
           }
         }
       }
@@ -1352,10 +1342,6 @@ int cache_get_fill_rrpv_srriphint(srriphint_data *policy_data,
   switch (SRRIPHINT_DATA_CFPOLICY(policy_data))
   {
     case cache_policy_srriphint:
-#define FLWR_SET(p)           ((p)->set_type == SRRIPHINT_FOLLOWER_SET)
-
-      assert(FLWR_SET(policy_data));
-
       if (GPU_STREAM(info->stream) && info->spill)
       {
         strm      = NEW_STREAM(info);
@@ -1384,7 +1370,7 @@ int cache_get_fill_rrpv_srriphint(srriphint_data *policy_data,
         {
           if (SRD_LOW(perfctr, strm) || SREUSE_LOW(perfctr, strm))
           {
-            ret_rrpv = 2;
+            ret_rrpv = 3;
           }
         }
 
@@ -1418,46 +1404,25 @@ int cache_get_fill_rrpv_srriphint(srriphint_data *policy_data,
 
         if (info->fill)
         {
-          if (FREUSE(perfctr, strm) < FILLS(perfctr, strm) / 8 || !SMLPR_EFCTV(global_data, info))
+          switch (GET_FILL_POLICY(policy_data, global_data))
           {
-            if (++(global_data->cpu_bmc) == MAX_BMC)
-            {
-              global_data->cpu_bmc = 0; 
-              return SRRIPHINT_DATA_MAX_RRPV(policy_data) - 1;
-            }
-            else
-            {
-              return SRRIPHINT_DATA_MAX_RRPV(policy_data) - 1;
-            }
-          }
-          else
-          {
-            if (!SMLPR_EFCTV(global_data, info))
-            {
-              return SRRIPHINT_DATA_MAX_RRPV(policy_data);
-            }
-          }
-        }
-        else
-        {
-          if (SREUSE(perfctr, strm) < SPILLS(perfctr, strm) / 8 || !SMLPR_EFCTV(global_data, info))
-          {
-            if (++(global_data->cpu_bmc) == MAX_BMC)
-            {
-              global_data->cpu_bmc = 0; 
-              return SRRIPHINT_DATA_MAX_RRPV(policy_data) - 1;
-            }
-            else
-            {
-              return SRRIPHINT_DATA_MAX_RRPV(policy_data) - 1;
-            }
-          }
-          else
-          {
-            if (RRPV1(perfctr, strm) || RRPV2(perfctr, strm))
-            {
-              return SRRIPHINT_DATA_MAX_RRPV(policy_data) - 1;
-            }
+            /* Ship sample set fills with ship */
+            case FILL_TEST_SHIP:
+              if (CPU_STREAM(info->stream))
+              {
+                if (!(global_data->ship_shct[SHIPSIGN(global_data, info)]))
+                {
+                  return SRRIPHINT_DATA_MAX_RRPV(policy_data);
+                }
+              }
+              break;
+
+              /* Non ship sample set fills with srrip */
+            case FILL_TEST_SRRIP:
+              break;
+
+            default:
+              panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
           }
         }
 
@@ -1474,7 +1439,6 @@ int cache_get_fill_rrpv_srriphint(srriphint_data *policy_data,
 
       return SRRIPHINT_DATA_MAX_RRPV(policy_data) - 1;
 
-#undef FLWR_SET
       break;
 
     case cache_policy_srrip:
@@ -1501,6 +1465,7 @@ int cache_get_replacement_rrpv_srriphint(srriphint_data *policy_data)
 #define SHPIN_TH(p, s)    (SRUSE(p, s) * SHTH_DENM > SCOUNT(p, s) * SHTH_NUMR)
 #define RRPV1(p, s)       ((SRUSE(p, s) > MRUSE(p) / 2) || SHPIN_TH(p, s))
 #define RRPV2(p, s)       ((SRUSE(p, s) > MRUSE(p) / 3))
+#define RRPV3(p, s)       ((SRUSE(p, s) > SCOUNT(p, s) / 2))
 #define SRD_LOW(p, s)     (SDLOW(p, s) < SDHIGH(p, s))
 #define SREUSE_LOW(p, s)  (SREUSE(p, s) == 0 && SCOUNT(p, s) > BYPASS_ACCESS_TH)
 #define CT_TH1            (64)
@@ -1586,13 +1551,13 @@ int cache_get_new_rrpv_srriphint(srriphint_data *policy_data, srriphint_gdata *g
   else
   {
 #if 0
-    if (RRPV2(perfctr, strm))
+    if (RRPV3(perfctr, strm))
     {
-      ret_rrpv = 0;
+      ret_rrpv = 2;
     }
     else
     {
-      ret_rrpv = old_rrpv;
+      ret_rrpv = 2;
     }
 #endif
   }
@@ -1610,6 +1575,7 @@ int cache_get_new_rrpv_srriphint(srriphint_data *policy_data, srriphint_gdata *g
 #undef SHPIN_TH
 #undef RRPV1
 #undef RRPV2
+#undef RRPV3
 #undef SRD_LOW
 #undef SREUSE_LOW
 #undef CT_TH1
@@ -1919,6 +1885,37 @@ void update_shnt_sampler_fill_reuse_perfctr(shnt_sampler_cache *sampler, ub4 ind
   }
 }
 
+#define GET_SAMPLER_INDX(i, s)    ((((i)->address >> (s)->log_grain_size)) & ((s)->sets - 1))
+#define GET_SAMPLER_TAG(i, s)     ((i)->address >> (s)->log_grain_size)
+#define GET_SAMPLER_OFFSET(i, s)  (((i)->address >> (s)->log_block_size) & ((s)->entry_size - 1))
+
+static srriphint_sampler_entry* shnt_sampler_cache_get_block(shnt_sampler_cache *sampler, memory_trace *info)
+{
+  ub4 way;
+  ub4 index;
+  ub8 page;
+
+  /* Obtain sampler index, tag, offset and cache index of the access */
+  index   = GET_SAMPLER_INDX(info, sampler);
+  page    = GET_SAMPLER_TAG(info, sampler);
+
+  for (way = 0; way < sampler->ways; way++)
+  {
+    if (sampler->blocks[index][way].page == page)
+    {
+      assert(page != SARP_SAMPLER_INVALID_TAG);
+      break;
+    }
+  }
+
+  return (way < sampler->ways) ? &(sampler->blocks[index][way]) : NULL;
+}
+
+#undef GET_SAMPLER_INDX
+#undef GET_SAMPLER_TAG
+#undef GET_SAMPLER_OFFSET
+
+
 /* Update fills for current reuse ep ch */
 static void update_shnt_sampler_fill_per_reuse_epoch_perfctr(shnt_sampler_cache *sampler, 
     ub4 index, ub4 way, memory_trace *info)
@@ -2216,31 +2213,8 @@ void shnt_sampler_cache_lookup(shnt_sampler_cache *sampler, srriphint_data *poli
   }
 }
 
-srriphint_sampler_entry* shnt_sampler_cache_get_block(shnt_sampler_cache *sampler, memory_trace *info)
-{
-  ub4 way;
-  ub4 index;
-  ub8 page;
-  ub8 offset;
-  ub1 strm;
-
-  /* Obtain sampler index, tag, offset and cache index of the access */
-  index   = SAMPLER_INDX(info, sampler);
-  page    = SAMPLER_TAG(info, sampler);
-  offset  = SAMPLER_OFFSET(info, sampler);
-
-  for (way = 0; way < sampler->ways; way++)
-  {
-    if (sampler->blocks[index][way].page == page)
-    {
-      assert(page != SARP_SAMPLER_INVALID_TAG);
-      break;
-    }
-  }
-
-  return (way < sampler->ways) ? &(sampler->blocks[index][way]) : NULL;
-}
-
+#undef RPL_GPU_FIRST
+#undef RPL_GPU_COND_FIRST
 #undef INTERVAL_SIZE
 #undef EPOCH_SIZE
 #undef RTBL_SIZE_LOG
@@ -2265,3 +2239,16 @@ srriphint_sampler_entry* shnt_sampler_cache_get_block(shnt_sampler_cache *sample
 #undef SHIPSIGN
 #undef CACHE_INC_SHCT
 #undef CACHE_DEC_SHCT
+#undef R_GPU_SET
+#undef R_CPU_SET
+#undef F_R_SET
+#undef R_GPU_FIRST
+#undef R_GPU_COND
+#undef F_GPU_FIRST
+#undef GET_RPOLICY
+#undef FILL_SHIP_SET
+#undef FILL_SRRIP_SET
+#undef FILL_FOLLOW_SET
+#undef FILL_FOLLOW_SHIP
+#undef FILL_WITH_SHIP
+#undef GET_FILL_POLICY
