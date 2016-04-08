@@ -114,6 +114,14 @@ refreshRank(0) {
         {
                 refreshCountdown.push_back((int) ((REFRESH_PERIOD / tCK) / NUM_RANKS)*(i + 1));
         }
+        
+        for (size_t s = 0; s <= TST; s++)
+        {
+          totalReadsPerBankPerStream.push_back(new vector <uint64_t>(NUM_RANKS * NUM_BANKS, 0));
+          totalWritesPerBankPerStream.push_back(new vector <uint64_t>(NUM_RANKS * NUM_BANKS, 0));
+          totalRowHitsPerBankPerStream.push_back(new vector <uint64_t>(NUM_RANKS * NUM_BANKS, 0));
+          totalReadRowHitsPerBankPerStream.push_back(new vector <uint64_t>(NUM_RANKS * NUM_BANKS, 0));
+        }
 }
 
 //get a bus packet from either data or cmd bus
@@ -524,6 +532,10 @@ void MemoryController::update() {
                 outgoingCmdPacket = poppedBusPacket;
                 cmdCyclesLeft = tCMD;
 
+                if (schedulingPolicy == RankThenBankSMS || schedulingPolicy == BankThenRankSMS)
+                {
+                    commandQueue.remove_request_sms(poppedBusPacket);
+                }
         }
         
         vector <Transaction *> *transactionQueue;
@@ -563,6 +575,12 @@ void MemoryController::update() {
           }
         }
 #endif
+        /* TODO: If there is policy specific stage, make a call to it */
+        if (schedulingPolicy == BankThenRankSMS || schedulingPolicy == RankThenBankSMS)
+        {
+          commandQueue.execute_batching_sms();
+        }
+
         for (size_t i = 0; i < transactionQueue->size(); i++)
         {
                 //pop off top transaction from queue
@@ -579,7 +597,7 @@ void MemoryController::update() {
 
                 //if we have room, break up the transaction into the appropriate commands
                 //and add them to the command queue
-                if (commandQueue.hasRoomFor(2, newTransactionRank, newTransactionBank, transaction->stream_type == speedup_stream_x))
+                if (commandQueue.hasRoomFor(2, newTransactionRank, newTransactionBank, transaction->stream_type == speedup_stream_x, transaction->stream))
                 {
                         if (DEBUG_ADDR_MAP)
                         {
@@ -620,6 +638,7 @@ void MemoryController::update() {
                         commandQueue.enqueue(command);
 
                         /* For per stream statistics create a new statistics vector */
+#if 0
                         char stream = transaction->stream;
                           
                         if (totalReadsPerBankPerStream.size() <= (unsigned char)stream)
@@ -639,6 +658,7 @@ void MemoryController::update() {
                         /* Ensure all streams has statistics allocated */
                         assert((totalReadsPerBankPerStream.size() == totalWritesPerBankPerStream.size())
                                && (totalWritesPerBankPerStream.size() == totalRowHitsPerBankPerStream.size()));
+#endif
 
                         // If we have a read, save the transaction so when the data comes back
                         // in a bus packet, we can staple it back into a transaction and return it

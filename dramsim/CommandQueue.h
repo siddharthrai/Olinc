@@ -41,6 +41,8 @@
 //Header
 //
 
+#define EXTERN_C extern "C"
+
 #include "BusPacket.h"
 #include "BankState.h"
 #include "Transaction.h"
@@ -50,14 +52,14 @@
 
 using namespace std;
 
+#define SMS_STREAM(s) (GFX_STREAM(s) ? IS : GPGPU_STREAM(s) ? GP : (s))
+
 namespace DRAMSim
 {
+         typedef vector<BusPacket *> BusPacket1D;
+         typedef vector<BusPacket1D> BusPacket2D;
+         typedef vector<BusPacket2D> BusPacket3D;
 
-
-        typedef vector<BusPacket *> BusPacket1D;
-        typedef vector<BusPacket1D> BusPacket2D;
-        typedef vector<BusPacket2D> BusPacket3D;
-        
         /* 
          * Staged memory scheduler
          *
@@ -69,8 +71,8 @@ namespace DRAMSim
         typedef enum sms_batching_mode
         {
           batching_mode_invalid = 0,
-          batching_mode_pick    = 0,
-          batching_mode_drain   = 0
+          batching_mode_pick,
+          batching_mode_drain   
         }sms_mode;
         
 #define SMS_SRC_Q(s)   ((s)->queue)
@@ -118,12 +120,10 @@ namespace DRAMSim
           sms_bqueue  batch_queue;            /* Batch queue */
         }sms;
         
-        void init_sms(sms *sched, size_t bank_queue, size_t queue_size);
-        bool has_room_for_sms(sms *sched, int stream);
-        void enqueue_sms(sms *sched, int stream, BusPacket *newBusPacket);
-        void execute_batching_sms(sms *sched, unsigned rank, unsigned bank);
-        vector<BusPacket *> get_command_queue_sms(sms *sched, unsigned rank, unsigned bank); 
-        void remove_request_sms(sms *sched, BusPacket *newBusPacket);
+
+        typedef vector<BusPacket *> BusPacket1D;
+        typedef vector<BusPacket1D> BusPacket2D;
+        typedef vector<BusPacket2D> BusPacket3D;
 
         class CommandQueue : public SimulatorObject
         {
@@ -141,7 +141,7 @@ namespace DRAMSim
 
                 void enqueue(BusPacket *newBusPacket);
                 bool pop(BusPacket **busPacket);
-                bool hasRoomFor(unsigned numberToEnqueue, unsigned rank, unsigned bank, bool speedup);
+                bool hasRoomFor(unsigned numberToEnqueue, unsigned rank, unsigned bank, bool speedup, unsigned stream);
                 bool isIssuable(BusPacket *busPacket);
                 bool isEmpty(unsigned rank);
                 void needRefresh(unsigned rank);
@@ -180,8 +180,21 @@ namespace DRAMSim
                 bool sendAct;
 
                 int  scheduling_policy;
+                
+                sms scheduler_sms;
+
+        public:
+
+        void init_sms(size_t bank_queue, size_t queue_size);
+        void remove_request_sms(BusPacket *poppedBusPacket);
+        bool has_room_for_sms(sms *sched, int stream, unsigned hasRoomFor);
+        void enqueue_sms(int stream, BusPacket *newBusPacket);
+        void execute_batching_sms();
+        vector<BusPacket *> &get_command_queue_sms(sms *sched, unsigned rank, unsigned bank); 
+
         };
 }
 
 #endif
 
+#undef EXTERN_C

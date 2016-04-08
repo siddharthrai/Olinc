@@ -188,9 +188,13 @@ int dramsim_init(const char *deviceIniFilename, unsigned int megsOfMemory, unsig
         /* ADDRESS_MAPPING_SCHEME : valid schemes 1-8; For multiple independent 
          * channels, use scheme7 since it has the most parallelism  */
         //(kv_map)[string("ADDRESS_MAPPING_SCHEME")] = string("scheme8");
+        /* SCHEDULING_POLICY : bank_then_rank_round_robin or rank_then_bank_round_robin */
+#if 0
+        (kv_map)[string("SCHEDULING_POLICY")] = string("bank_then_rank_round_robin");
+#endif
 
         /* SCHEDULING_POLICY : bank_then_rank_round_robin or rank_then_bank_round_robin */
-        (kv_map)[string("SCHEDULING_POLICY")] = string("bank_then_rank_round_robin");
+        (kv_map)[string("SCHEDULING_POLICY")] = string("bank_then_rank_sms");
 
         /* QUEUING_STRUCTURE : per_rank or per_rank_per_bank */
         (kv_map)[string("QUEUING_STRUCTURE")] = string("per_rank_per_bank");
@@ -286,7 +290,7 @@ int dramsim_init(const char *deviceIniFilename, unsigned int megsOfMemory, unsig
 
         /* Set the llcTagLowBitWith for scheme 8 address mapping */
         llcTagLowBitWidth = _llcTagLowBitWidth;
-
+        
         /* Return tick : tick is cycle time in picoseconds. tCK represents the
          * cycle time in nano seconds, thus tick for DRAM is (tCK * 1000) */
         return (int) (tCK * 1000);

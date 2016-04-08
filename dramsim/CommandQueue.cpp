@@ -154,6 +154,8 @@ sendAct(true) {
                 //init the empty vectors here so we don't seg fault later
                 tFAWCountdown.push_back(vector<unsigned>());
         }
+        
+        init_sms(16, 16);
 }
 
 
@@ -195,61 +197,68 @@ CommandQueue::~CommandQueue() {
 void CommandQueue::enqueue(BusPacket *newBusPacket) {
   unsigned rank = newBusPacket->rank;
   unsigned bank = newBusPacket->bank;
-
-  if (newBusPacket->stream_type == speedup_stream_x)
+  
+  if (schedulingPolicy == RankThenBankSMS || schedulingPolicy == BankThenRankSMS)
   {
-    if (queuingStructure == PerRank)
-    {
-      speedup_queues[rank][0].push_back(newBusPacket);
-      if (speedup_queues[rank][0].size() > CMD_QUEUE_DEPTH)
-      {
-        ERROR("== Error - Enqueued more than allowed in command queue");
-        ERROR("						Need to call .hasRoomFor(int numberToEnqueue, unsigned rank, unsigned bank) first");
-        exit(0);
-      }
-    }
-    else if (queuingStructure == PerRankPerBank)
-    {
-      speedup_queues[rank][bank].push_back(newBusPacket);
-      if (speedup_queues[rank][bank].size() > CMD_QUEUE_DEPTH)
-      {
-        ERROR("== Error - Enqueued more than allowed in command queue");
-        ERROR("						Need to call .hasRoomFor(int numberToEnqueue, unsigned rank, unsigned bank) first");
-        exit(0);
-      }
-    }
-    else
-    {
-      ERROR("== Error - Unknown queuing structure");
-      exit(0);
-    }
+    enqueue_sms(newBusPacket->stream, newBusPacket);
   }
   else
   {
-    if (queuingStructure == PerRank)
+    if (newBusPacket->stream_type == speedup_stream_x)
     {
-      queues[rank][0].push_back(newBusPacket);
-      if (queues[rank][0].size() > CMD_QUEUE_DEPTH)
+      if (queuingStructure == PerRank)
       {
-        ERROR("== Error - Enqueued more than allowed in command queue");
-        ERROR("						Need to call .hasRoomFor(int numberToEnqueue, unsigned rank, unsigned bank) first");
-        exit(0);
+        speedup_queues[rank][0].push_back(newBusPacket);
+        if (speedup_queues[rank][0].size() > CMD_QUEUE_DEPTH)
+        {
+          ERROR("== Error - Enqueued more than allowed in command queue");
+          ERROR("						Need to call .hasRoomFor(int numberToEnqueue, unsigned rank, unsigned bank) first");
+          exit(0);
+        }
       }
-    }
-    else if (queuingStructure == PerRankPerBank)
-    {
-      queues[rank][bank].push_back(newBusPacket);
-      if (queues[rank][bank].size() > CMD_QUEUE_DEPTH)
+      else if (queuingStructure == PerRankPerBank)
       {
-        ERROR("== Error - Enqueued more than allowed in command queue");
-        ERROR("						Need to call .hasRoomFor(int numberToEnqueue, unsigned rank, unsigned bank) first");
+        speedup_queues[rank][bank].push_back(newBusPacket);
+        if (speedup_queues[rank][bank].size() > CMD_QUEUE_DEPTH)
+        {
+          ERROR("== Error - Enqueued more than allowed in command queue");
+          ERROR("						Need to call .hasRoomFor(int numberToEnqueue, unsigned rank, unsigned bank) first");
+          exit(0);
+        }
+      }
+      else
+      {
+        ERROR("== Error - Unknown queuing structure");
         exit(0);
       }
     }
     else
     {
-      ERROR("== Error - Unknown queuing structure");
-      exit(0);
+      if (queuingStructure == PerRank)
+      {
+        queues[rank][0].push_back(newBusPacket);
+        if (queues[rank][0].size() > CMD_QUEUE_DEPTH)
+        {
+          ERROR("== Error - Enqueued more than allowed in command queue");
+          ERROR("						Need to call .hasRoomFor(int numberToEnqueue, unsigned rank, unsigned bank) first");
+          exit(0);
+        }
+      }
+      else if (queuingStructure == PerRankPerBank)
+      {
+        queues[rank][bank].push_back(newBusPacket);
+        if (queues[rank][bank].size() > CMD_QUEUE_DEPTH)
+        {
+          ERROR("== Error - Enqueued more than allowed in command queue");
+          ERROR("						Need to call .hasRoomFor(int numberToEnqueue, unsigned rank, unsigned bank) first");
+          exit(0);
+        }
+      }
+      else
+      {
+        ERROR("== Error - Unknown queuing structure");
+        exit(0);
+      }
     }
   }
 }
@@ -836,16 +845,23 @@ bool CommandQueue::pop(BusPacket **busPacket) {
 //check if a rank/bank queue has room for a certain number of bus packets
 
 
-bool CommandQueue::hasRoomFor(unsigned numberToEnqueue, unsigned rank, unsigned bank, bool speedup) {
-  if (speedup)
+bool CommandQueue::hasRoomFor(unsigned numberToEnqueue, unsigned rank, unsigned bank, bool speedup, unsigned stream) {
+  if (schedulingPolicy == RankThenBankSMS || schedulingPolicy == BankThenRankSMS)
   {
-        vector<BusPacket *> &queue = getCommandQueue(rank, bank, TRUE);
-        return (CMD_QUEUE_DEPTH - queue.size() >= numberToEnqueue);
+        return has_room_for_sms(&scheduler_sms, stream, numberToEnqueue);
   }
   else
   {
-        vector<BusPacket *> &queue = getCommandQueue(rank, bank, FALSE);
-        return (CMD_QUEUE_DEPTH - queue.size() >= numberToEnqueue);
+        if (speedup)
+        {
+              vector<BusPacket *> &queue = getCommandQueue(rank, bank, TRUE);
+              return (CMD_QUEUE_DEPTH - queue.size() >= numberToEnqueue);
+        }
+        else
+        {
+              vector<BusPacket *> &queue = getCommandQueue(rank, bank, FALSE);
+              return (CMD_QUEUE_DEPTH - queue.size() >= numberToEnqueue);
+        }
   }
 }
 
@@ -894,15 +910,18 @@ void CommandQueue::print() {
  * argument is ignored (and the 0th index is returned 
  */
 vector<BusPacket *> &CommandQueue::getCommandQueue(unsigned rank, unsigned bank, bool speedup) {
-  if (speedup)
+
+  if ((schedulingPolicy == RankThenBankSMS || schedulingPolicy == BankThenRankSMS) && !speedup)
   {
+    sms *sched = &scheduler_sms;
+
     if (queuingStructure == PerRankPerBank)
     {
-      return speedup_queues[rank][bank];
+      return sched->batch_queue.queue[rank][bank];
     }
     else if (queuingStructure == PerRank)
     {
-      return speedup_queues[rank][0];
+      return sched->batch_queue.queue[rank][0];
     }
     else
     {
@@ -912,18 +931,37 @@ vector<BusPacket *> &CommandQueue::getCommandQueue(unsigned rank, unsigned bank,
   }
   else
   {
-    if (queuingStructure == PerRankPerBank)
+    if (speedup)
     {
-      return queues[rank][bank];
-    }
-    else if (queuingStructure == PerRank)
-    {
-      return queues[rank][0];
+      if (queuingStructure == PerRankPerBank)
+      {
+        return speedup_queues[rank][bank];
+      }
+      else if (queuingStructure == PerRank)
+      {
+        return speedup_queues[rank][0];
+      }
+      else
+      {
+        ERROR("Unknown queue structure");
+        abort();
+      }
     }
     else
     {
-      ERROR("Unknown queue structure");
-      abort();
+      if (queuingStructure == PerRankPerBank)
+      {
+        return queues[rank][bank];
+      }
+      else if (queuingStructure == PerRank)
+      {
+        return queues[rank][0];
+      }
+      else
+      {
+        ERROR("Unknown queue structure");
+        abort();
+      }
     }
   }
 }
@@ -1028,7 +1066,7 @@ void CommandQueue::needRefresh(unsigned rank) {
 
 
 void CommandQueue::nextRankAndBank(unsigned &rank, unsigned &bank) {
-        if (schedulingPolicy == RankThenBankRoundRobin)
+        if (schedulingPolicy == RankThenBankRoundRobin || schedulingPolicy == RankThenBankSMS)
         {
                 rank++;
                 if (rank == NUM_RANKS)
@@ -1041,7 +1079,7 @@ void CommandQueue::nextRankAndBank(unsigned &rank, unsigned &bank) {
                         }
                 }
         }//bank-then-rank round robin
-        else if (schedulingPolicy == BankThenRankRoundRobin)
+        else if (schedulingPolicy == BankThenRankRoundRobin || schedulingPolicy == BankThenRankSMS)
         {
                 bank++;
                 if (bank == NUM_BANKS)
@@ -1070,14 +1108,17 @@ void CommandQueue::update() {
 }
 
 /* Allocate and initialize per-bank queues */
-void init_sms(sms *sched, size_t bank_queue, size_t queue_size)
+void CommandQueue::init_sms(size_t bank_queue, size_t queue_size)
 {
+  sms *sched;
   BusPacket1D actualQueue;
   BusPacket2D perBankQueue;
+  
+  sched = &scheduler_sms;
 
 #define INVALID_ROW (-1)    
 
-  for (int u = NN + 1; u <= TST; u++)
+  for (int u = NN; u <= TST; u++)
   {
     sched->source_queue[u].queue          = BusPacket1D();
     sched->source_queue[u].queue_size     = queue_size;
@@ -1092,11 +1133,11 @@ void init_sms(sms *sched, size_t bank_queue, size_t queue_size)
   sched->batch_queue.psjf       = .9;
   sched->batch_queue.rr_next    = NN;
 
-  for (int u = NN + 1; u <= TST; u++)
+  for (int u = NN; u <= TST; u++)
   {
     sched->batch_queue.src_req[u] = 0;
   }
-  
+
   /* Allocate common batch queue for all sources */
   sched->batch_queue.queue = BusPacket3D();
 
@@ -1115,11 +1156,16 @@ void init_sms(sms *sched, size_t bank_queue, size_t queue_size)
   }
 }
 
-bool has_room_for_sms(sms *sched, int stream)
+bool CommandQueue::has_room_for_sms(sms *sched, int stream_in, unsigned numberToEnqueue)
 {
+  int stream;
+
   assert(sched);
-  assert(stream > NN && stream <= TST);
   assert(sched->source_queue);
+  
+  stream = SMS_STREAM(stream_in);
+
+  assert(stream > NN && stream <= TST);
 
   if (sched->source_queue[stream].queue_entries < sched->source_queue[stream].queue_size)
   {
@@ -1130,13 +1176,24 @@ bool has_room_for_sms(sms *sched, int stream)
 }
 
 /* First stage of SMS */
-void enqueue_sms(sms *sched, int stream, BusPacket *newBusPacket)
+void CommandQueue::enqueue_sms(int stream_in, BusPacket *newBusPacket)
 {
-  assert(sched);
+  int stream;
+  sms *sched;
+
+  unsigned rank = newBusPacket->rank;
+  unsigned bank = newBusPacket->bank;
+
   assert(newBusPacket);
-  assert(stream > NN && stream <= TST);
+  assert(stream_in > NN && stream_in <= TST);
+  
+  sched   = &scheduler_sms;
+  stream  = SMS_STREAM(stream_in);
+
   assert(sched->source_queue[stream].queue_entries < sched->source_queue[stream].queue_size);
   
+  newBusPacket->age = sched->cycle;
+
   /* Enqueue new request into the source queue */
   sched->source_queue[stream].queue.push_back(newBusPacket);
   sched->source_queue[stream].queue_entries += 1;
@@ -1180,47 +1237,73 @@ void enqueue_sms(sms *sched, int stream, BusPacket *newBusPacket)
     ERROR("						Need to call .hasRoomFor(int numberToEnqueue, unsigned rank, unsigned bank) first");
     exit(0);
   }
+
+#if 0
+  sched->batch_queue.queue[rank][bank].push_back(newBusPacket);
+#endif
 }
 
-void execute_batching_sms(sms *sched, unsigned rank, unsigned bank)
+void CommandQueue::execute_batching_sms()
 {
   /* Find out sources with ready batches 
    * Select one batch based on the policy and enqueue request to batch queue 
    * */ 
+  sms       *sched;
   int        min_batch_size;
   long int   min_age;
   int        tgt_queue;
   int        qcount;
   BusPacket *newBusPacket;  
-
-  min_batch_size  = CMD_QUEUE_DEPTH * 4;
+  int        rank;
+  int        bank;
+ 
+  sched           = &scheduler_sms; 
+  min_batch_size  = 0xffffff;
   min_age         = 0xffffffffffff;
   tgt_queue       = NN;
-  
+
   /* Increment scheduler cycle */
   sched->cycle += 1;
 
 #define BATCH_READY(s, st)  ((s)->source_queue[st].ready == TRUE)
+#define SOURCE_HEAD(s, st)  ((s)->source_queue[st].queue[0])
+#define SOURCE_PNDNG(s, st) ((s)->source_queue[st].queue_entries)
 #define SOURCE_SIZE(s, st)  ((s)->source_queue[st].queue_entries + (s)->batch_queue.src_req[st])
 #define BATCH_AGE(s, st)    ((s)->source_queue[st].age)
 
   if (sched->batch_queue.mode == batching_mode_pick)
   {
+    for (int stream = NN; stream <= TST; stream++)
+    {
+      if (SOURCE_PNDNG(sched, stream))
+      {
+        newBusPacket = SOURCE_HEAD(sched, stream);
+
+        if (sched->cycle - newBusPacket->age > 200)
+        {
+          sched->source_queue[stream].ready = TRUE;    
+        }
+      }
+    }
+
     /* Chooses between SJF and Round Robin */
     if (get_prob_in_range(0.0, 0.9))
     {
-      for (int stream = NN + 1; stream <= TST; stream++)
+      for (int stream = NN; stream <= TST; stream++)
       {
         if (BATCH_READY(sched, stream)) 
         {
 #define CHK_TIE(sc, st, m, ma) (SOURCE_SIZE(sc, st) == m && BATCH_AGE(sc, st) < ma)
 
           /* Choose next ready batch */
-          if (SOURCE_SIZE(sched, stream) <= min_batch_size || CHK_TIE(sched, stream, min_batch_size, min_age))
+          if (SOURCE_PNDNG(sched, stream))
           {
-            tgt_queue       = stream;
-            min_age         = BATCH_AGE(sched, stream); 
-            min_batch_size  = SOURCE_SIZE(sched, stream);
+            if (SOURCE_SIZE(sched, stream) <= min_batch_size || CHK_TIE(sched, stream, min_batch_size, min_age))
+            {
+              tgt_queue       = stream;
+              min_age         = BATCH_AGE(sched, stream); 
+              min_batch_size  = SOURCE_SIZE(sched, stream);
+            }
           }
 
 #undef CHK_TIE
@@ -1236,6 +1319,11 @@ void execute_batching_sms(sms *sched, unsigned rank, unsigned bank)
       while (!BATCH_READY(sched, tgt_queue) && qcount++ <= TST)
       {
         tgt_queue = (sched->batch_queue.rr_next + 1) % (TST + 1);
+      }
+
+      if (!BATCH_READY(sched, tgt_queue))
+      {
+        tgt_queue = NN;
       }
     }
 
@@ -1260,18 +1348,45 @@ void execute_batching_sms(sms *sched, unsigned rank, unsigned bank)
     assert(newBusPacket);
     assert(newBusPacket->row == sched->source_queue[sched->batch_queue.src].current_row_id);
 
+    rank = newBusPacket->rank;
+    bank = newBusPacket->bank;
+
     /* Move request from source queue to per-bank batch queue */
     sched->source_queue[sched->batch_queue.src].queue.erase(sched->source_queue[sched->batch_queue.src].queue.begin());
+    assert(sched->source_queue[sched->batch_queue.src].queue_entries > 0);
+
     sched->source_queue[sched->batch_queue.src].queue_entries -= 1;
 
     sched->batch_queue.queue[rank][bank].push_back(newBusPacket);
     sched->batch_queue.src_req[sched->batch_queue.src] += 1;
+
+    if (newBusPacket->busPacketType == ACTIVATE &&
+      sched->source_queue[sched->batch_queue.src].queue[0]->physicalAddress == newBusPacket->physicalAddress)
+    {
+      newBusPacket = sched->source_queue[sched->batch_queue.src].queue[0];
+
+      assert(newBusPacket);
+      assert(newBusPacket->row == sched->source_queue[sched->batch_queue.src].current_row_id);
+
+      rank = newBusPacket->rank;
+      bank = newBusPacket->bank;
+
+      /* Move request from source queue to per-bank batch queue */
+      sched->source_queue[sched->batch_queue.src].queue.erase(sched->source_queue[sched->batch_queue.src].queue.begin());
+      assert(sched->source_queue[sched->batch_queue.src].queue_entries > 0);
+
+      sched->source_queue[sched->batch_queue.src].queue_entries -= 1;
+
+      sched->batch_queue.queue[rank][bank].push_back(newBusPacket);
+    }
 
     if (sched->source_queue[sched->batch_queue.src].queue_entries == 0)
     {
       sched->source_queue[sched->batch_queue.src].ready           = FALSE;
       sched->source_queue[sched->batch_queue.src].current_row_id  = INVALID_ROW;
       sched->source_queue[sched->batch_queue.src].age             = 0;
+      sched->batch_queue.src                                      = NN;
+      sched->batch_queue.mode                                     = batching_mode_pick;
     }
     else
     {
@@ -1300,10 +1415,12 @@ void execute_batching_sms(sms *sched, unsigned rank, unsigned bank)
   }
 
 #undef BATCH_READY
+#undef SOURCE_PNDNG
+#undef SOURCE_SIZE
 #undef BATCH_AGE
 }
 
-vector<BusPacket *> get_command_queue_sms(sms *sched, unsigned rank, unsigned bank) 
+vector<BusPacket *> &CommandQueue::get_command_queue_sms(sms *sched, unsigned rank, unsigned bank) 
 {
   if (queuingStructure == PerRankPerBank)
   {
@@ -1320,12 +1437,26 @@ vector<BusPacket *> get_command_queue_sms(sms *sched, unsigned rank, unsigned ba
   }
 }
 
-void remove_request_sms(sms *sched, BusPacket *newBusPacket)
+/* This function is used to update total number of requests from a source once a request is 
+ * dequeued from the command queue */
+void CommandQueue::remove_request_sms(BusPacket *newBusPacket)
 {
-  assert(newBusPacket->stream != NN);    
-  assert(sched->batch_queue.src_req[newBusPacket->stream]);
+  sms *sched;
+  int  stream;
 
-  sched->batch_queue.src_req[newBusPacket->stream] -= 1;
+  sched = &scheduler_sms;
+  stream = SMS_STREAM(newBusPacket->stream);
+
+#if 0
+  assert(newBusPacket->stream != NN);    
+
+  assert(sched->batch_queue.src_req[newBusPacket->stream]);
+#endif
+  
+  if (sched->batch_queue.src_req[stream])
+  {
+    sched->batch_queue.src_req[stream] -= 1;
+  }
 }
 
 #undef INVALID_ROW

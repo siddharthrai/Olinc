@@ -194,7 +194,9 @@ enum QueuingStructure
 enum SchedulingPolicy
 {
         RankThenBankRoundRobin,
-        BankThenRankRoundRobin
+        BankThenRankRoundRobin,
+        RankThenBankSMS,
+        BankThenRankSMS
 };
 
 

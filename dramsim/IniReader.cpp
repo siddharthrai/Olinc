@@ -667,8 +667,30 @@ namespace DRAMSim
                 }
                 else
                 {
-                        cout << "WARNING: Unknown scheduling policy '" << SCHEDULING_POLICY << "'; valid options are 'rank_then_bank_round_robin' or 'bank_then_rank_round_robin'; defaulting to Bank Then Rank Round Robin" << endl;
-                        schedulingPolicy = BankThenRankRoundRobin;
+                        if (SCHEDULING_POLICY == "rank_then_bank_sms") 
+                        {
+                                schedulingPolicy = RankThenBankSMS;
+                                if (DEBUG_INI_READER)
+                                {
+                                        DEBUG("SCHEDULING: Rank Then Bank SMS");
+                                }
+                        }
+                        else
+                        {
+                                if (SCHEDULING_POLICY == "bank_then_rank_sms")
+                                {
+                                        schedulingPolicy = BankThenRankSMS;
+                                        if (DEBUG_INI_READER)
+                                        {
+                                                DEBUG("SCHEDULING: Bank Then Rank SMS");
+                                        }
+                                }
+                                else
+                                {
+                                        cout << "WARNING: Unknown scheduling policy '" << SCHEDULING_POLICY << "'; valid options are 'rank_then_bank_round_robin' or 'bank_then_rank_round_robin'; defaulting to Bank Then Rank Round Robin" << endl;
+                                        schedulingPolicy = BankThenRankRoundRobin;
+                                }
+                        }
                 }
 
         }

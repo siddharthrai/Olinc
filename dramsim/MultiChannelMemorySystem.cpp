@@ -250,7 +250,7 @@ void MultiChannelMemorySystem::InitOutputFiles(string traceFilename) {
                         // finally, figure out the filename
                         string sched = "BtR";
                         string queue = "pRank";
-                        if (schedulingPolicy == RankThenBankRoundRobin)
+                        if (schedulingPolicy == RankThenBankRoundRobin || schedulingPolicy == RankThenBankSMS)
                         {
                                 sched = "RtB";
                         }

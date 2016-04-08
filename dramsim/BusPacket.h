@@ -69,6 +69,7 @@ namespace DRAMSim
                 unsigned rank;
                 uint64_t physicalAddress;
                 char     stream; // Access stream
+                unsigned age;
                 speedup_stream_type stream_type; // Access stream
 
                 void *data;
