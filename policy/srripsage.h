@@ -129,31 +129,40 @@ typedef struct cache_policy_srripsage_gdata_t
   ub8 valid_demotion[TST + 1];                /* Expected demotions */
 
   /* Eight counter to be used for SRRIPDBP reuse probability learning */
-  struct saturating_counter_t tex_e0_fill_ctr;    /* Texture epoch 0 fill */
-  struct saturating_counter_t tex_e0_hit_ctr;     /* Texture epoch 0 hits */
-  struct saturating_counter_t tex_e1_fill_ctr;    /* Texture epoch 1 fill */
-  struct saturating_counter_t tex_e1_hit_ctr;     /* Texture epoch 1 hits */
-  struct saturating_counter_t acc_all_ctr;        /* Total accesses */
 
-  struct saturating_counter_t fath_ctr[TST + 1];  /* Per-stream dueling Counter for fills */
-  struct saturating_counter_t fathm_ctr[TST + 1]; /* Per-stream dueling Counter for fills */
-  struct saturating_counter_t dem_ctr[TST + 1];   /* Per-stream dueling Counter for demotions */
-  struct saturating_counter_t demm_ctr[TST + 1];  /* Per-stream dueling Counter for demotions */
-  struct saturating_counter_t cb_ctr;             /* CB reuse counter */
-  struct saturating_counter_t bc_ctr;             /* CB reuse counter */
-  struct saturating_counter_t ct_ctr;             /* CT reuse counter */
-  struct saturating_counter_t bt_ctr;             /* BT reuse counter */
-  struct saturating_counter_t tb_ctr;             /* TB reuse counter */
-  struct saturating_counter_t zt_ctr;             /* ZT reuse counter */
+  sctr tex_e0_fill_ctr;                       /* Texture epoch 0 fill */
+  sctr tex_e0_hit_ctr;                        /* Texture epoch 0 hits */
+  sctr tex_e1_fill_ctr;                       /* Texture epoch 1 fill */
+  sctr tex_e1_hit_ctr;                        /* Texture epoch 1 hits */
+  sctr acc_all_ctr;                           /* Total accesses */
 
-  struct saturating_counter_t gfath_ctr;          /* Global dueling Counter for fills */
-  struct saturating_counter_t gfathm_ctr;         /* Global dueling Counter for misses */
-  struct saturating_counter_t gdem_ctr;           /* Global dueling Counter for demotions */
+  sctr fath_ctr[TST + 1];                     /* Per-stream dueling Counter for fills */
+  sctr fathm_ctr[TST + 1];                    /* Per-stream dueling Counter for fills */
+  sctr dem_ctr[TST + 1];                      /* Per-stream dueling Counter for demotions */
+  sctr demm_ctr[TST + 1];                     /* Per-stream dueling Counter for demotions */
+  sctr cb_ctr;                                /* CB reuse counter */
+  sctr bc_ctr;                                /* CB reuse counter */
+  sctr ct_ctr;                                /* CT reuse counter */
+  sctr bt_ctr;                                /* BT reuse counter */
+  sctr tb_ctr;                                /* TB reuse counter */
+  sctr zt_ctr;                                /* ZT reuse counter */
 
-  struct saturating_counter_t fill_list_fctr[TST + 1];  /* Fill-list fill counter */
-  struct saturating_counter_t fill_list_hctr[TST + 1];  /* Fill-list hit counter */
+  sctr gfath_ctr;                             /* Global dueling Counter for fills */
+  sctr gfathm_ctr;                            /* Global dueling Counter for misses */
+  sctr gdem_ctr;                              /* Global dueling Counter for demotions */
 
-  srrip_gdata srrip;                              /* SRRIP global data */
+  sctr fill_list_fctr[TST + 1];               /* Fill-list fill counter */
+  sctr fill_list_hctr[TST + 1];               /* Fill-list hit counter */
+
+  ub4  sign_size;                             /* # Ship signature size */
+  ub4  shct_size;                             /* # Counter table entries */
+  ub4  core_size;                             /* # Core count */
+  ub8  ship_access;                           /* # Access to ship sampler */
+  ub8  ship_inc;                              /* # Access to ship sampler */
+  ub8  ship_dec;                              /* # Access to ship sampler */
+  ub1 *ship_shct;                             /* SHiP signature counter table */
+
+  srrip_gdata srrip;                          /* SRRIP global data */
 }srripsage_gdata;
 
 #undef MAX_THR

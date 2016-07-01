@@ -33,6 +33,7 @@
 #include "MemorySystem.h"
 #include "IniReader.h"
 #include "CSVWriter.h"
+#include "../common/intermod-common.h"
 
 
 namespace DRAMSim
@@ -62,7 +63,7 @@ namespace DRAMSim
                 unsigned findChannelNumber(uint64_t addr, char stream);
                 ub8 getOpenRow(ub8 address);
 
-                bool isSpeedupHintEnable(bool is_gpu);
+                bool isSpeedupHintEnable(bool is_gpu, speedup_stream_type gpu_stream);
 
                 //output file
                 std::ofstream visDataOut;
@@ -80,7 +81,8 @@ namespace DRAMSim
                 static bool fileExists(string path);
                 CSVWriter *csvOut;
 
-                bool speedup_hint_enable;
+                bool gpu_x_speedup_hint_enable;
+                bool gpu_y_speedup_hint_enable;
                 bool cpu_speedup_hint_enable;
 
         };

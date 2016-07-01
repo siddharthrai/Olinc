@@ -25,6 +25,8 @@
 #include "srriphint.h"
 #include "sap.h"
 
+#define THROTTLE_ACTIVE           (FALSE)
+
 #define RPL_GPU_FIRST             (0)
 #define RPL_GPU_COND_FIRST        (1)
 #define FILL_TEST_SHIP            (2)
@@ -930,7 +932,7 @@ int cache_replace_block_srriphint(srriphint_data *policy_data, srriphint_gdata *
 #define CPU_FREUSE(g) (PU_STR(g, PS) + PU_STR(g, PS1) + PU_STR(g, PS2) + PU_STR(g, PS3))
 #define CPU_FCOUNT(g) (PU_STF(g, PS) + PU_STF(g, PS1) + PU_STF(g, PS2) + PU_STF(g, PS3))
 
-      if (GPU_STREAM(info->stream)) 
+      if (THROTTLE_ACTIVE && GPU_STREAM(info->stream)) 
       {
         assert(policy_data->set_type == SRRIPHINT_GPU_SET || 
             policy_data->set_type == SRRIPHINT_GPU_COND_SET || 
@@ -1196,14 +1198,16 @@ int cache_get_fill_rrpv_srriphint(srriphint_data *policy_data,
   int ret_rrpv;
   ub1 strm;
 
-  switch (SRRIPHINT_DATA_CFPOLICY(policy_data))
+  if (THROTTLE_ACTIVE)
   {
-    case cache_policy_srriphint:
-      if (GPU_STREAM(info->stream) && info->spill)
-      {
-        strm      = NEW_STREAM(info);
-        perfctr   = &((global_data->sampler)->perfctr);
-        ret_rrpv  = 2;
+    switch (SRRIPHINT_DATA_CFPOLICY(policy_data))
+    {
+      case cache_policy_srriphint:
+        if (GPU_STREAM(info->stream) && info->spill)
+        {
+          strm      = NEW_STREAM(info);
+          perfctr   = &((global_data->sampler)->perfctr);
+          ret_rrpv  = 2;
 
 #define SCOUNT(p, s)      (SMPLRPERF_SPILL(p, s))
 #define SRUSE(p, s)       (SMPLRPERF_SREUSE(p, s))
@@ -1217,21 +1221,21 @@ int cache_get_fill_rrpv_srriphint(srriphint_data *policy_data,
 #define SRD_LOW(p, s)     (SDLOW(p, s) < SDHIGH(p, s))
 #define SREUSE_LOW(p, s)  (SREUSE(p, s) == 0 && SCOUNT(p, s) > BYPASS_ACCESS_TH)
 
-        ret_rrpv =  SRRIPHINT_DATA_MAX_RRPV(policy_data) - 1;
+          ret_rrpv =  SRRIPHINT_DATA_MAX_RRPV(policy_data) - 1;
 
-        if (RRPV1(perfctr, strm) || RRPV2(perfctr, strm))
-        {
-          ret_rrpv = 0;
-        }
-        else
-        {
-          if (SRD_LOW(perfctr, strm) || SREUSE_LOW(perfctr, strm))
+          if (RRPV1(perfctr, strm) || RRPV2(perfctr, strm))
           {
-            ret_rrpv = 3;
+            ret_rrpv = 0;
           }
-        }
+          else
+          {
+            if (SRD_LOW(perfctr, strm) || SREUSE_LOW(perfctr, strm))
+            {
+              ret_rrpv = 3;
+            }
+          }
 
-        return ret_rrpv;
+          return ret_rrpv;
 
 #undef SCOUNT
 #undef SRUSE
@@ -1243,11 +1247,11 @@ int cache_get_fill_rrpv_srriphint(srriphint_data *policy_data,
 #undef RRPV2
 #undef SRD_LOW
 #undef SREUSE_LOW
-      }
-      else
-      {
-        strm      = NEW_STREAM(info);
-        perfctr   = &((global_data->sampler)->perfctr);
+        }
+        else
+        {
+          strm      = NEW_STREAM(info);
+          perfctr   = &((global_data->sampler)->perfctr);
 
 #define MAX_BMC           (32)
 #define FREUSE(p, s)      (SMPLRPERF_FREUSE(p, s))
@@ -1259,29 +1263,29 @@ int cache_get_fill_rrpv_srriphint(srriphint_data *policy_data,
 #define RRPV2(p, s)       ((SREUSE(p, s) > MRUSE(p) / 3))
 #define SMLPR_EFCTV(g, i) ((g)->ship_shct[SHIPSIGN(g, i)])
 
-        if (info->fill)
-        {
-          switch (GET_FILL_POLICY(policy_data, global_data))
+          if (info->fill)
           {
-            /* Ship sample set fills with ship */
-            case FILL_TEST_SHIP:
-              if (CPU_STREAM(info->stream))
-              {
-                if (!(global_data->ship_shct[SHIPSIGN(global_data, info)]))
+            switch (GET_FILL_POLICY(policy_data, global_data))
+            {
+              /* Ship sample set fills with ship */
+              case FILL_TEST_SHIP:
+                if (CPU_STREAM(info->stream))
                 {
-                  return SRRIPHINT_DATA_MAX_RRPV(policy_data);
+                  if (!(global_data->ship_shct[SHIPSIGN(global_data, info)]))
+                  {
+                    return SRRIPHINT_DATA_MAX_RRPV(policy_data);
+                  }
                 }
-              }
-              break;
+                break;
 
-              /* Non ship sample set fills with srrip */
-            case FILL_TEST_SRRIP:
-              break;
+                /* Non ship sample set fills with srrip */
+              case FILL_TEST_SRRIP:
+                break;
 
-            default:
-              panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
+              default:
+                panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
+            }
           }
-        }
 
 #undef MAX_BMC
 #undef FREUSE
@@ -1292,18 +1296,23 @@ int cache_get_fill_rrpv_srriphint(srriphint_data *policy_data,
 #undef RRPV1
 #undef RRPV2
 #undef SMLPR_EFCTV
-      }
+        }
 
-      return SRRIPHINT_DATA_MAX_RRPV(policy_data) - 1;
+        return SRRIPHINT_DATA_MAX_RRPV(policy_data) - 1;
 
-      break;
+        break;
 
-    case cache_policy_srrip:
-      return SRRIPHINT_DATA_MAX_RRPV(policy_data) - 1;
+      case cache_policy_srrip:
+        return SRRIPHINT_DATA_MAX_RRPV(policy_data) - 1;
 
-    default:
-      panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
-      return 0;
+      default:
+        panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
+        return 0;
+    }
+  }
+  else
+  {
+    return SRRIPHINT_DATA_MAX_RRPV(policy_data) - 1;
   }
 }
 
@@ -1354,51 +1363,54 @@ int cache_get_new_rrpv_srriphint(srriphint_data *policy_data, srriphint_gdata *g
   strm    = NEW_STREAM(info);
   
   ret_rrpv = 0;
-
-  if (GPU_STREAM(info->stream))
+  
+  if (THROTTLE_ACTIVE)
   {
-    if (info->spill)
+    if (GPU_STREAM(info->stream))
     {
-      if (RRPV1(perfctr, strm) && old_rrpv >= 3)
+      if (info->spill)
       {
-        ret_rrpv = 0;
-      }
-      else
-      {
-        ret_rrpv = old_rrpv;
-      }
-    }
-    else
-    {
-      assert(info->fill == TRUE);
-
-      if (block->is_ct_block)
-      {
-        if (FRUSE(perfctr, DCS, epoch) * CT_TH1 <= FCOUNT(perfctr, DCS, epoch))
+        if (RRPV1(perfctr, strm) && old_rrpv >= 3)
         {
-          ret_rrpv = 3;
+          ret_rrpv = 0;
         }
         else
         {
-          if (FRUSE(perfctr, DCS, epoch) * TH2 <= FCOUNT(perfctr, DCS, epoch))
-          {
-            ret_rrpv = 2;
-          }
+          ret_rrpv = old_rrpv;
         }
       }
       else
       {
-        if (block->is_bt_block)
+        assert(info->fill == TRUE);
+
+        if (block->is_ct_block)
         {
-          if (FRUSE(perfctr, DBS, epoch) * CT_TH1 <= FCOUNT(perfctr, DBS, epoch))
+          if (FRUSE(perfctr, DCS, epoch) * CT_TH1 <= FCOUNT(perfctr, DCS, epoch))
           {
             ret_rrpv = 3;
           }
           else
           {
-            if (FRUSE(perfctr, DBS, epoch) * TH2 <= FCOUNT(perfctr, DBS, epoch))
+            if (FRUSE(perfctr, DCS, epoch) * TH2 <= FCOUNT(perfctr, DCS, epoch))
             {
               ret_rrpv = 2;
+            }
+          }
+        }
+        else
+        {
+          if (block->is_bt_block)
+          {
+            if (FRUSE(perfctr, DBS, epoch) * CT_TH1 <= FCOUNT(perfctr, DBS, epoch))
+            {
+              ret_rrpv = 3;
+            }
+            else
+            {
+              if (FRUSE(perfctr, DBS, epoch) * TH2 <= FCOUNT(perfctr, DBS, epoch))
+              {
+                ret_rrpv = 2;
+              }
             }
           }
         }

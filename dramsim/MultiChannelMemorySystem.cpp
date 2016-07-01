@@ -39,7 +39,6 @@
 #include "IniReader.h"
 
 
-
 using namespace DRAMSim;
 
 
@@ -107,10 +106,12 @@ csvOut(new CSVWriter(visDataOut)) {
                 channels.push_back(channel);
         }
 
-        speedup_hint_enable     = SPEEDUP_HINT;
-        cpu_speedup_hint_enable = CPU_SPEEDUP_HINT;
+        gpu_x_speedup_hint_enable = GPU_X_SPEEDUP_HINT;
+        gpu_y_speedup_hint_enable = GPU_Y_SPEEDUP_HINT;
+        cpu_speedup_hint_enable   = CPU_SPEEDUP_HINT;
 
-        printf("Speedup enable GPU:%d CPU:%d\n", speedup_hint_enable, cpu_speedup_hint_enable);
+        printf("Speedup enable GPU-X:%d GPU_Y:%d CPU:%d\n", gpu_x_speedup_hint_enable, 
+            gpu_y_speedup_hint_enable, cpu_speedup_hint_enable);
 }
 
 
@@ -511,7 +512,21 @@ ub8 MultiChannelMemorySystem::getOpenRow(ub8 address)
         return channels[chan]->getOpenRow(rank, bank);
 }
 
-bool MultiChannelMemorySystem::isSpeedupHintEnable(bool is_gpu)
+bool MultiChannelMemorySystem::isSpeedupHintEnable(bool is_gpu, speedup_stream_type gpu_stream)
 {
-  return (is_gpu) ? speedup_hint_enable : cpu_speedup_hint_enable;
+  if (is_gpu)
+  {
+    if (gpu_stream == speedup_stream_x)
+    {
+      return gpu_x_speedup_hint_enable;
+    }
+    else
+    {
+      return gpu_y_speedup_hint_enable;
+    }
+  }
+  else
+  {
+    return cpu_speedup_hint_enable;
+  }
 }

@@ -67,13 +67,6 @@
 #define PSEL_MAX_VAL            (0x3ff)
 #define PSEL_MID_VAL            (512)
 
-#if 0
-#define PSEL_WIDTH              (6)
-#define PSEL_MIN_VAL            (0x00)
-#define PSEL_MAX_VAL            (0x3f)
-#define PSEL_MID_VAL            (32)
-#endif
-
 #define SET_BLCOKS(p)           ((p)->rrpv_blocks[0])
 
 #define PHASE_SIZE              (5000)
@@ -86,14 +79,52 @@
 #define OCC_FTHR(g, s)          ((g)->occ_thr[FOLLOWER_SET][(s)])
 #define OCC_THR(p, g, s)        (IS_SAMPLED_SET(p) ? OCC_STHR(g, s) : OCC_FTHR(g, s))
 
-#define CACHE_UPDATE_BLOCK_STATE(block, tag, va, state_in)              \
-do                                                                      \
-{                                                                       \
-  (block)->tag      = (tag);                                            \
-  (block)->vtl_addr = (va);                                             \
-  (block)->state    = (state_in);                                       \
+#define CACHE_UPDATE_BLOCK_STATE(block, tag, va, state_in)                    \
+do                                                                            \
+{                                                                             \
+  (block)->tag      = (tag);                                                  \
+  (block)->vtl_addr = (va);                                                   \
+  (block)->state    = (state_in);                                             \
 }while(0)
 
+
+/* Macros to obtain signature */
+#define SHIP_MAX                      (7)
+#define SIGNSIZE(g)                   ((g)->sign_size)
+#define SHCTSIZE(g)                   ((g)->shct_size)
+#define COREBTS(g)                    ((g)->core_size)
+#define SIGMAX_VAL(g)                 (((1 << SIGNSIZE(g)) - 1))
+#define SIGNMASK(g)                   (SIGMAX_VAL(g) << SHCTSIZE(g))
+#define SIGNP(g, i)                   (((i)->pc) & SIGMAX_VAL(g))
+#define SIGNM(g, i)                   ((((i)->address >> SHCTSIZE(g)) & SIGMAX_VAL(g)))
+#define SIGNCORE(g, i)                (((i)->core - 1) << (SHCTSIZE(g) - COREBTS(g)))
+#define GET_SSIGN(g, i)               ((i)->stream < PS ? SIGNM(g, i) : SIGNP(g, i) ^ SIGNCORE(g, i))
+#define SHIPSIGN(g, i)                (GET_SSIGN(g, i))
+
+#define CACHE_INC_SHCT(block, g)                                              \
+do                                                                            \
+{                                                                             \
+  assert(block->ship_sign <= SIGMAX_VAL(g));                                  \
+                                                                              \
+  if ((g)->ship_shct[block->ship_sign] < SHIP_MAX)                            \
+  {                                                                           \
+    (g)->ship_shct[block->ship_sign] += 1;                                    \
+  }                                                                           \
+}while(0)
+
+#define CACHE_DEC_SHCT(block, g)                                              \
+do                                                                            \
+{                                                                             \
+  assert(block->ship_sign <= SIGMAX_VAL(g));                                  \
+                                                                              \
+  if (!block->access)                                                         \
+  {                                                                           \
+    if ((g)->ship_shct[block->ship_sign] > 0)                                 \
+    {                                                                         \
+      (g)->ship_shct[block->ship_sign] -= 1;                                  \
+    }                                                                         \
+  }                                                                           \
+}while(0)
 
 void cache_fill_nru_block(rrip_list *head, struct cache_block_t *block)
 {
@@ -935,6 +966,28 @@ void cache_init_srripsage(int set_indx, struct cache_params *params,
     global_data->bm_thr         = params->threshold;
     global_data->access_count   = 0;
     global_data->active_stream  = NN;
+    global_data->sign_size      = params->ship_sig_size;
+    global_data->shct_size      = params->ship_shct_size;
+    global_data->core_size      = params->ship_core_size;
+    global_data->ship_access    = 0;
+
+
+    global_data->ship_shct = (ub1 *) xcalloc((1 << global_data->shct_size), sizeof(ub1));
+    assert(global_data->ship_shct);
+
+#define SHCT_ENTRY_SIZE (3)
+#define CTR_MIN_VAL     (0)  
+#define CTR_MAX_VAL     ((1 << SHCT_ENTRY_SIZE) - 1)
+
+    /* Initialize counter table */ 
+    for (ub4 i = 0; i < (1 << global_data->shct_size); i++)
+    {
+      global_data->ship_shct[i] = 0;
+    }
+
+#undef SHCT_ENTRY_SIZE
+#undef CTR_MIN_VAL
+#undef CTR_MAX_VAL
 
     /* Set default value for each stream recency threshold */
     for (int strm = 0; strm <= TST; strm++)
@@ -2730,10 +2783,21 @@ void cache_fill_block_srripsage(srripsage_data *policy_data,
       }
     }
 
+    if (CPU_STREAM(info->stream))
+    {
+      block->ship_sign        = SHIPSIGN(global_data, info);
+      block->ship_sign_valid  = TRUE;
+    }
+    else
+    {
+      block->ship_sign_valid = FALSE;
+    }
 
     /* TODO: Get set associativity dynamically */
     assert(SRRIPSAGE_DATA_RRPV_BLCKS(policy_data)[block->last_rrpv] < 16);
+
     SRRIPSAGE_DATA_RRPV_BLCKS(policy_data)[block->last_rrpv]++;
+
     global_data->rrpv_blocks[block->last_rrpv]++;
   }
 
@@ -2858,6 +2922,16 @@ int cache_replace_block_srripsage(srripsage_data *policy_data,
       }
     }
 #endif
+  }
+
+  if (min_wayid != ~(0))
+  {
+    block = &(policy_data->blocks[min_wayid]);
+
+    if (info->fill && CPU_STREAM(block->stream) && block->ship_sign_valid)
+    {
+      CACHE_DEC_SHCT(block, global_data);
+    }
   }
 
   /* If no non busy block can be found, return -1 */
@@ -3129,6 +3203,11 @@ void cache_access_block_srripsage(srripsage_data *policy_data,
 
   policy_data->last_eviction = policy_data->evictions;
 
+  if (info->fill && CPU_STREAM(info->stream) && blk->ship_sign_valid)
+  {
+    CACHE_INC_SHCT(blk, global_data);
+  }
+
   /* Reset post fill hit bit */
   policy_data->hit_post_fill[info->stream] = TRUE;
 }
@@ -3167,9 +3246,10 @@ ub1 cache_override_fill_at_head(srripsage_data *policy_data,
 int cache_get_fill_rrpv_srripsage(srripsage_data *policy_data, 
     srripsage_gdata *global_data, memory_trace *info)
 {
-  int ret_rrpv;
-  int tex_alloc;
-  struct cache_block_t *block;
+  int     ret_rrpv;
+  int     tex_alloc;
+  struct  cache_block_t *block;
+  ub8     ship_sign;
 
   tex_alloc = FALSE;
 
@@ -3201,7 +3281,16 @@ int cache_get_fill_rrpv_srripsage(srripsage_data *policy_data,
       break;
 
     case PS:
-      ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data);
+      ship_sign = SHIPSIGN(global_data, info);
+
+      if (global_data->ship_shct[ship_sign] == 0)
+      {
+        ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data);
+      }
+      else
+      {
+        ret_rrpv = SRRIPSAGE_DATA_MAX_RRPV(policy_data);
+      }
       break;
 
     default:
@@ -3210,6 +3299,7 @@ int cache_get_fill_rrpv_srripsage(srripsage_data *policy_data,
   }
 
   block = SRRIPSAGE_DATA_VALID_HEAD(policy_data)[0].head;
+
 #if 0
   if (block && policy_data->evictions)
   {

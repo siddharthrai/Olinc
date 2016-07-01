@@ -47,6 +47,8 @@
 
 using namespace DRAMSim;
 
+extern float PSJF;
+
 /* Returns TRUE if random number falls in range [lo, hi] */
 static ub1 get_prob_in_range(uf8 lo, uf8 hi)
 {
@@ -155,7 +157,7 @@ sendAct(true) {
                 tFAWCountdown.push_back(vector<unsigned>());
         }
         
-        init_sms(16, 16);
+        init_sms(CMD_QUEUE_DEPTH, CMD_QUEUE_DEPTH);
 }
 
 
@@ -1115,6 +1117,10 @@ void CommandQueue::init_sms(size_t bank_queue, size_t queue_size)
   BusPacket2D perBankQueue;
   
   sched = &scheduler_sms;
+  
+  sched->pending_request  = 0;
+  sched->cycle            = 0;
+  sched->k_cycle          = 0;
 
 #define INVALID_ROW (-1)    
 
@@ -1126,11 +1132,13 @@ void CommandQueue::init_sms(size_t bank_queue, size_t queue_size)
     sched->source_queue[u].current_row_id = INVALID_ROW;
     sched->source_queue[u].ready          = FALSE;
     sched->source_queue[u].age            = 0;
+    sched->source_queue[u].mpkc           = 0.0f;
+    sched->source_queue[u].miss_count     = 0;
   }
 
   sched->batch_queue.mode       = batching_mode_pick;
   sched->batch_queue.src        = NN;
-  sched->batch_queue.psjf       = .9;
+  sched->batch_queue.psjf       = PSJF;
   sched->batch_queue.rr_next    = NN;
 
   for (int u = NN; u <= TST; u++)
@@ -1178,8 +1186,8 @@ bool CommandQueue::has_room_for_sms(sms *sched, int stream_in, unsigned numberTo
 /* First stage of SMS */
 void CommandQueue::enqueue_sms(int stream_in, BusPacket *newBusPacket)
 {
-  int stream;
-  sms *sched;
+  int   stream;
+  sms  *sched;
 
   unsigned rank = newBusPacket->rank;
   unsigned bank = newBusPacket->bank;
@@ -1194,11 +1202,40 @@ void CommandQueue::enqueue_sms(int stream_in, BusPacket *newBusPacket)
   
   newBusPacket->age = sched->cycle;
 
-  /* Enqueue new request into the source queue */
-  sched->source_queue[stream].queue.push_back(newBusPacket);
-  sched->source_queue[stream].queue_entries += 1;
-  
-  /* Update batch state based on the row-id of current request */
+  sched->source_queue[stream].miss_count += 1;
+
+#define BYP_MPKC(s, st) ((s)->source_queue[st].mpkc < 1)
+#define LOW_INTENS(s)   ((s)->pending_request < 16)
+#define BYPASS(s, b)    ((s)->act_bypass && (s)->bypass_addr == (b)->physicalAddress)
+
+  if (BYP_MPKC(sched, stream) || LOW_INTENS(sched) || BYPASS(sched, newBusPacket))
+  {
+    sched->batch_queue.queue[rank][bank].push_back(newBusPacket);
+
+    sched->pending_request += 1;
+
+    if (newBusPacket->busPacketType == ACTIVATE)
+    {
+      sched->act_bypass   = true;
+      sched->bypass_addr  = newBusPacket->physicalAddress;
+    }
+    else
+    {
+      sched->act_bypass = false;
+    }
+  }
+  else
+  {
+    /* Reset activate bypass flag */
+    sched->act_bypass = false;
+
+    /* Enqueue new request into the source queue */
+    sched->source_queue[stream].queue.push_back(newBusPacket);
+    sched->source_queue[stream].queue_entries += 1;
+
+    sched->pending_request += 1;
+
+    /* Update batch state based on the row-id of current request */
 #define BATCH_READY(s, st)    ((s)->source_queue[st].ready == TRUE)
 #define QUEUE_SIZE(s, st)     ((s)->source_queue[st].queue_size)
 #define QUEUE_ENTRY(s, st)    ((s)->source_queue[st].queue_entries)
@@ -1208,20 +1245,20 @@ void CommandQueue::enqueue_sms(int stream_in, BusPacket *newBusPacket)
 #define ROW_CHANGE(s, st, p)  ((s)->source_queue[st].current_row_id != (p)->row)
 
   if (BATCH_BEGIN(sched, stream) && !BATCH_READY(sched, stream))
-  {
-    if (ROW_CHANGE(sched, stream, newBusPacket) || QUEUE_FULL(sched, stream))
     {
-      sched->source_queue[stream].ready = TRUE;
-      sched->source_queue[stream].age   = sched->cycle;
+      if (ROW_CHANGE(sched, stream, newBusPacket) || QUEUE_FULL(sched, stream))
+      {
+        sched->source_queue[stream].ready = TRUE;
+        sched->source_queue[stream].age   = sched->cycle;
+      }
     }
-  }
-  else
-  {
-    if (!BATCH_BEGIN(sched, stream))
+    else
     {
-      CURRENT_ROW(sched, stream) = newBusPacket->row;
+      if (!BATCH_BEGIN(sched, stream))
+      {
+        CURRENT_ROW(sched, stream) = newBusPacket->row;
+      }
     }
-  }
 
 #undef BATCH_READY
 #undef QUEUE_SIZE
@@ -1231,16 +1268,17 @@ void CommandQueue::enqueue_sms(int stream_in, BusPacket *newBusPacket)
 #undef BATCH_BEGIN
 #undef ROW_CHANGE
 
-  if (sched->source_queue[stream].queue.size() > CMD_QUEUE_DEPTH)
-  {
-    ERROR("== Error - Enqueued more than allowed in command queue");
-    ERROR("						Need to call .hasRoomFor(int numberToEnqueue, unsigned rank, unsigned bank) first");
-    exit(0);
+    if (sched->source_queue[stream].queue.size() > CMD_QUEUE_DEPTH)
+    {
+      ERROR("== Error - Enqueued more than allowed in command queue");
+      ERROR("						Need to call .hasRoomFor(int numberToEnqueue, unsigned rank, unsigned bank) first");
+      exit(0);
+    }
   }
 
-#if 0
-  sched->batch_queue.queue[rank][bank].push_back(newBusPacket);
-#endif
+#undef BYP_MPKC
+#undef LOW_INTENS
+#undef BYPASS
 }
 
 void CommandQueue::execute_batching_sms()
@@ -1256,9 +1294,9 @@ void CommandQueue::execute_batching_sms()
   BusPacket *newBusPacket;  
   int        rank;
   int        bank;
- 
+
   sched           = &scheduler_sms; 
-  min_batch_size  = 0xffffff;
+  min_batch_size  = 0xfffffff;
   min_age         = 0xffffffffffff;
   tgt_queue       = NN;
 
@@ -1270,6 +1308,8 @@ void CommandQueue::execute_batching_sms()
 #define SOURCE_PNDNG(s, st) ((s)->source_queue[st].queue_entries)
 #define SOURCE_SIZE(s, st)  ((s)->source_queue[st].queue_entries + (s)->batch_queue.src_req[st])
 #define BATCH_AGE(s, st)    ((s)->source_queue[st].age)
+#define LMPKC(s, st)        ((s)->source_queue[st].mpkc < 10)
+#define AGE_TH(s, st)       (LMPKC(s, st) ? 50 : 200)
 
   if (sched->batch_queue.mode == batching_mode_pick)
   {
@@ -1278,8 +1318,10 @@ void CommandQueue::execute_batching_sms()
       if (SOURCE_PNDNG(sched, stream))
       {
         newBusPacket = SOURCE_HEAD(sched, stream);
+        
+        assert(sched->cycle > newBusPacket->age);
 
-        if (sched->cycle - newBusPacket->age > 200)
+        if (sched->cycle - newBusPacket->age > AGE_TH(sched, stream))
         {
           sched->source_queue[stream].ready = TRUE;    
         }
@@ -1313,17 +1355,21 @@ void CommandQueue::execute_batching_sms()
     else
     {
       qcount    = 0;
-      tgt_queue = (sched->batch_queue.rr_next + 1) % (TST + 1);
+      tgt_queue = sched->batch_queue.rr_next;
       
       /* Find next ready batch from the source in round-robin order */
       while (!BATCH_READY(sched, tgt_queue) && qcount++ <= TST)
       {
-        tgt_queue = (sched->batch_queue.rr_next + 1) % (TST + 1);
+        tgt_queue = (tgt_queue + 1) % (TST + 1);
       }
 
       if (!BATCH_READY(sched, tgt_queue))
       {
         tgt_queue = NN;
+      }
+      else
+      {  
+        sched->batch_queue.rr_next = (tgt_queue + 1) % (TST + 1); 
       }
     }
 
@@ -1414,10 +1460,31 @@ void CommandQueue::execute_batching_sms()
     }
   }
 
+#define SMS_PERIOD  (1000)
+  
+  float mpkc;
+
+  /* Execute periodic events */
+  if (++(sched->period) >= SMS_PERIOD)
+  {
+    sched->period   = 0;
+    sched->k_cycle += 1;
+
+    /* For each source compute MPKC */
+    for (int stream = NN; stream <= TST; stream++)
+    {
+      mpkc = (float)(sched->source_queue[stream].miss_count) / sched->k_cycle;
+      sched->source_queue[stream].mpkc = mpkc;
+    }
+  }
+
+#undef SMS_PERIOD
 #undef BATCH_READY
 #undef SOURCE_PNDNG
 #undef SOURCE_SIZE
 #undef BATCH_AGE
+#undef LMPKC
+#undef AGE_TH
 }
 
 vector<BusPacket *> &CommandQueue::get_command_queue_sms(sms *sched, unsigned rank, unsigned bank) 
@@ -1446,16 +1513,15 @@ void CommandQueue::remove_request_sms(BusPacket *newBusPacket)
 
   sched = &scheduler_sms;
   stream = SMS_STREAM(newBusPacket->stream);
-
-#if 0
-  assert(newBusPacket->stream != NN);    
-
-  assert(sched->batch_queue.src_req[newBusPacket->stream]);
-#endif
   
   if (sched->batch_queue.src_req[stream])
   {
     sched->batch_queue.src_req[stream] -= 1;
+  }
+
+  if (sched->pending_request)
+  {
+    sched->pending_request -= 1;
   }
 }
 

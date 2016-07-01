@@ -1,12 +1,12 @@
 CXX      =g++
-CXXFLAGS =-O0 -g -funroll-all-loops -funroll-loops -Wall
+CXXFLAGS =-O3 -funroll-all-loops -funroll-loops -Wall
 
 ifdef PROF
   CXXFLAGS += -pg
 endif
 
 CC      = gcc
-CCFLAGS = -O0 -g -funroll-all-loops -funroll-loops -std=c99 -Wall
+CCFLAGS = -O3 -funroll-all-loops -funroll-loops -std=c99 -Wall
 
 DEPDIR = .deps
 BINDIR = bin

@@ -191,10 +191,10 @@ int dramsim_init(const char *deviceIniFilename, unsigned int megsOfMemory, unsig
         /* SCHEDULING_POLICY : bank_then_rank_round_robin or rank_then_bank_round_robin */
 #if 0
         (kv_map)[string("SCHEDULING_POLICY")] = string("bank_then_rank_round_robin");
-#endif
 
         /* SCHEDULING_POLICY : bank_then_rank_round_robin or rank_then_bank_round_robin */
         (kv_map)[string("SCHEDULING_POLICY")] = string("bank_then_rank_sms");
+#endif
 
         /* QUEUING_STRUCTURE : per_rank or per_rank_per_bank */
         (kv_map)[string("QUEUING_STRUCTURE")] = string("per_rank_per_bank");
@@ -264,6 +264,8 @@ int dramsim_init(const char *deviceIniFilename, unsigned int megsOfMemory, unsig
 
                 (kv_map)[string("SPEEDUP_HINT")] = string("false");
                 (kv_map)[string("CPU_SPEEDUP_HINT")] = string("false");
+
+                (kv_map)[string("PSJF")] = string("0.0");
         }
 
         /* Initialize Receiver */
@@ -355,16 +357,13 @@ void dramsim_request(int isWrite, uint64_t addr, char stream, memory_trace *info
 #define CPU_PQ(s)   (CPU_PSET(s) || CPU_QSET(s))
 #define CPU_PQR(s)  (CPU_PSET(s) || CPU_QSET(s) || CPU_RSET(s))
 
-        if (memSystem->isSpeedupHintEnable(CPU_HINT))
+        if (memSystem->isSpeedupHintEnable(CPU_HINT, speedup_stream_u))
         {
           new_stream = CPU_PQ(stream_type) ? speedup_stream_x : speedup_stream_u;
         }
         else
         {
-          new_stream = memSystem->isSpeedupHintEnable(GPU_HINT) ? stream_type : speedup_stream_u;
-#if 0
-          new_stream = memSystem->isSpeedupHintEnable(GPU_HINT) ? speedup_stream_x : speedup_stream_u;
-#endif
+          new_stream = memSystem->isSpeedupHintEnable(GPU_HINT, stream_type) ? speedup_stream_x : speedup_stream_u;
         }
 
 #undef GPU_HINT

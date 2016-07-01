@@ -113,8 +113,11 @@ bool DEBUG_POWER;
 bool USE_LOW_POWER;
 bool VIS_FILE_OUTPUT;
 
-bool SPEEDUP_HINT;
+bool GPU_X_SPEEDUP_HINT;
+bool GPU_Y_SPEEDUP_HINT;
 bool CPU_SPEEDUP_HINT;
+
+float PSJF;
 
 bool VERIFICATION_OUTPUT;
 
@@ -185,8 +188,12 @@ namespace DRAMSim
                                         DEFINE_BOOL_PARAM(USE_LOW_POWER, SYS_PARAM),
 
                                         //Speedup hint
-                                        DEFINE_BOOL_PARAM(SPEEDUP_HINT, SYS_PARAM),
+                                        DEFINE_BOOL_PARAM(GPU_X_SPEEDUP_HINT, SYS_PARAM),
+                                        DEFINE_BOOL_PARAM(GPU_Y_SPEEDUP_HINT, SYS_PARAM),
                                         DEFINE_BOOL_PARAM(CPU_SPEEDUP_HINT, SYS_PARAM),
+
+                                        // SJF probability for SMS
+                                        DEFINE_FLOAT_PARAM(PSJF, DEV_PARAM),
 
                                         DEFINE_STRING_PARAM(ROW_BUFFER_POLICY, SYS_PARAM),
                                         DEFINE_STRING_PARAM(SCHEDULING_POLICY, SYS_PARAM),

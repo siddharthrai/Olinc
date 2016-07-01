@@ -90,6 +90,8 @@ namespace DRAMSim
           size_t      queue_entries;  // Entries in queue
           int         ready;          // True, if batch is ready
           int         age;            // Cycle when batch became ready
+          float       mpkc;           // Miss per thousand cycle
+          int         miss_count;     // Access seen by DRAM
           unsigned    current_row_id; // Current row id
         }sms_queue;
 
@@ -116,6 +118,11 @@ namespace DRAMSim
         typedef struct sms_scheduler
         {
           ub8         cycle;                  /* Current scheduler cycle */
+          ub8         k_cycle;                /* # 1000 cycle epochs */
+          ub8         period;                 /* Cycles in current period */
+          bool        act_bypass;             /* True if previous access bypassed was activate */
+          ub8         bypass_addr;            /* Address of bypassed activate */
+          ub8         pending_request;        /* Pending requests in entire system */
           sms_queue   source_queue[TST + 1];  /* Queue per source */
           sms_bqueue  batch_queue;            /* Batch queue */
         }sms;

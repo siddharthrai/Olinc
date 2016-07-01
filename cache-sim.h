@@ -61,6 +61,28 @@ typedef struct dram_request
 #define MPAGE_COUNT     (128 >> LOG_MPAGE_COUNT)
 #define MPAGE_OFFSET(c) (c >> LOG_MPAGE_COUNT)
 
+typedef struct stream_row_data
+{
+  ub1 streams;                                      /* Streams sharing the row */
+  ub1 sharer[TST + 1];                              /* Row sharer vector */
+  ub8 total_access;                                 /* # accesses to row before closure */
+}stream_row_data;
+
+/* Row access stats for all stream */
+typedef struct stream_row
+{
+  ub8           current_row[TST + 1];               /* Current row accessed by the stream */
+  ub8           current_access[TST + 1];            /* #Access in current burst */
+  ub8           total_access[TST + 1];              /* #Access across all bursts */
+  map<ub8, ub8> interval_access[TST + 1];           /* Per-stream access in each interval */
+  ub8           total_interval[TST + 1];            /* #Bursts */
+  ub8           max_access[TST + 1];                /* Max access per-stream */
+  map<ub8, ub8> row_to_stream_count;                /* Streams accessing the row */
+  ub8           total_shared_access[TST + 1];       /* Total shared access across all intervals */
+  map<ub8, ub8> interval_shared_access[TST + 1];    /* Per-stream access in each interval */
+  ub8           total_shared_interval[TST + 1];     /* #Bursts */
+}stream_row;
+
 typedef struct dram_channel
 {
   map<ub8, ub8> ranks;
@@ -79,6 +101,8 @@ typedef struct dram_row
   ub8 global_btob_hits;         /* Total possible hits */
   ub8 interval_count;           /* # interval */
   ub8 row_access;               /* # accesses to row */
+  ub8 row_hits;                 /* # hits to row */
+  ub8 row_misses;               /* # misses to row */
   ub8 row_critical;             /* # critical access */
   ub8 row_open;                 /* # row hits */
   ub8 row_reopen;               /* # per interval row conflict */
@@ -262,8 +286,6 @@ typedef struct cs_mshr
   cs_qnode rlist; /* Retry list for conflicting requests */
 }cs_mshr;
 
-#define TOTAL_BANKS (NUM_CHANS * NUM_RANKS * NUM_BANKS)
-
 struct cachesim_cache
 {
   gzFile                trc_file;                                 /* Memory trace file */
@@ -303,9 +325,8 @@ struct cachesim_cache
   ub1                   shuffle_row;                              /* True if accesses are shuffled across rows */
   map<ub8, ub8>         dramsim_channels;                         /* Per-rank per-bank open rows */
   map<ub8, ub8>         dramsim_row_set;                          /* Set of rows used for dynamic row mapping */
+  stream_row            per_stream_row[NUM_CHANS][NUM_BANKS];     /* Row stats of all streams */ 
 };
-
-#undef TOTAL_BANKS
 
 typedef struct cachesim_cache cachesim_cache;
 

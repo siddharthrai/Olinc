@@ -343,6 +343,340 @@ speedup_stream_type get_srriphint_stream(cachesim_cache *cache, memory_trace *in
   return (speedup_stream_type)(info->sap_stream);
 }
 
+void dumpDRAMStats(cachesim_cache *cache)
+{
+  dram_channel *current_channel;
+  dram_rank    *current_rank;
+  dram_bank    *current_bank;
+  dram_row     *current_row;
+
+  dram_channel *shadow_channel;
+  dram_rank    *shadow_rank;
+  dram_bank    *shadow_bank;
+  dram_row     *shadow_row;
+
+  map<ub8, ub8>::iterator channel_itr;
+  map<ub8, ub8>::iterator rank_itr;
+  map<ub8, ub8>::iterator bnk_itr;
+  map<ub8, ub8>::iterator rw_itr;
+  map<ub8, ub8>::iterator blk_itr;
+
+  map<ub8, ub8>::iterator schannel_itr;
+  map<ub8, ub8>::iterator srank_itr;
+  map<ub8, ub8>::iterator sbnk_itr;
+  map<ub8, ub8>::iterator srw_itr;
+
+  ub8 row_count;                        /* #row in all banks */
+  ub8 block_count;                      /* #blocks in all banks */
+  ub8 gpu_shared_row_count;             /* #GPU shared rows */
+  ub8 gpu_shared_row_hits;              /* #GPU shared row hits */
+  ub8 gpu_shared_row_misses;            /* #GPU shared row misses */
+  ub8 gpu_shared_block_count;           /* #GPU blocks in shared rows */
+  ub8 cpu_shared_row_count;             /* #CPU shared rows */
+  ub8 cpu_shared_row_hits;              /* #CPU shared row hits */
+  ub8 cpu_shared_row_misses;            /* #CPU shared row misses */
+  ub8 cpu_shared_block_count;           /* #CPU blocks in shared rows */
+  ub8 gpu_unshared_row_count;           /* #GPU unshared rows */
+  ub8 gpu_unshared_row_hits;            /* #GPU unshared row hits */
+  ub8 gpu_unshared_row_misses;          /* #GPU unshared row misses */
+  ub8 gpu_unshared_block_count;         /* #GPU blocks in unshared rows */
+  ub8 cpu_unshared_row_count;           /* #CPU unshared rows */
+  ub8 cpu_unshared_row_hits;            /* #CPU unshared row hits */
+  ub8 cpu_unshared_row_misses;          /* #CPU unshared row misses */
+  ub8 cpu_unshared_block_count;         /* #GPU blocks in unshared rows */
+  ub8 row_reuse;                        /* # rows reused */
+  ub1 rank_count;                       /* # ranks */
+  ub1 bank_count;                       /* # banks */
+  ub1 current_stream;                   /* Current stream */
+  ub1 row_used;                         /* True, if row is already used */
+  ub1 gpu_shared;                       /* True, if row is shared by GPU */
+  ub1 cpu_shared;                       /* True, if row is shared by CPU */
+  ub8 per_stream_blocks[TST + 1];       /* #blocks for each stream */
+  ub8 per_stream_row[TST + 1];          /* #rows for each stream */
+  ub8 per_stream_shared_row[TST + 1];   /* #shared row for each stream */
+  ub1 per_stream_row_used[TST + 1];     /* TRUE, is row is used by a stream */
+  
+  /* Initialize all counters */
+  row_count                 = 0;
+  block_count               = 0;
+  gpu_shared_row_count      = 0;
+  gpu_shared_block_count    = 0;
+  gpu_shared_row_hits       = 0;
+  gpu_shared_row_misses     = 0;
+  cpu_shared_row_count      = 0;
+  cpu_shared_block_count    = 0;
+  cpu_shared_row_hits       = 0;
+  cpu_shared_row_misses     = 0;
+  gpu_unshared_row_count    = 0;
+  gpu_unshared_block_count  = 0;
+  gpu_unshared_row_hits     = 0;
+  gpu_unshared_row_misses   = 0;
+  cpu_unshared_row_count    = 0;
+  cpu_unshared_block_count  = 0;
+  cpu_unshared_row_hits     = 0;
+  cpu_unshared_row_misses   = 0;
+  row_reuse                 = 0;
+  rank_count                = 0;
+  bank_count                = 0;
+  current_channel           = NULL;
+  current_rank              = NULL;
+  current_bank              = NULL;
+  current_row               = NULL;
+
+  memset(per_stream_blocks, 0, sizeof(per_stream_blocks));
+  memset(per_stream_row, 0, sizeof(per_stream_row));
+  memset(per_stream_shared_row, 0, sizeof(per_stream_shared_row));
+  
+  /* For each channel in the memory system */
+  for (channel_itr = cache->dramsim_channels.begin(); channel_itr != cache->dramsim_channels.end(); channel_itr++)
+  {
+    current_channel = (dram_channel *)(channel_itr->second);
+    assert(current_channel);
+    
+    /* For each rank connected to each channel */
+    for (rank_itr = current_channel->ranks.begin(); rank_itr != current_channel->ranks.end(); rank_itr++)
+    {
+      current_rank = (dram_rank *)(rank_itr->second);
+      assert(current_rank); 
+       
+      /* For each bank in a rank */
+      for (bnk_itr = current_rank->banks.begin(); bnk_itr != current_rank->banks.end(); bnk_itr++)
+      {
+        current_bank = (dram_bank *)(bnk_itr->second);
+        assert(current_bank);
+
+        row_reuse = 0;
+        
+        /* For each row in a back */
+        for (rw_itr = current_bank->bank_rows.begin(); rw_itr != current_bank->bank_rows.end(); rw_itr++)
+        {
+          current_row = (dram_row *)(rw_itr->second);
+          assert(current_row);
+          
+          /* Reset row use counter */
+          memset(per_stream_row_used, 0, sizeof(per_stream_row_used));
+
+          row_used = 0;
+
+          /* Update per stream block count */
+          for (blk_itr = current_row->dist_blocks.begin(); blk_itr != current_row->dist_blocks.end(); blk_itr++)
+          {
+            current_stream = blk_itr->second; 
+            assert(current_stream > NN && current_stream <= TST);
+
+            per_stream_blocks[current_stream] += 1;
+            
+            /* Update row count for a stream */
+            if (per_stream_row_used[current_stream] == FALSE)
+            {
+              per_stream_row_used[current_stream] = TRUE;
+              per_stream_row[current_stream]     += 1;
+            }
+            
+            /* Update GPU block count and row count */
+            if (GPU_STREAM(current_stream))
+            {
+              block_count += 1;
+
+              if (row_used == 0)
+              {
+                row_count += 1;
+                row_used   = 1;
+              }
+            }
+          }
+          
+          row_used = 0;
+
+          ub1 strm;
+
+          /* Check if row is shared by multiple streams */
+          for (strm = NN + 1; strm <= TST; strm++)
+          {
+            if (per_stream_row_used[strm])
+            {
+              if (row_used)
+              {
+                row_reuse += 1;
+
+                /* Find #streams sharing a row */
+                for (ub1 i = NN + 1; i <= TST; i++)
+                {
+                  if (per_stream_row_used[i])
+                  {
+                    per_stream_shared_row[i] += 1;
+                  }
+                }
+
+                break;
+              }
+
+              row_used = 1;
+            }
+          }
+
+          if (strm == (TST + 1) && current_row->dist_blocks.size())
+          {
+            for (blk_itr = current_row->dist_blocks.begin(); blk_itr != current_row->dist_blocks.end(); blk_itr++)
+            {
+              current_stream = blk_itr->second; 
+              assert(current_stream > NN && current_stream <= TST);
+
+              if (GPU_STREAM(current_stream))
+              {
+                gpu_unshared_row_count   += 1; 
+                gpu_unshared_row_hits    += current_row->row_hits;
+                gpu_unshared_row_misses  += current_row->row_misses;
+                gpu_unshared_block_count += current_row->dist_blocks.size();
+                break; 
+              }
+
+              if (CPU_STREAM(current_stream))
+              {
+                cpu_unshared_row_count   += 1; 
+                cpu_unshared_row_hits    += current_row->row_hits; 
+                cpu_unshared_row_misses  += current_row->row_misses; 
+                cpu_unshared_block_count += current_row->dist_blocks.size();
+                break; 
+              }
+            }
+          }
+          else if (strm <= TST)
+          {
+            gpu_shared = FALSE;
+            cpu_shared = FALSE;
+            
+            for (blk_itr = current_row->dist_blocks.begin(); blk_itr != current_row->dist_blocks.end(); blk_itr++)
+            {
+              current_stream = blk_itr->second; 
+              assert(current_stream > NN && current_stream <= TST);
+              
+              if (gpu_shared == FALSE && GPU_STREAM(current_stream))
+              {
+                gpu_shared_row_count  += 1;
+
+                gpu_shared = TRUE;
+              }
+
+              if (cpu_shared == FALSE && CPU_STREAM(current_stream))
+              {
+                cpu_shared_row_count  += 1;
+
+                cpu_shared = TRUE;
+              }
+            } 
+            
+            /* Update shared block count */
+            for (blk_itr = current_row->dist_blocks.begin(); blk_itr != current_row->dist_blocks.end(); blk_itr++)
+            {
+              current_stream = blk_itr->second; 
+              assert(current_stream > NN && current_stream <= TST);
+
+              if (gpu_shared && GPU_STREAM(current_stream))
+              {
+                gpu_shared_block_count  += 1;
+              }
+
+              if (cpu_shared && CPU_STREAM(current_stream))
+              {
+                cpu_shared_block_count  += 1;
+              }
+            }
+            
+            /* Update GPU and CPU shared/unshared row hit count */
+            if (gpu_shared)
+            {
+              gpu_shared_row_hits   += current_row->row_hits;
+              gpu_shared_row_misses += current_row->row_misses;
+            }
+
+            if (cpu_shared)
+            {
+              cpu_shared_row_hits   += current_row->row_hits;
+              cpu_shared_row_misses += current_row->row_misses;
+            }
+          }
+          
+
+          current_row->dist_blocks.clear();
+        }
+
+        current_bank->bank_rows.clear();
+        bank_count++;
+      }
+
+      current_rank->banks.clear();
+      rank_count++;
+    }
+
+    current_channel->ranks.clear();
+  }
+  
+  cache->dramsim_channels.clear();
+  
+  if (bank_count)
+  {
+    for (ub1 i = NN + 1; i <= TST; i++)
+    {
+      per_stream_blocks[i]      /= bank_count;
+      per_stream_row[i]         /= bank_count;
+      per_stream_shared_row[i]  /= bank_count;
+
+      if (per_stream_row[i])
+      {
+        per_stream_blocks[i] /= per_stream_row[i];
+      }
+    }
+
+    row_count                 /= bank_count;
+    block_count               /= bank_count;
+    gpu_shared_row_count      /= bank_count;
+    gpu_shared_row_hits       /= bank_count;
+    gpu_shared_row_misses     /= bank_count;
+    gpu_shared_block_count    /= bank_count;
+    cpu_shared_row_count      /= bank_count;
+    cpu_shared_row_hits       /= bank_count;
+    cpu_shared_row_misses     /= bank_count;
+    cpu_shared_block_count    /= bank_count;
+    gpu_unshared_row_count    /= bank_count;
+    gpu_unshared_row_hits     /= bank_count;
+    gpu_unshared_row_misses   /= bank_count;
+    gpu_unshared_block_count  /= bank_count;
+    cpu_unshared_row_count    /= bank_count;
+    cpu_unshared_row_hits     /= bank_count;
+    cpu_unshared_row_misses   /= bank_count;
+    cpu_unshared_block_count  /= bank_count;
+
+    if (gpu_shared_row_count)
+    {
+      gpu_shared_block_count /= gpu_shared_row_count;
+    }
+
+    if (gpu_unshared_row_count)
+    {
+      gpu_unshared_block_count /= gpu_unshared_row_count;
+    }
+
+    if (cpu_shared_row_count)
+    {
+      cpu_shared_block_count /= cpu_shared_row_count;
+    }
+
+    if (cpu_unshared_row_count)
+    {
+      cpu_unshared_block_count /= cpu_unshared_row_count;
+    }
+
+    printf("\n%6ld;%3ld;%6ld;%6ld;%6ld;%3ld;%6ld;%6ld;%6ld;%3ld;%6ld;%6ld;%6ld;%3ld;%6ld;%6ld;",
+        gpu_shared_block_count, gpu_shared_row_count, gpu_shared_row_hits, gpu_shared_row_misses,
+        gpu_unshared_block_count, gpu_unshared_row_count, gpu_unshared_row_hits, gpu_unshared_row_misses,
+        cpu_shared_block_count, cpu_shared_row_count, cpu_shared_row_hits, cpu_shared_row_misses,
+        cpu_unshared_block_count, cpu_unshared_row_count, cpu_unshared_row_hits, cpu_unshared_row_misses);
+  }
+
+  fflush(stdout);
+}
+
 void cachesim_dump_per_bank_stats(cachesim_cache *cache, cachesim_cache *shadow_tags, ub1 global_stat = FALSE)
 {
   dram_channel *current_channel;
@@ -365,7 +699,7 @@ void cachesim_dump_per_bank_stats(cachesim_cache *cache, cachesim_cache *shadow_
   map<ub8, ub8>::iterator sbnk_itr;
   map<ub8, ub8>::iterator srw_itr;
 
-  ub1 row_count;
+  ub8 row_count;
   ub8 interval_count;
 
   row_count = 0;
@@ -688,216 +1022,6 @@ void cachesim_update_row_reopen(cachesim_cache *cache)
         }
       }
     }
-  }
-}
-
-void cachesim_update_cycle_interval_end(cachesim_cache *cache, cachesim_cache *shadow_tags)
-{
-  dram_channel *current_channel;
-  dram_rank    *current_rank;
-  dram_bank    *current_bank;
-  dram_row     *current_row;
-
-  dram_channel *shadow_channel;
-  dram_rank    *shadow_rank;
-  dram_bank    *shadow_bank;
-  dram_row     *shadow_row;
-
-  map<ub8, ub8>::iterator channel_itr;
-  map<ub8, ub8>::iterator rank_itr;
-  map<ub8, ub8>::iterator bnk_itr;
-  map<ub8, ub8>::iterator rw_itr;
-
-  map<ub8, ub8>::iterator schannel_itr;
-  map<ub8, ub8>::iterator srank_itr;
-  map<ub8, ub8>::iterator sbnk_itr;
-  map<ub8, ub8>::iterator srw_itr;
-  map<ub8, ub8>::iterator map_itr;
-
-  ub1 row_count;
-
-  row_count = 0;
-
-  printf("\n Per Bank stats \n");
-
-  for (channel_itr = cache->dramsim_channels.begin(); channel_itr != cache->dramsim_channels.end(); channel_itr++)
-  {
-    current_channel = (dram_channel *)(channel_itr->second);
-    assert(current_channel);
-
-    schannel_itr = shadow_tags->dramsim_channels.find(channel_itr->first);
-    assert(schannel_itr != shadow_tags->dramsim_channels.end());
-
-    shadow_channel = (dram_channel *)(schannel_itr->second);
-
-    for (rank_itr = current_channel->ranks.begin(); rank_itr != current_channel->ranks.end(); rank_itr++)
-    {
-      current_rank = (dram_rank *)(rank_itr->second);
-      assert(current_rank); 
-
-      srank_itr = shadow_channel->ranks.find(rank_itr->first);
-      assert(srank_itr != shadow_channel->ranks.end());
-
-      shadow_rank = (dram_rank *)(srank_itr->second);
-
-      for (bnk_itr = current_rank->banks.begin(); bnk_itr != current_rank->banks.end(); bnk_itr++)
-      {
-        current_bank = (dram_bank *)(bnk_itr->second);
-        assert(current_bank);
-
-        sbnk_itr = shadow_rank->banks.find(bnk_itr->first);
-        assert(sbnk_itr != shadow_rank->banks.end());
-
-        shadow_bank = (dram_bank *)(sbnk_itr->second);
-
-        row_count = 0;
-        
-        if (current_bank->bank_rows.size())
-        {
-          printf("\nBank %ld D rows %ld : ", bnk_itr->first, current_bank->d_rows.size());
-
-          for (rw_itr = current_bank->d_rows.begin(); rw_itr != current_bank->d_rows.end(); rw_itr++)
-          {
-            printf("%ld ", rw_itr->first); 
-          }
-
-          printf("\n");
-        }
-
-        for (rw_itr = current_bank->bank_rows.begin(); rw_itr != current_bank->bank_rows.end(); rw_itr++)
-        {
-          current_row = (dram_row *)(rw_itr->second);
-          assert(current_row);
-#if 0
-          srw_itr = shadow_bank->bank_rows.find(rw_itr->first);
-          if (srw_itr != shadow_bank->bank_rows.end())
-#endif
-          {
-
-#if 0
-            shadow_row = (dram_row *)(srw_itr->second);
-            if (current_row->row_access)
-#endif
-            {
-#if 0
-              printf("R:%5ld || A: %5ld O:%3ld B2B:%3ld D:%3ld| ", rw_itr->first, current_row->row_access, 
-                  current_row->row_open, current_row->btob_hits, current_row->btob_hits - current_row->btob_hits);
-
-              while (row_count != rw_itr->first % 6)
-              {
-                printf("|R:%4ld|A:%3ld C:%3ld O:%3ld D:%3ld| ", rw_itr->first, 
-                    current_row->row_access, current_row->row_critical, current_row->row_open, current_row->btob_hits);
-
-                if (++row_count == 6)
-                {
-                  row_count = 0;
-                  printf("\n");
-                }
-              }
-#endif
-
-#if 0
-              if (rw_itr->first % 6 == row_count)
-              {
-                if (shadow_row->btob_hits > current_row->btob_hits)
-                {
-                  printf("|R:%4ld|A:%3ld C:%3ld B:%3ld D:%3ld| ", rw_itr->first, 
-                      current_row->row_access, current_row->row_critical, current_row->all_blocks.size(), 
-                      shadow_row->btob_hits - current_row->btob_hits);
-
-                  if (++row_count == 6)
-                  {
-                    row_count = 0;
-                    printf("\n");
-                  }
-                }
-              }
-#endif
-
-              current_row->interval_count += 1;
-            }
-#if 0
-            printf("R:%5ld || A: %5ld B2B:%3ld| ", srw_itr->first, shadow_row->row_access, 
-                shadow_row->btob_hits);
-#endif
-
-            current_row->global_row_access      += current_row->row_access;
-            current_row->global_row_critical    += current_row->row_critical;
-            current_row->global_row_open        += current_row->row_open;
-            current_row->global_btob_hits       += current_row->btob_hits;
-
-            current_row->row_critical            = 0;
-            current_row->row_access              = 0;
-            current_row->row_open                = 0;
-            current_row->btob_hits               = 0;
-            current_row->max_btob_hits           = 0;
-
-            current_row->row_blocks.clear();
-#if 0
-            current_row->all_blocks.clear();
-#endif
-            current_row->dist_blocks.clear();
-
-            current_row->mig_blocks.clear();
-            current_row->avl_cols.clear();
-
-            for (ub1 i = 0; i < MPAGE_COUNT; i++)
-            {
-              current_row->page_access[i] = 0;
-            }
-      
-#if 0          
-            for (ub4 i = 0; i < NUM_COLS / 8; i++)
-            {
-              map_itr = current_row->ntv_cols.find(i);
-              if (map_itr == current_row->ntv_cols.end())
-              {
-                current_row->avl_cols.insert(pair<ub8, ub8>(i, 0)); 
-              }
-            }
-
-            if (current_row->request_queue.empty())
-            {
-              delete current_row;
-              current_bank->bank_rows.erase(rw_itr->first);
-            }
-#endif
-          }
-        }
-        
-        for (srw_itr = shadow_bank->bank_rows.begin(); srw_itr != shadow_bank->bank_rows.end(); srw_itr++)
-        {
-          shadow_row = (dram_row *)(srw_itr->second);
-          assert(shadow_row);
-
-          shadow_row->global_row_access       += shadow_row->row_access;
-          shadow_row->global_row_critical     += shadow_row->row_critical;
-          shadow_row->global_row_open         += shadow_row->row_open;
-          shadow_row->global_btob_hits        += shadow_row->btob_hits;
-
-          shadow_row->row_critical             = 0;
-          shadow_row->row_access               = 0;
-          shadow_row->row_open                 = 0;
-          shadow_row->row_reopen               = 0;
-          shadow_row->btob_hits                = 0;
-          shadow_row->max_btob_hits            = 0;
-
-          for (ub1 i = 0; i < MPAGE_COUNT; i++)
-          {
-            shadow_row->page_access[i] = 0;
-          }
-        }
-
-        current_bank->d_rows.clear();
-        current_bank->remap_rows.clear();
-
-        break;
-      }
-
-      break;
-    }
-
-    break;
   }
 }
 
@@ -1381,132 +1505,6 @@ void dram_fini()
   dramsim_done();
 }
 
-static ub8 update_dramsim_shadow_tag_row_hit(cachesim_cache *cache, memory_trace *info)
-{
-  ub8 physicalAddress;
-  ub8 tmpPhysicalAddress;
-  ub8 newTransactionChan;
-  ub8 newTransactionColumn;
-  ub8 newTransactionBank;
-  ub8 newTransactionRank;
-  ub8 newTransactionRow;
-  ub8 tempA;
-  ub8 tempB;
-  ub8 transactionMask;
-  ub8 btob;
-
-  ub4 byteOffsetWidth;
-  ub4 transactionSize;
-  ub4 channelBitWidth;
-  ub4 rankBitWidth;
-  ub4 bankBitWidth;
-  ub4 rowBitWidth;
-  ub4 colBitWidth;
-  ub4 colHighBitWidth;
-  ub4 colLowBitWidth;
-  ub4 llcTagLowBitWidth;
-
-  llcTagLowBitWidth = LOG_BLOCK_SIZE;
-  transactionSize   = (JEDEC_DATA_BUS_BITS / 8) * BL;
-  transactionMask   = transactionSize - 1;
-  channelBitWidth   = log2(NUM_CHANS);
-  rankBitWidth      = log2(NUM_RANKS);
-  bankBitWidth      = log2(NUM_BANKS);
-  rowBitWidth       = log2(NUM_ROWS);
-  colBitWidth       = log2(NUM_COLS);
-  btob              = 0;
-
-  byteOffsetWidth = log2((JEDEC_DATA_BUS_BITS / 8)); 
-
-  tmpPhysicalAddress  = info->address;
-  physicalAddress     = info->address >> byteOffsetWidth;
-  colLowBitWidth      = log2(transactionSize) - byteOffsetWidth;
-  physicalAddress     = physicalAddress >> colLowBitWidth;
-  colHighBitWidth     = colBitWidth - colLowBitWidth;
-  
-  //row:rank:bank:col:chan
-  tempA = physicalAddress;
-  physicalAddress = physicalAddress >> channelBitWidth;
-  tempB = physicalAddress << channelBitWidth;
-  newTransactionChan = tempA ^ tempB;
-
-  tempA = physicalAddress;
-  physicalAddress = physicalAddress >> colHighBitWidth;
-  tempB = physicalAddress << colHighBitWidth;
-  newTransactionColumn = tempA ^ tempB;
-
-  // bank id
-  tempA = physicalAddress;
-  physicalAddress = physicalAddress >> bankBitWidth;
-  tempB = physicalAddress << bankBitWidth;
-  newTransactionBank = tempA ^ tempB;
-
-  /* XOR with lower LLC tag bits */
-  tempA = tmpPhysicalAddress >> llcTagLowBitWidth;
-  tempB = (tempA >> bankBitWidth) << bankBitWidth;
-  newTransactionBank = newTransactionBank ^ (tempA ^ tempB);
-
-  tempA = physicalAddress;
-  physicalAddress = physicalAddress >> rankBitWidth;
-  tempB = physicalAddress << rankBitWidth;
-  newTransactionRank = tempA ^ tempB;
-
-  tempA = physicalAddress;
-  physicalAddress = physicalAddress >> rowBitWidth;
-  tempB = physicalAddress << rowBitWidth;
-  newTransactionRow = tempA ^ tempB;
-
-  map<ub8, ub8>::iterator map_itr;
-  dram_channel  *current_channel;
-  dram_rank     *current_rank;
-  dram_bank     *current_bank;
-  dram_row      *current_row;
-
-  current_channel = NULL;
-  current_rank    = NULL;
-  current_bank    = NULL;
-  current_row     = NULL;
-
-  /* Find channel, rank , bank , row  and update count */
-  map_itr = cache->dramsim_channels.find(newTransactionChan);  
-
-  if (map_itr != cache->dramsim_channels.end())
-  {
-    current_channel = (dram_channel *)(map_itr->second);
-    assert(current_channel);
-
-    map_itr = current_channel->ranks.find(newTransactionRank);
-
-    if (map_itr != current_channel->ranks.end())
-    {
-      current_rank = (dram_rank *)(map_itr->second);
-      assert(current_rank);
-
-      map_itr = current_rank->banks.find(newTransactionBank);
-      if (map_itr != current_rank->banks.end())
-      {
-        current_bank = (dram_bank *)(map_itr->second);
-
-        map_itr = current_bank->bank_rows.find(newTransactionRow);
-
-        if (map_itr != current_bank->bank_rows.end())
-        {
-          current_row = (dram_row *)(map_itr->second);
-
-          /* Update per-bank row stats */
-          current_row->btob_hits += current_row->request_queue.size();
-
-          btob = current_row->btob_hits;
-
-          current_row->request_queue.clear();
-        }
-      }
-    }
-  }
-
-  return btob;
-}
-
 static void update_dramsim_row_access_stats(cachesim_cache *cache, memory_trace *info)
 {
   ub8 physicalAddress;
@@ -1618,20 +1616,7 @@ static void update_dramsim_row_access_stats(cachesim_cache *cache, memory_trace 
         if (map_itr != current_bank->bank_rows.end())
         {
           current_row = (dram_row *)(map_itr->second);
-#if 0
-          /* Update per-bank row stats */
-          map_itr = current_row->all_blocks.find(info->address);
-          if (map_itr == current_row->all_blocks.end())
-          {
-            current_row->all_blocks.insert(pair<ub8, ub8>(info->address, 1));
-
-            map_itr = current_bank->d_rows.find(newTransactionRow);
-            if (map_itr != current_bank->d_rows.end())
-            {
-              map_itr->second = current_row->all_blocks.size();
-            }
-          }
-#endif          
+          
           /* If block is not in native and migrated set, insert into native 
            * set */
           map_itr = current_row->ntv_blocks.find(info->address);
@@ -1654,6 +1639,232 @@ static void update_dramsim_row_access_stats(cachesim_cache *cache, memory_trace 
       }
     }
   }
+}
+
+static void update_stream_row_stats(cachesim_cache *cache, cachesim_cache *shadow_tags, 
+    ub1 remap, memory_trace *info)
+{
+  ub8 physicalAddress;
+  ub8 tmpPhysicalAddress;
+  ub8 newTransactionChan;
+  ub8 newTransactionColumn;
+  ub8 newTransactionBank;
+  ub8 newTransactionRank;
+  ub8 newTransactionRow;
+  ub8 tempA;
+  ub8 tempB;
+  ub8 transactionMask;
+  ub8 current_btob;
+  ub8 shadow_btob;
+
+  ub4 byteOffsetWidth;
+  ub4 transactionSize;
+  ub4 channelBitWidth;
+  ub4 rankBitWidth;
+  ub4 bankBitWidth;
+  ub4 rowBitWidth;
+  ub4 colBitWidth;
+  ub4 colHighBitWidth;
+  ub4 colLowBitWidth;
+  ub4 llcTagLowBitWidth;
+  
+  map<ub8, ub8>::iterator map_itr;
+  map<ub8, ub8>::iterator old_row_itr;
+  map<ub8, ub8>::iterator new_row_itr;
+  
+  stream_row_data *old_row_data;
+  stream_row_data *new_row_data;
+  
+  old_row_data      = NULL;
+  new_row_data      = NULL;
+  llcTagLowBitWidth = LOG_BLOCK_SIZE;
+  transactionSize   = (JEDEC_DATA_BUS_BITS / 8) * BL;
+  transactionMask   = transactionSize - 1;
+  channelBitWidth   = log2(NUM_CHANS);
+  rankBitWidth      = log2(NUM_RANKS);
+  bankBitWidth      = log2(NUM_BANKS);
+  rowBitWidth       = log2(NUM_ROWS);
+  colBitWidth       = log2(NUM_COLS);
+
+  byteOffsetWidth = log2((JEDEC_DATA_BUS_BITS / 8)); 
+
+  tmpPhysicalAddress  = info->address;
+  physicalAddress     = info->address >> byteOffsetWidth;
+  colLowBitWidth      = log2(transactionSize) - byteOffsetWidth;
+  physicalAddress     = physicalAddress >> colLowBitWidth;
+  colHighBitWidth     = colBitWidth - colLowBitWidth;
+
+  //row:rank:bank:col:chan
+  tempA = physicalAddress;
+  physicalAddress = physicalAddress >> channelBitWidth;
+  tempB = physicalAddress << channelBitWidth;
+  newTransactionChan = tempA ^ tempB;
+
+  tempA = physicalAddress;
+  physicalAddress = physicalAddress >> colHighBitWidth;
+  tempB = physicalAddress << colHighBitWidth;
+  newTransactionColumn = tempA ^ tempB;
+
+  // bank id
+  tempA = physicalAddress;
+  physicalAddress = physicalAddress >> bankBitWidth;
+  tempB = physicalAddress << bankBitWidth;
+  newTransactionBank = tempA ^ tempB;
+
+  /* XOR with lower LLC tag bits */
+  tempA = tmpPhysicalAddress >> llcTagLowBitWidth;
+  tempB = (tempA >> bankBitWidth) << bankBitWidth;
+  newTransactionBank = newTransactionBank ^ (tempA ^ tempB);
+
+  tempA = physicalAddress;
+  physicalAddress = physicalAddress >> rankBitWidth;
+  tempB = physicalAddress << rankBitWidth;
+  newTransactionRank = tempA ^ tempB;
+
+  tempA = physicalAddress;
+  physicalAddress = physicalAddress >> rowBitWidth;
+  tempB = physicalAddress << rowBitWidth;
+  newTransactionRow = tempA ^ tempB;
+
+#define NRANK                           ((newTransactionRank * NUM_RANKS) + newTransactionChan)
+#define NBANK                           (newTransactionBank)
+#define STREAM_ROW(c, r, b, s)          ((c)->per_stream_row[r][b].current_row[s])
+#define ROW_TO_STREAM(c, r, b)          ((c)->per_stream_row[r][b].row_to_stream_count)
+#define STREAM_ACCESS(c, r, b, s)       ((c)->per_stream_row[r][b].current_access[s])
+#define STREAM_IACCESS(c, r, b, s)      ((c)->per_stream_row[r][b].interval_access[s])
+#define STREAM_TOTAL(c, r, b, s)        ((c)->per_stream_row[r][b].total_access[s])
+#define STREAM_INTERVAL(c, r, b, s)     ((c)->per_stream_row[r][b].total_interval[s])
+#define INTERVAL_PAIR(c, r, b, s, v)    (pair<ub8, ub8>(STREAM_INTERVAL(c, r, b, s), v))
+#define STREAM_ADD_IVL(c, r, b, s, v)   (STREAM_IACCESS(c, r, b, s).insert(INTERVAL_PAIR(c, r, b, s, v)))
+#define STREAM_FIND_IVL(c, r, b, s)     (STREAM_IACCESS(c, r, b, s).find(STREAM_INTERVAL(c, r, b, s)))
+#define STREAM_S_IACCESS(c, r, b, s)    ((c)->per_stream_row[r][b].interval_shared_access[s])
+#define STREAM_S_TOTAL(c, r, b, s)      ((c)->per_stream_row[r][b].total_shared_access[s])
+#define STREAM_S_INTERVAL(c, r, b, s)   ((c)->per_stream_row[r][b].total_shared_interval[s])
+#define S_INTERVAL_PAIR(c, r, b, s, v)  (pair<ub8, ub8>(STREAM_S_INTERVAL(c, r, b, s), v))
+#define STREAM_ADD_S_IVL(c, r, b, s, v) (STREAM_S_IACCESS(c, r, b, s).insert(S_INTERVAL_PAIR(c, r, b, s, v)))
+#define STREAM_FIND_S_IVL(c, r, b, s)   (STREAM_S_IACCESS(c, r, b, s).find(STREAM_S_INTERVAL(c, r, b, s)))
+
+  /* If stream has access to new row, update access and interval counter */
+  if (STREAM_ROW(cache, NRANK, NBANK, info->stream) != newTransactionRow)
+  {
+    /* If row is present in row_to_stream map, get old row data and update 
+     * stream count for the row */
+    old_row_itr = ROW_TO_STREAM(cache, NRANK, NBANK).find(STREAM_ROW(cache, NRANK, NBANK, info->stream));
+    if (old_row_itr != ROW_TO_STREAM(cache, NRANK, NBANK).end())
+    {
+      old_row_data = (stream_row_data *)(old_row_itr->second);
+      if (old_row_data->streams)
+      {
+        /* Update total access by stream in total access counter. */
+        old_row_data->total_access += STREAM_ACCESS(cache, NRANK, NBANK, info->stream);
+
+        /* Decrement streams accessed the row by one */
+        old_row_data->streams -= 1;
+      }
+    }
+    
+    /* Update sharer count for newly accessed row. If row is accessed for the
+     * first time, insert new row in row_to_stream map. */
+    new_row_itr = ROW_TO_STREAM(cache, NRANK, NBANK).find(newTransactionRow);
+    if (new_row_itr != ROW_TO_STREAM(cache, NRANK, NBANK).end())
+    {
+      new_row_data = (stream_row_data *)(new_row_itr->second);
+      assert(new_row_data);
+
+      new_row_data->streams += 1;
+
+      assert(new_row_data->streams <= TST);
+    }
+    else
+    {
+      new_row_data = new stream_row_data;
+      assert(new_row_data);
+      
+      memset(new_row_data, 0, sizeof(stream_row_data));
+
+      new_row_data->streams = 1;
+
+      ROW_TO_STREAM(cache, NRANK, NBANK).insert(pair<ub8, ub8>(newTransactionRow, (ub8)new_row_data));
+    }
+    
+    assert(new_row_data);
+
+    new_row_data->sharer[info->stream] = 1;
+
+    if (STREAM_ACCESS(cache, NRANK, NBANK, info->stream) && old_row_data && old_row_data->streams == 0)
+    {
+      ub1 sharer_count = 0;
+      
+      for (ub1 s = NN + 1; s <= TST; s++)
+      {
+        if (old_row_data->sharer[s])
+        {
+          sharer_count++;
+        }
+      }
+
+      assert(sharer_count);
+
+      for (ub1 s = NN + 1; s <= TST; s++)
+      {
+        if (old_row_data->sharer[s])
+        {
+          if (sharer_count == 1)
+          {
+            map_itr = STREAM_FIND_IVL(cache, NRANK, NBANK, s);
+            if (map_itr == cache->per_stream_row[NRANK][NBANK].interval_access[s].end())
+            {
+              STREAM_ADD_IVL(cache, NRANK, NBANK, s, old_row_data->total_access);
+            }
+
+            STREAM_TOTAL(cache, NRANK, NBANK, s)    += old_row_data->total_access;
+            STREAM_INTERVAL(cache, NRANK, NBANK, s) += 1;
+          }
+          else
+          {
+            map_itr = STREAM_FIND_S_IVL(cache, NRANK, NBANK, s);
+            if (map_itr == cache->per_stream_row[NRANK][NBANK].interval_shared_access[s].end())
+            {
+              STREAM_ADD_S_IVL(cache, NRANK, NBANK, s, old_row_data->total_access);
+            }
+
+            STREAM_S_TOTAL(cache, NRANK, NBANK, s)    += old_row_data->total_access;
+            STREAM_S_INTERVAL(cache, NRANK, NBANK, s) += 1;
+          }
+
+          old_row_data->sharer[s] = 0;
+        }
+      }
+
+      delete old_row_data;
+
+      ROW_TO_STREAM(cache, NRANK, NBANK).erase(STREAM_ROW(cache, NRANK, NBANK, info->stream));
+    }
+
+    STREAM_ROW(cache, NRANK, NBANK, info->stream)     = newTransactionRow;
+    STREAM_ACCESS(cache, NRANK, NBANK, info->stream)  = 0;
+  }
+  else
+  {
+    STREAM_ACCESS(cache, NRANK, NBANK, info->stream) += 1;
+  }
+
+#undef NRANK
+#undef NBANK
+#undef STREAM_ROW
+#undef STREAM_ACCESS
+#undef STREAM_IACCESS
+#undef STREAM_TOTAL
+#undef STREAM_INTERVAL
+#undef INTERVAL_PAIR
+#undef STREAM_ADD_IVL
+#undef STREAM_FIND_IVL
+#undef STREAM_S_IACCESS
+#undef STREAM_S_TOTAL
+#undef STREAM_S_INTERVAL
+#undef S_INTERVAL_PAIR
+#undef STREAM_ADD_S_IVL
+#undef STREAM_FIND_S_IVL
 }
 
 static void update_dramsim_open_row_stats(cachesim_cache *cache, cachesim_cache *shadow_tags, 
@@ -1766,6 +1977,8 @@ static void update_dramsim_open_row_stats(cachesim_cache *cache, cachesim_cache 
     current_row->global_btob_hits       = 0;
     current_row->interval_count         = 0;
     current_row->row_access             = 0;
+    current_row->row_hits               = 0;
+    current_row->row_misses             = 0;
     current_row->row_critical           = 0;
     current_row->row_open               = 0;
     current_row->row_reopen             = 0;
@@ -1831,6 +2044,8 @@ static void update_dramsim_open_row_stats(cachesim_cache *cache, cachesim_cache 
         current_row->global_btob_hits       = 0;
         current_row->interval_count         = 0;
         current_row->row_access             = 0;
+        current_row->row_hits               = 0;
+        current_row->row_misses             = 0;
         current_row->row_critical           = 0;
         current_row->btob_hits              = 0;
         current_row->max_btob_hits          = 0;
@@ -1875,6 +2090,8 @@ static void update_dramsim_open_row_stats(cachesim_cache *cache, cachesim_cache 
       current_row->global_btob_hits       = 0;
       current_row->interval_count         = 0;
       current_row->row_access             = 0;
+      current_row->row_hits               = 0;
+      current_row->row_misses             = 0;
       current_row->row_critical           = 0;
       current_row->btob_hits              = 0;
       current_row->max_btob_hits          = 0;
@@ -1902,7 +2119,14 @@ static void update_dramsim_open_row_stats(cachesim_cache *cache, cachesim_cache 
   current_row->row_access           += 1;
   current_row->periodic_row_access  += 1;
   current_bank->open_row_id          = dramsim_get_open_row(info);
+
+  map_itr = current_row->dist_blocks.find(BLCKALIGN(info->address));
+  if (map_itr == current_row->dist_blocks.end())
+  {
+    current_row->dist_blocks.insert(pair<ub8, ub8>(BLCKALIGN(info->address), info->stream));
+  }
   
+#if 0  
   current_row->page_access[MPAGE_OFFSET(newTransactionColumn)] += 1;
 
   if (remap)
@@ -1943,35 +2167,13 @@ static void update_dramsim_open_row_stats(cachesim_cache *cache, cachesim_cache 
   map_itr = current_row->dist_blocks.find(info->address);
   if (map_itr == current_row->dist_blocks.end())
   {
-    current_row->dist_blocks.insert(pair<ub8, ub8>(info->address, 1));
+    current_row->dist_blocks.insert(pair<ub8, ub8>(info->address, info->stream));
   }
 
   if (newTransactionRow == current_bank->open_row_id)
   {
     current_row->btob_hits += current_row->request_queue.size();
     current_row->request_queue.clear();
-    
-    /* Update btob hits for D value */
-    current_btob  = current_row->btob_hits;
-    shadow_btob   = update_dramsim_shadow_tag_row_hit(shadow_tags, info);
-    
-    current_row->d_value = (shadow_btob > current_btob) ? (shadow_btob - current_btob) : 0;
-
-#define D_TH  (16)
-
-    if (current_row->d_value > D_TH)
-    {
-      map_itr = current_bank->d_rows.find(current_bank->open_row_id);
-      if (map_itr == current_bank->d_rows.end())
-      {
-        current_bank->d_rows.insert(pair<ub8, ub8>(current_bank->open_row_id, current_row->all_blocks.size()));
-      }
-    }
-
-#undef D_TH
-#if 0
-    current_row->row_open += 1;
-#endif
   }
   else
   {
@@ -1989,9 +2191,10 @@ static void update_dramsim_open_row_stats(cachesim_cache *cache, cachesim_cache 
 
     cache->dram_access_count = 0;
   }
+#endif
 }
 
-static void update_dramsim_shadow_tag_open_row_stats(cachesim_cache *cache, memory_trace *info)
+static void update_dramsim_access_completion_stats(cachesim_cache *cache, memory_trace *info)
 {
   ub8 physicalAddress;
   ub8 tmpPhysicalAddress;
@@ -2077,53 +2280,7 @@ static void update_dramsim_shadow_tag_open_row_stats(cachesim_cache *cache, memo
   
   /* Find channel, rank , bank , row  and update count */
   map_itr = cache->dramsim_channels.find(newTransactionChan);  
-  if (map_itr == cache->dramsim_channels.end())
-  {
-    current_channel = new dram_channel();
-    assert(current_channel);
-
-    current_rank = new dram_rank();
-    assert(current_rank);
-
-    current_bank = new dram_bank();
-    assert(current_bank);
-
-    current_row = new dram_row();
-    assert(current_row);
-    
-    current_row->global_row_access      = 0;
-    current_row->global_row_critical    = 0;
-    current_row->global_row_open        = 0;
-    current_row->global_btob_hits       = 0;
-    current_row->interval_count         = 0;
-    current_row->row_access             = 0;
-    current_row->btob_hits              = 0;
-    current_row->max_btob_hits          = 0;
-    current_row->periodic_row_access    = 0;
-    current_row->row_open               = 0;
-    current_row->row_reopen             = 0;
-    current_row->g_row_reopen           = 0;
-
-    for (ub4 i = 0; i < MPAGE_COUNT; i++)
-    {
-      current_row->page_access[i] = 0;
-    }
-
-    for (ub4 i = 0; i < NUM_COLS / 8; i++)
-    {
-      current_row->avl_cols.insert(pair<ub8, ub8>(i, 0)); 
-    }
-  
-    current_bank->bank_rows.insert(pair<ub8, ub8>(newTransactionRow, (ub8)current_row));
-
-    current_rank->banks.insert(pair<ub8, ub8>(newTransactionBank, (ub8)current_bank));
-
-    current_channel->ranks.insert(pair<ub8, ub8>(newTransactionRank, (ub8)current_rank));
-
-    /* Find Rank */  
-    cache->dramsim_channels.insert(pair<ub8, ub8>(newTransactionChan , (ub8)current_channel));
-  }
-  else
+  if (map_itr != cache->dramsim_channels.end())
   {
     current_channel = (dram_channel *)(map_itr->second);
     assert(current_channel);
@@ -2135,301 +2292,27 @@ static void update_dramsim_shadow_tag_open_row_stats(cachesim_cache *cache, memo
       assert(current_rank);
 
       map_itr = current_rank->banks.find(newTransactionBank);
-      if (map_itr == current_rank->banks.end())
-      {
-        current_bank = new dram_bank();
-        assert(current_bank);
-
-        current_rank->banks.insert(pair<ub8, ub8>(newTransactionBank, (ub8)current_bank));
-      }
-      else
+      if (map_itr != current_rank->banks.end())
       {
         current_bank = (dram_bank *)(map_itr->second);
-      }
-      
-      map_itr = current_bank->bank_rows.find(newTransactionRow);
-      if (map_itr == current_bank->bank_rows.end())
-      {
-        current_row = new dram_row();
-        assert(current_row);
-        
-        current_row->global_row_access      = 0;
-        current_row->global_row_critical    = 0;
-        current_row->global_row_open        = 0;
-        current_row->global_btob_hits       = 0;
-        current_row->interval_count         = 0;
-        current_row->row_access             = 0;
-        current_row->btob_hits              = 0;
-        current_row->max_btob_hits          = 0;
-        current_row->periodic_row_access    = 0;
-        current_row->row_open               = 0;
-        current_row->row_reopen             = 0;
-        current_row->g_row_reopen           = 0;
 
-        for (ub4 i = 0; i < MPAGE_COUNT; i++)
+        map_itr = current_bank->bank_rows.find(newTransactionRow);
+        if (map_itr != current_bank->bank_rows.end())
         {
-          current_row->page_access[i] = 0;
-        }
+          current_row = (dram_row *)(map_itr->second);
 
-        for (ub4 i = 0; i < NUM_COLS / 8; i++)
-        {
-          current_row->avl_cols.insert(pair<ub8, ub8>(i, 0)); 
-        }
-
-        current_bank->bank_rows.insert(pair<ub8, ub8>(newTransactionRow, (ub8)current_row));      
-      }
-      else
-      {
-        current_row = (dram_row *)(map_itr->second);
-
-        if (current_row->row_access == 0)
-        {
+          if (info->prefetch)
+          {
+            current_row->row_hits += 1;
+          }
+          else
+          {
+            current_row->row_misses += 1;
+          }
         }
       }
     }
-    else
-    {
-      current_rank = new dram_rank();
-      assert(current_rank);
-
-      current_bank = new dram_bank();
-      assert(current_bank);
-
-      current_row = new dram_row();
-      assert(current_row);
-        
-      current_row->global_row_access      = 0;
-      current_row->global_row_critical    = 0;
-      current_row->global_row_open        = 0;
-      current_row->global_btob_hits       = 0;
-      current_row->interval_count         = 0;
-      current_row->row_access             = 0;
-      current_row->btob_hits              = 0;
-      current_row->max_btob_hits          = 0;
-      current_row->row_open               = 0;
-      current_row->row_reopen             = 0;
-      current_row->g_row_reopen           = 0;
-      current_row->periodic_row_access    = 0;
-
-      for (ub4 i = 0; i < MPAGE_COUNT; i++)
-      {
-        current_row->page_access[i] = 0;
-      }
-
-      for (ub4 i = 0; i < NUM_COLS / 8; i++)
-      {
-        current_row->avl_cols.insert(pair<ub8, ub8>(i, 0)); 
-      }
-
-      current_bank->bank_rows.insert(pair<ub8, ub8>(newTransactionRow, (ub8)current_row));
-      current_rank->banks.insert(pair<ub8, ub8>(newTransactionBank, (ub8)current_bank));
-      current_channel->ranks.insert(pair<ub8, ub8>(newTransactionRank, (ub8)current_rank));
-    }
   }
-
-  
-  if (current_row->row_access == 0)
-  {
-    current_bank->access_list.push_back(newTransactionRow);
-  }
-
-  current_row->row_access += 1;
-
-  current_row->periodic_row_access += 1;
-
-  current_row->page_access[MPAGE_OFFSET(newTransactionColumn)] += 1;
-
-  /* Update per-bank row stats */
-  map_itr = current_row->request_queue.find(info->address);
-  if (map_itr ==  current_row->request_queue.end())
-  {
-    current_row->request_queue.insert(pair<ub8, ub8>(info->address, 1));
-  }
-
-  map_itr = current_row->row_blocks.find(info->address);
-  if (map_itr == current_row->row_blocks.end())
-  {
-    current_row->row_blocks.insert(pair<ub8, ub8>(info->address, 1));
-  }
-
-  current_bank->open_row_id = dramsim_get_open_row(info);
-
-  map_itr = current_bank->bank_rows.find(current_bank->open_row_id);
-  if (map_itr != current_bank->bank_rows.end())
-  {
-    current_row = (dram_row *)(map_itr->second);
-    assert(current_row);
-#if 0
-    current_row->row_open += 1;
-#endif
-  }
-}
-
-static void update_dramsim_open_row_response_stats(cachesim_cache *cache, memory_trace *info)
-{
-  ub8 physicalAddress;
-  ub8 tmpPhysicalAddress;
-  ub8 newTransactionChan;
-  ub8 newTransactionColumn;
-  ub8 newTransactionBank;
-  ub8 newTransactionRank;
-  ub8 newTransactionRow;
-  ub8 tempA;
-  ub8 tempB;
-  ub8 transactionMask;
-
-  ub4 byteOffsetWidth;
-  ub4 transactionSize;
-  ub4 channelBitWidth;
-  ub4 rankBitWidth;
-  ub4 bankBitWidth;
-  ub4 rowBitWidth;
-  ub4 colBitWidth;
-  ub4 colHighBitWidth;
-  ub4 colLowBitWidth;
-  ub4 llcTagLowBitWidth;
-
-  llcTagLowBitWidth = LOG_BLOCK_SIZE;
-  transactionSize   = (JEDEC_DATA_BUS_BITS / 8) * BL;
-  transactionMask   = transactionSize - 1;
-  channelBitWidth   = log2(NUM_CHANS);
-  rankBitWidth      = log2(NUM_RANKS);
-  bankBitWidth      = log2(NUM_BANKS);
-  rowBitWidth       = log2(NUM_ROWS);
-  colBitWidth       = log2(NUM_COLS);
-
-  byteOffsetWidth = log2((JEDEC_DATA_BUS_BITS / 8)); 
-  
-  tmpPhysicalAddress  = info->address;
-  physicalAddress     = info->address >> byteOffsetWidth;
-  colLowBitWidth      = log2(transactionSize) - byteOffsetWidth;
-  physicalAddress     = physicalAddress >> colLowBitWidth;
-  colHighBitWidth     = colBitWidth - colLowBitWidth;
-
-  //row:rank:bank:col:chan
-  tempA = physicalAddress;
-  physicalAddress = physicalAddress >> channelBitWidth;
-  tempB = physicalAddress << channelBitWidth;
-  newTransactionChan = tempA ^ tempB;
-
-  tempA = physicalAddress;
-  physicalAddress = physicalAddress >> colHighBitWidth;
-  tempB = physicalAddress << colHighBitWidth;
-  newTransactionColumn = tempA ^ tempB;
-
-  // bank id
-  tempA = physicalAddress;
-  physicalAddress = physicalAddress >> bankBitWidth;
-  tempB = physicalAddress << bankBitWidth;
-  newTransactionBank = tempA ^ tempB;
-
-  /* XOR with lower LLC tag bits */
-  tempA = tmpPhysicalAddress >> llcTagLowBitWidth;
-  tempB = (tempA >> bankBitWidth) << bankBitWidth;
-  newTransactionBank = newTransactionBank ^ (tempA ^ tempB);
-
-  tempA = physicalAddress;
-  physicalAddress = physicalAddress >> rankBitWidth;
-  tempB = physicalAddress << rankBitWidth;
-  newTransactionRank = tempA ^ tempB;
-
-  tempA = physicalAddress;
-  physicalAddress = physicalAddress >> rowBitWidth;
-  tempB = physicalAddress << rowBitWidth;
-  newTransactionRow = tempA ^ tempB;
-  
-  map<ub8, ub8>::iterator map_itr;
-  dram_channel  *current_channel;
-  dram_rank     *current_rank;
-  dram_bank     *current_bank;
-  dram_row      *current_row;
-
-  /* Find channel, rank , bank , row  and update count */
-  map_itr = cache->dramsim_channels.find(newTransactionChan);  
-  assert(map_itr != cache->dramsim_channels.end());
-
-  current_channel = (dram_channel *)(map_itr->second);
-  assert(current_channel);
-
-  map_itr = current_channel->ranks.find(newTransactionRank);
-  assert(map_itr != current_channel->ranks.end());
-
-  current_rank = (dram_rank *)(map_itr->second);
-  assert(current_rank);
-
-  map_itr = current_rank->banks.find(newTransactionBank);
-  assert (map_itr != current_rank->banks.end());
-
-  current_bank = (dram_bank *)(map_itr->second);
-  assert(current_bank);
-  
-  map_itr = current_bank->bank_rows.find(newTransactionRow);
-
-  assert(map_itr != current_bank->bank_rows.end());
-  
-  current_row = (dram_row *)(map_itr->second);
-  assert(current_row);
-
-  map_itr = current_row->request_queue.find(info->address);
-  if (map_itr != current_row->request_queue.end())
-  {
-    current_row->request_queue.erase(info->address);
-  }
-  
-  if (current_row->all_blocks.find(info->address) != current_row->all_blocks.end())
-  {
-    current_row->all_blocks.erase(info->address);
-  }
-
-  map_itr = current_bank->d_rows.find(newTransactionRow);
-  if (map_itr != current_bank->d_rows.end())
-  {
-    map_itr->second = current_row->all_blocks.size();
-  }
-    
-  if (info->prefetch)
-  {
-    current_row->row_open += 1;
-  }
-  else
-  {
-    current_row->row_reopen += 1;
-    current_bank->row_reopen += 1;
-  }
-
-#if 0
-  /* Collect response and remap blocks */
-#define RESPONSE_TH (0)
-
-  map_itr = current_row->response_queue.find(info->address);
-  if (map_itr == current_row->response_queue.end())
-  {
-    current_row->response_queue.insert(pair<ub8, ub8>(info->address, 1));
-
-    if (current_row->response_queue.size() >= RESPONSE_TH)
-    {
-      for (map_itr = current_row->response_queue.begin(); map_itr != current_row->response_queue.end(); map_itr++)
-      {
-        if (current_row->all_blocks.find(map_itr->first) != current_row->all_blocks.end())
-        {
-          current_row->all_blocks.erase(map_itr->first);
-        }
-      }
-
-      map_itr = current_bank->d_rows.find(newTransactionRow);
-      if (map_itr != current_bank->d_rows.end())
-      {
-        map_itr->second = current_row->all_blocks.size();
-      }
-
-      current_row->response_queue.clear();
-    }
-  }
-#endif
-
-
-#undef RESPONSE_TH
-
 }
 
 #define PG_ACCESS_CNT(i) (((i)->cluster)->page_access[(i)->cluster_off])
@@ -2622,6 +2505,11 @@ cache_access_status cachesim_fill_block(cachesim_cache *cache, memory_trace *inf
           /* Allocate DRAM timing stats structure before issuing a DRAM request */
           info_out->policy_data = (void *)calloc(1, sizeof(dram_queue_time));
 
+          if (cache->dramsim_enable)
+          {
+            update_dramsim_open_row_stats(cache, NULL, FALSE, info_out);
+          }
+
           dramsim_request(TRUE, BLCKALIGN(info_out->address), info_out->stream, info_out); 
 
           ret.fate  = CACHE_ACCESS_RPLC;
@@ -2676,226 +2564,6 @@ cache_access_status cachesim_fill_block(cachesim_cache *cache, memory_trace *inf
   return ret;
 }
 
-static void get_d_row_id(cachesim_cache *cache, memory_trace *info, 
-    ub8 &chn_id, ub8 &rnk_id, ub8 &bnk_id, ub8 &row_id, ub8 &col_id)
-{
-  ub8 physicalAddress;
-  ub8 tmpPhysicalAddress;
-  ub8 newTransactionChan;
-  ub8 newTransactionColumn;
-  ub8 newTransactionBank;
-  ub8 newTransactionRank;
-  ub8 newTransactionRow;
-  ub8 tempA;
-  ub8 tempB;
-  ub8 transactionMask;
-  ub8 btob;
-  ub8 d_row;
-  ub8 d_col;
-
-  ub4 byteOffsetWidth;
-  ub4 transactionSize;
-  ub4 channelBitWidth;
-  ub4 rankBitWidth;
-  ub4 bankBitWidth;
-  ub4 rowBitWidth;
-  ub4 colBitWidth;
-  ub4 colHighBitWidth;
-  ub4 colLowBitWidth;
-  ub4 llcTagLowBitWidth;
-
-  llcTagLowBitWidth = LOG_BLOCK_SIZE;
-  transactionSize   = (JEDEC_DATA_BUS_BITS / 8) * BL;
-  transactionMask   = transactionSize - 1;
-  channelBitWidth   = log2(NUM_CHANS);
-  rankBitWidth      = log2(NUM_RANKS);
-  bankBitWidth      = log2(NUM_BANKS);
-  rowBitWidth       = log2(NUM_ROWS);
-  colBitWidth       = log2(NUM_COLS);
-  btob              = 0;
-
-  byteOffsetWidth = log2((JEDEC_DATA_BUS_BITS / 8)); 
-
-  tmpPhysicalAddress  = info->address;
-  physicalAddress     = info->address >> byteOffsetWidth;
-  colLowBitWidth      = log2(transactionSize) - byteOffsetWidth;
-  physicalAddress     = physicalAddress >> colLowBitWidth;
-  colHighBitWidth     = colBitWidth - colLowBitWidth;
-  
-  //row:rank:bank:col:chan
-  tempA = physicalAddress;
-  physicalAddress = physicalAddress >> channelBitWidth;
-  tempB = physicalAddress << channelBitWidth;
-  newTransactionChan = tempA ^ tempB;
-
-  tempA = physicalAddress;
-  physicalAddress = physicalAddress >> colHighBitWidth;
-  tempB = physicalAddress << colHighBitWidth;
-  newTransactionColumn = tempA ^ tempB;
-
-  // bank id
-  tempA = physicalAddress;
-  physicalAddress = physicalAddress >> bankBitWidth;
-  tempB = physicalAddress << bankBitWidth;
-  newTransactionBank = tempA ^ tempB;
-
-  /* XOR with lower LLC tag bits */
-  tempA = tmpPhysicalAddress >> llcTagLowBitWidth;
-  tempB = (tempA >> bankBitWidth) << bankBitWidth;
-  newTransactionBank = newTransactionBank ^ (tempA ^ tempB);
-
-  tempA = physicalAddress;
-  physicalAddress = physicalAddress >> rankBitWidth;
-  tempB = physicalAddress << rankBitWidth;
-  newTransactionRank = tempA ^ tempB;
-
-  tempA = physicalAddress;
-  physicalAddress = physicalAddress >> rowBitWidth;
-  tempB = physicalAddress << rowBitWidth;
-  newTransactionRow = tempA ^ tempB;
-
-  map<ub8, ub8>::iterator map_itr;
-  dram_channel  *current_channel;
-  dram_rank     *current_rank;
-  dram_bank     *current_bank;
-  dram_row      *current_row;
-
-  current_channel = NULL;
-  current_rank    = NULL;
-  current_bank    = NULL;
-  current_row     = NULL;
-  
-  chn_id  = newTransactionChan;
-  rnk_id  = newTransactionRank;
-  bnk_id  = newTransactionBank;
-  d_row   = newTransactionRow;
-  d_col   = newTransactionColumn;
-  
-  map_itr = cache->remap_rows.find(newTransactionRow);
-  if (map_itr != cache->remap_rows.end())
-  {
-    d_row = map_itr->second;
-
-    /* Find channel, rank , bank , row  and update count */
-    map_itr = cache->dramsim_channels.find(newTransactionChan);  
-
-    if (map_itr != cache->dramsim_channels.end())
-    {
-      current_channel = (dram_channel *)(map_itr->second);
-      assert(current_channel);
-
-      map_itr = current_channel->ranks.find(newTransactionRank);
-
-      if (map_itr != current_channel->ranks.end())
-      {
-        current_rank = (dram_rank *)(map_itr->second);
-        assert(current_rank);
-
-        map_itr = current_rank->banks.find(newTransactionBank);
-        if (map_itr != current_rank->banks.end())
-        {
-          current_bank = (dram_bank *)(map_itr->second);
-
-          map_itr = current_bank->bank_rows.find(d_row); 
-
-          if (map_itr != current_bank->bank_rows.end())
-          {
-            current_row = (dram_row *)(map_itr->second);
-
-            if (current_row->all_blocks.size() >= 120)
-            {
-              d_row = newTransactionRow;
-            }
-            else
-            {
-              cache->remap_count += 1;
-#if 0
-              printf("M:%ld[%ld]:%ld:%ld ", d_row, newTransactionRow, current_row->dist_blocks.size(), current_row->all_blocks.size());
-#endif
-            }
-          }
-        }
-      }
-    }
-  }
-  else
-  {
-    /* Find channel, rank , bank , row  and update count */
-    map_itr = cache->dramsim_channels.find(newTransactionChan);  
-
-    if (map_itr != cache->dramsim_channels.end())
-    {
-      current_channel = (dram_channel *)(map_itr->second);
-      assert(current_channel);
-
-      map_itr = current_channel->ranks.find(newTransactionRank);
-
-      if (map_itr != current_channel->ranks.end())
-      {
-        current_rank = (dram_rank *)(map_itr->second);
-        assert(current_rank);
-
-        map_itr = current_rank->banks.find(newTransactionBank);
-        if (map_itr != current_rank->banks.end())
-        {
-          current_bank = (dram_bank *)(map_itr->second);
-          assert(current_bank);
-
-          if (!current_bank->isDRow(newTransactionRow) && current_bank->d_rows.size()
-              && current_bank->predicted_rows.find(newTransactionRow) != current_bank->predicted_rows.end())
-          {
-            d_row = current_bank->getMinDRow();
-
-            map_itr = current_bank->d_rows.find(d_row); 
-            assert(map_itr != current_bank->d_rows.end());
-            if (map_itr->second >= 120)
-            {
-              d_row = newTransactionRow;
-            }
-            else
-            {
-              cache->remap_count += 1;
-              map_itr = current_bank->bank_rows.find(d_row);
-              assert(map_itr != current_bank->bank_rows.end());
-
-              current_row = (dram_row *)(map_itr->second);
-              assert(current_row);
-#if 0
-              d_col = current_row->avl_cols.begin()->first;
-              current_row->avl_cols.erase(d_col);
-#endif
-              map_itr = current_bank->remap_rows.find(newTransactionRow);
-              if (map_itr == current_bank->remap_rows.end())
-              {
-                current_bank->remap_rows.insert(pair<ub8, ub8>(newTransactionRow, d_row));
-              }
-              else
-              {
-                map_itr->second = d_row;
-              }
-
-              map_itr = current_bank->remap_rows.find(d_row);
-              if (map_itr == current_bank->remap_rows.end())
-              {
-                current_bank->remap_rows.insert(pair<ub8, ub8>(d_row, newTransactionRow));
-              }
-              else
-              {
-                map_itr->second = newTransactionRow;
-              }
-
-              printf("%ld[%ld]:%ld:%ld ", d_row, newTransactionRow, current_row->dist_blocks.size(), current_row->all_blocks.size());
-            }
-          }
-        }
-      }
-    }
-  }
-
-  row_id = d_row;
-  col_id = d_col;
-}
-
 cache_access_status cachesim_incl_cache(cachesim_cache *cache, cachesim_cache *shadow_tags, 
     ub8 addr, ub8 rdis, ub1 strm, memory_trace *info)
 {
@@ -2924,7 +2592,9 @@ cache_access_status cachesim_incl_cache(cachesim_cache *cache, cachesim_cache *s
 
   block = cache_find_block(cache->cache, indx, addr, info);
 
+#if 0
   update_dramsim_row_access_stats(cache, info);
+#endif
 
   /* If access is a miss */
   if (!block)
@@ -2968,64 +2638,7 @@ cache_access_status cachesim_incl_cache(cachesim_cache *cache, cachesim_cache *s
         dram_row  *current_row; 
         access_remapped = FALSE;
 
-        if (cache->remap_crtcl)
-        {
-          original_row_id = get_row_id(info->address);
-
-          /* Get new row id */
-          map_itr = cache->remap_page_table.find(info->address);
-          if (map_itr != cache->remap_page_table.end())
-          {
-            info_out->address = map_itr->second;
-          }
-          else
-          {
-            get_d_row_id(cache, info, speedup_chn_id, speedup_rnk_id, speedup_bnk_id, speedup_row_id, speedup_col_id);
-
-            if (speedup_row_id != get_row_id(info->address))
-            {
-              info_out->address = change_row_id(info->address, speedup_row_id, speedup_col_id);
-
-              check_row_id(info_out->address, speedup_chn_id, speedup_rnk_id, speedup_bnk_id, speedup_row_id, speedup_col_id);
-
-              access_remapped = TRUE;
-
-              map_itr = cache->remap_page_table.find(info->address);
-              if (map_itr == cache->remap_page_table.end())
-              {
-                cache->remap_page_table.insert(pair<ub8, ub8>(info->address, info_out->address)); 
-              }
-              else
-              {
-                map_itr->second = info_out->address;
-              }
-
-              map_itr = cache->remap_rows.find(original_row_id);
-              if (map_itr == cache->remap_rows.end())
-              {
-                cache->remap_rows.insert(pair<ub8, ub8>(original_row_id, speedup_row_id)); 
-              }
-
-              map_itr = cache->remap_page_table.find(info_out->address);
-              if (map_itr == cache->remap_page_table.end())
-              {
-                cache->remap_page_table.insert(pair<ub8, ub8>(info_out->address, info->address)); 
-              }
-              else
-              {
-                map_itr->second = info->address;
-              }
-
-              map_itr = cache->remap_rows.find(speedup_row_id);
-              if (map_itr == cache->remap_rows.end())
-              {
-                cache->remap_rows.insert(pair<ub8, ub8>(speedup_row_id, original_row_id)); 
-              }
-            }
-          }
-        }
-
-        if (cache->shuffle_row)
+        if (cache->dramsim_enable)
         {
           update_dramsim_open_row_stats(cache, shadow_tags, access_remapped, info_out);
         }
@@ -3036,16 +2649,6 @@ cache_access_status cachesim_incl_cache(cachesim_cache *cache, cachesim_cache *s
         dramsim_request(FALSE, BLCKALIGN(info_out->address), info_out->stream, info_out); 
 
         pending_requests += 1;
-#if 0
-        if (++(cache->cache_access_count) >= INTERVAL_SIZE)
-        {
-          /* Finalize component simulators */
-          cache->cache_access_count = 0;
-
-          printf("Interval %ld\n", total_interval++);
-          fflush(stdout);
-        }
-#endif
       }
       else
       {
@@ -3096,6 +2699,11 @@ cache_access_status cachesim_incl_cache(cachesim_cache *cache, cachesim_cache *s
       }
       else
       {
+        if (info->fill)
+        {
+          update_stream_row_stats(cache, NULL, FALSE, info);
+        }
+
         ret = cachesim_fill_block(cache, info);
       }
     }
@@ -3118,57 +2726,6 @@ cache_access_status cachesim_incl_cache(cachesim_cache *cache, cachesim_cache *s
   }
   
   return ret;
-}
-
-void cachesim_shadow_cache_lookup(cachesim_cache *cache, ub8 addr, 
-  ub1 strm, memory_trace *info)
-{
-  struct    cache_block_t *block;
-  ub8       indx;
-
-  assert(cache);
-  assert(info);
-
-  indx        = ADDR_NDX(cache, addr);
-  addr        = BLCKALIGN(addr); 
-
-  if (strm == NN || strm > TST)
-  {
-    cout << "Illegal stream " << (int)strm << endl;
-  }
-
-  assert(strm != NN && strm <= TST);
-
-  block = cache_find_block(cache->cache, indx, addr, info);
-
-  shadow_access++;
-
-  /* If access is a miss */
-  if (!block)
-  {
-    assert(info->prefetch == FALSE);
-
-    shadow_miss++;
-    
-    if (cache->dramsim_enable && info->fill == TRUE)
-    {
-      if (cache->shuffle_row)
-      {
-        update_dramsim_shadow_tag_open_row_stats(cache, info);
-      }
-    }
-
-    cachesim_fill_block(cache, info);
-  }
-  else
-  {
-    if (cache->dramsim_enable && info->fill == TRUE && cache->shuffle_row)
-    {
-      update_dramsim_shadow_tag_open_row_stats(cache, info);
-    }
-
-    cache_access_block(cache->cache, indx, block->way, strm, info);
-  }
 }
 
 cache_access_status cachesim_only_dram(cachesim_cache *cache, ub8 addr, 
@@ -5861,71 +5418,6 @@ void update_access_stats(cachesim_cache *cache, memory_trace *info, cache_access
             assert(0);
         }
       }
-
-#if 0
-      if (ret.stream >= PS && ret.stream <= PS + MAX_CORES - 1)
-      {
-        assert(p_blocks->getValue());
-        (*p_blocks)--;
-      }
-      else
-      {
-        switch (ret.stream)
-        {
-          case IS:
-            assert(i_blocks->getValue());
-            (*i_blocks)--;
-            break;
-
-          case CS:
-
-            assert(c_blocks->getValue(1) && info->stream != CS);
-            (*c_blocks)--;
-            break;
-
-          case ZS:
-            assert(z_blocks->getValue());
-            (*z_blocks)--;
-            break;
-
-          case TS:
-            assert(t_blocks->getValue());
-            (*t_blocks)--;
-            break;
-
-          case NS:
-            assert(n_blocks->getValue());
-            (*n_blocks)--;
-            break;
-
-          case HS:
-            assert(h_blocks->getValue());
-            (*h_blocks)--;
-            break;
-
-          case BS:
-            assert(b_blocks->getValue());
-            (*b_blocks)--;
-            break;
-
-          case DS:
-            assert(d_blocks->getValue());
-            (*d_blocks)--;
-            break;
-
-          case XS:
-            assert(x_blocks->getValue());
-            (*x_blocks)--;
-            break;
-
-          default:
-            cout << "Illegal stream " << (int)ret.stream << " for address ";
-            cout << hex << info->address << " type : ";
-            cout << dec << (int)info->fill << " spill: " << dec << (int)info->spill;
-            assert(0);
-        }
-      }
-#endif
     }
   }
 
@@ -6038,13 +5530,6 @@ ub1 dram_cycle(cachesim_cache *cache, ub8 dramcycle)
   {
     assert(pending_requests);
 
-#if 0    
-    if (info->fill && cache->shuffle_row)
-    {
-      update_dramsim_open_row_response_stats(cache, info);
-    }
-#endif    
-
     /* Restore old physical address */
     info->address = info->vtl_addr;
 
@@ -6075,6 +5560,9 @@ ub1 dram_cycle(cachesim_cache *cache, ub8 dramcycle)
     {
       free(info->policy_data);
     }
+    
+    /* Update DRAM access completion stats */
+    update_dramsim_access_completion_stats(cache, info);
 
     free(info);
   }
@@ -6181,10 +5669,10 @@ ub1 cache_cycle(cachesim_cache *cache, cachesim_cache *shadow_tag, ub8 cachecycl
 #undef QUEUE_HEAD
 #undef QUEUE_HEAD_DATA
 
-#if 0
     if (info)
-#endif
+#if 0
     if (info && cachecycle >= info->cycle)
+#endif
     {
       assert(current_queue);
       assert(current_node);
@@ -6246,12 +5734,6 @@ ub1 cache_cycle(cachesim_cache *cache, cachesim_cache *shadow_tag, ub8 cachecycl
       /* Update cachecycle interval end */
       if (cache->cachecycle_interval >= CYCLE_INTERVAL)
       {
-#if 0
-        cachesim_dump_per_bank_stats(cache, shadow_tag);
-        cachesim_update_cycle_interval_end(cache, shadow_tag);
-#endif
-        cache->remap_page_table.clear();
-        cache->remap_rows.clear();
         cache->cachecycle_interval = 0;
       }
     }
@@ -6260,120 +5742,6 @@ ub1 cache_cycle(cachesim_cache *cache, cachesim_cache *shadow_tag, ub8 cachecycl
   }
 
   return sim_end;
-}
-
-ub1 shadow_tag_cycle(cachesim_cache *cache, ub8 shadowtag_cycle, ub8 cachecycle)
-{
-  cs_qnode             *current_queue;  /* Queue for last request */
-  cs_qnode             *current_node;   /* Last request node */
-  memory_trace         *info;           /* Generic structure used for requests between units */
-  memory_trace         *new_info;       /* Generic structure used for requests between units */
-
-  if (!gzeof(cache->trc_file) || !cs_qempty(&(cache->rdylist)) || !cs_qempty(&(cache->plist)))
-  {
-    info          = NULL;
-    current_queue = NULL;
-    current_node  = NULL;
-
-    if (cs_qempty(&(cache->rdylist)) && !gzeof(cache->trc_file))
-    {
-      new_info = (memory_trace *)calloc(1, sizeof(memory_trace));
-      assert(new_info);
-  
-      gzread(cache->trc_file, (char *)new_info, sizeof(memory_trace));
-
-      if (!gzeof(cache->trc_file))
-      {
-        cs_qappend(&(cache->rdylist), (ub1 *)new_info);  
-      }
-      else
-      {
-        free(new_info);
-      }
-    }
-
-    /* Read entire trace file and run the simulation */
-
-#define QUEUE_HEAD(q)       ((cs_qnode *)((q)->next))
-#define QUEUE_HEAD_DATA(q)  (((cs_qnode *)((q)->next))->data)
-
-    if (cs_qempty(&(cache->plist)))
-    {
-      if (!cs_qempty(&(cache->rdylist)))
-      {
-        current_queue = &(cache->rdylist);
-        current_node  = (cs_qnode*)QUEUE_HEAD(&(cache->rdylist));
-
-        info = (memory_trace *)QUEUE_HEAD_DATA(&(cache->rdylist));
-      }
-    }
-    else
-    {
-#if 0
-#if 0
-  if (frame_itr == cache->src_frames.end() && info->sap_stream != speedup_stream_x)
-#endif
-  if (frame_itr == cache->src_frames.end() && info->sap_stream != speedup_stream_x)
-#endif
-      current_queue = &(cache->plist);
-      current_node  = (cs_qnode*)QUEUE_HEAD(&(cache->plist));
-
-      info = (memory_trace *)QUEUE_HEAD_DATA(&(cache->plist));
-    }
-
-#undef QUEUE_HEAD
-#undef QUEUE_HEAD_DATA
-    
-    if (shadow_access > real_access)
-    {
-      if (shadow_access - real_access > 100000)
-      {
-        access_shadow_tag = FALSE;
-      }
-    }
-    else
-    {
-      access_shadow_tag = TRUE;
-#if 0
-      printf("Access jumped %ld\n", access_jumped);
-#endif
-      access_jumped = 0;
-    }
-
-#if 0
-    if (info)
-#endif
-    if (info && shadowtag_cycle >= info->cycle)
-    {
-      assert(current_queue);
-      assert(current_node);
-
-      info->vtl_addr  = info->address;
-
-      assert(cache->dramsim_trace == FALSE);
-
-      /* Increment per-set access count */
-      cachesim_shadow_cache_lookup(cache, info->address, info->stream, info);
-
-      cs_qdelete(current_queue, current_node);
-      free(info);
-      
-      /* Update cachecycle interval end */
-      if (cache->cachecycle_interval >= CYCLE_INTERVAL)
-      {
-        cache->cachecycle_interval = 0;
-      }
-    }
-    else
-    {
-      if (info)
-      {
-        access_jumped += 1;
-      }
-    }
-  }
-
-  return (gzeof(cache->trc_file));
 }
 
 /* Simulation start */
@@ -6397,7 +5765,6 @@ int main(int argc, char **argv)
   ub8  shadow_tag_ctime;
   ub8  dram_ctime;
   ub8  cache_next_cycle;
-  ub8  shadow_tag_next_cycle;
   ub8  dram_next_cycle;
   ub8  current_cycle;
   ub8  total_cycle;
@@ -6495,7 +5862,7 @@ int main(int argc, char **argv)
   {
     way_count = 1;
   }
-  
+
   /* Allocate cache size array */
   cache_sizes = (ub8 *)malloc(sizeof(ub8) * cache_count);
   assert(cache_sizes);
@@ -6543,11 +5910,12 @@ int main(int argc, char **argv)
   openStatisticsStream(&sim_params, stats_stream);
   initStatistics(sm);
 
+#if 0
   if (sim_params.lcP.dramSimEnable == FALSE)
   {
     dram_config_init(&(l3cache.dram_info));
-    dram_config_init(&(shadow_tags.dram_info));
   }
+#endif
 
   cout << endl << "Running for " << cache_count << " iterations" << endl;
 
@@ -6567,6 +5935,20 @@ int main(int argc, char **argv)
       CLRSTRUCT(shadow_tags.miss); 
       CLRSTRUCT(shadow_tags.itr_count);
       CLRSTRUCT(shadow_tags.cachecycle);
+
+      for (ub1 rank = 0; rank < NUM_CHANS * NUM_RANKS; rank++)
+      {
+        for (ub1 bank = 0; bank < NUM_BANKS; bank++)
+        {
+          CLRSTRUCT(l3cache.per_stream_row[rank][bank].current_row); 
+          CLRSTRUCT(l3cache.per_stream_row[rank][bank].current_access); 
+          CLRSTRUCT(l3cache.per_stream_row[rank][bank].total_access); 
+          CLRSTRUCT(l3cache.per_stream_row[rank][bank].total_interval); 
+          CLRSTRUCT(l3cache.per_stream_row[rank][bank].max_access); 
+          CLRSTRUCT(l3cache.per_stream_row[rank][bank].total_shared_access); 
+          CLRSTRUCT(l3cache.per_stream_row[rank][bank].total_shared_interval); 
+        }
+      }
 
       set_cache_params(&params, &(sim_params.lcP), cache_sizes[c_cache], cache_ways[c_way], cache_set);
 
@@ -6601,7 +5983,6 @@ int main(int argc, char **argv)
 
       /* Initialize shadow tags */
       shadow_tag_ctime        = cs_init(&shadow_tags, params, trc_file_name);
-      shadow_tag_next_cycle   = SHADOW_TAG_CTIME;
       shadow_tags.shadow_tag  = TRUE; 
 
       if (l3cache.dramsim_enable)
@@ -6622,15 +6003,13 @@ int main(int argc, char **argv)
       {
         if (l3cache.dramsim_enable)
         {
-          current_cycle         = MINIMUM(MINIMUM(cache_next_cycle, dram_next_cycle), shadow_tag_next_cycle);
+          current_cycle         = MINIMUM(cache_next_cycle, dram_next_cycle);
           cache_next_cycle      = cache_next_cycle - current_cycle;
-          shadow_tag_next_cycle = shadow_tag_next_cycle - current_cycle;
           dram_next_cycle       = dram_next_cycle - current_cycle;
         }
         else
         {
           current_cycle         = cache_next_cycle;
-          shadow_tag_next_cycle = shadow_tag_next_cycle - current_cycle;
           cache_next_cycle      = cache_next_cycle - current_cycle;
         }
 
@@ -6638,27 +6017,9 @@ int main(int argc, char **argv)
         {
           cache_done        = cache_cycle(&l3cache, &shadow_tags, l3cache.cachecycle);
           cache_next_cycle  = cache_ctime;
-          
+
           l3cache.cachecycle          += 1;
           l3cache.cachecycle_interval += 1;
-#if 0
-          if (l3cache.cachecycle % 1000000 == 0)
-          {
-            printf("Cycle times : %ld %ld\n", l3cache.cachecycle, shadow_tags.cachecycle);
-            printf("Real miss:%ld:%ld Shadow miss: %ld:%ld\n", real_access, real_miss, shadow_access, shadow_miss);
-          }
-#endif
-        }
-
-        if (!shadow_tag_next_cycle)
-        {
-          /* Access shadow tags  */
-#if 0
-          shadow_tag_cycle(&shadow_tags, shadow_tags.cachecycle, l3cache.cachecycle);
-#endif
-          shadow_tag_next_cycle = SHADOW_TAG_CTIME;
-
-          shadow_tags.cachecycle += 1;
         }
 
         if (l3cache.dramsim_enable && !dram_next_cycle)
@@ -6679,18 +6040,16 @@ int main(int argc, char **argv)
 
         (*all_access)++;
 
-        if (!(inscnt % 1000000))
+        if (!(inscnt % 10000000))
         {
           sm->dumpValues(cache_sizes[c_cache], 0, CH, stats_stream);
           periodicReset();
+          dumpDRAMStats(&l3cache);
           fflush(stdout);
         }
       }while(!cache_done || !dram_done);
-      
-      cachesim_dump_per_bank_stats(&l3cache, &shadow_tags, TRUE);
 
-      printf("Real miss:%ld:%ld Shadow miss: %ld:%ld\n", real_access, real_miss, shadow_access, shadow_miss);
-      printf("Remap count:%ld\n", l3cache.remap_count);
+      cachesim_dump_per_bank_stats(&l3cache, &shadow_tags, TRUE);
 
       /* Finalize component simulators */
       cs_fini(&l3cache);
@@ -6699,7 +6058,7 @@ int main(int argc, char **argv)
       {
         dram_fini();
       }
-      
+
       if (cache_count > 1 || (cache_count == 1 && way_count == 1))
       {
         sm->dumpValues(cache_sizes[c_cache], 0, CH, stats_stream);
@@ -6722,6 +6081,168 @@ int main(int argc, char **argv)
   /* Close statistics stream */
   closeStatisticsStream(stats_stream);
   dumpOverallStats(&l3cache, total_cycle, l3cache.cachecycle, l3cache.dramcycle);
+
+  printf("\n");
+
+#define STREAM_ROW(c, r, b, s)        ((c)->per_stream_row[r][b].current_row[s])
+#define STREAM_ACCESS(c, r, b, s)     ((c)->per_stream_row[r][b].current_access[s])
+#define STREAM_IACCESS(c, r, b, s)    ((c)->per_stream_row[r][b].interval_access[s])
+#define STREAM_TOTAL(c, r, b, s)      ((c)->per_stream_row[r][b].total_access[s])
+#define STREAM_INTERVAL(c, r, b, s)   ((c)->per_stream_row[r][b].total_interval[s])
+#define BGN_IVL(c, r, b, s)           (STREAM_IACCESS(c, r, b, s).begin())
+#define END_IVL(c, r, b, s)           (STREAM_IACCESS(c, r, b, s).end())
+#define STREAM_S_IACCESS(c, r, b, s)  ((c)->per_stream_row[r][b].interval_shared_access[s])
+#define STREAM_S_TOTAL(c, r, b, s)    ((c)->per_stream_row[r][b].total_shared_access[s])
+#define STREAM_S_INTERVAL(c, r, b, s) ((c)->per_stream_row[r][b].total_shared_interval[s])
+#define S_BGN_IVL(c, r, b, s)         (STREAM_S_IACCESS(c, r, b, s).begin())
+#define S_END_IVL(c, r, b, s)         (STREAM_S_IACCESS(c, r, b, s).end())
+
+  map<ub8, ub8>::iterator map_itr;
+  ub8 val;
+  ub8 diff;
+  ub8 var;
+  ub8 mean;
+  ub8 total_access[TST + 1];
+  ub8 total_interval[TST + 1];
+  ub8 total_shared_access[TST + 1];
+  ub8 total_shared_interval[TST + 1];
+
+  memset(total_access, 0, sizeof(total_access));
+  memset(total_interval, 0, sizeof(total_interval));
+  memset(total_shared_access, 0, sizeof(total_shared_access));
+  memset(total_shared_interval, 0, sizeof(total_shared_interval));
+
+  /* Iterate through all ranks */
+  for (ub4 rank = 0; rank < NUM_RANKS * NUM_CHANS; rank++)
+  {
+    /* Iterate through all banks */
+    for (ub4 bank = 0; bank < NUM_BANKS; bank++)
+    {
+      /* Iterate through all streams */
+      for (ub4 s = NN + 1; s <= TST; s++)
+      {
+        if (STREAM_TOTAL(&l3cache, rank, bank, s))
+        {
+          total_access[s]   += STREAM_TOTAL(&l3cache, rank, bank, s);
+          total_interval[s] += STREAM_INTERVAL(&l3cache, rank, bank, s);
+        }
+
+        if (STREAM_S_TOTAL(&l3cache, rank, bank, s))
+        {
+          total_shared_access[s]   += STREAM_S_TOTAL(&l3cache, rank, bank, s);
+          total_shared_interval[s] += STREAM_S_INTERVAL(&l3cache, rank, bank, s);
+        }
+      }
+    }
+  }
+
+  /* Iterate through all streams */
+  for (ub4 s = NN + 1; s <= TST; s++)
+  {
+    val   = 0;
+    diff  = 0;
+    var   = 0;
+    mean  = 0;
+
+    if (total_access[s])
+    {
+      assert(total_interval[s]);
+
+      mean = total_access[s] / total_interval[s];
+
+      /* Iterate through all ranks */
+      for (ub4 rank = 0; rank < NUM_RANKS * NUM_CHANS; rank++)
+      {
+        /* Iterate through all banks */
+        for (ub4 bank = 0; bank < NUM_BANKS; bank++)
+        {
+          /* Get variance */
+          for (map_itr = BGN_IVL(&l3cache, rank, bank, s); map_itr != END_IVL(&l3cache, rank, bank, s); map_itr++)
+          {
+            val = map_itr->second;
+
+            if (val > mean)
+            {
+              diff = pow((val - mean), 2);
+            }
+            else
+            {
+              diff = pow((mean - val), 2);
+            }
+
+            var += diff;
+          }
+        }
+      }
+
+      var = var / total_interval[s];
+
+      printf("%3s; %8ld; %8ld; %2ld; %6ld\n", stream_names[s], 
+          total_access[s], total_interval[s], mean, var);
+    }
+  }
+  
+  printf("\n");
+
+  for (ub4 s = NN + 1; s <= TST; s++)
+  {
+    val   = 0;
+    diff  = 0;
+    var   = 0;
+    mean  = 0;
+
+    /* Iterate through all streams */
+    if (total_shared_access[s])
+    {
+      assert(total_shared_interval[s]);
+
+      mean = total_shared_access[s] / total_shared_interval[s];
+
+      /* Iterate through all ranks */
+      for (ub4 rank = 0; rank < NUM_RANKS * NUM_CHANS; rank++)
+      {
+        /* Iterate through all banks */
+        for (ub4 bank = 0; bank < NUM_BANKS; bank++)
+        {
+          /* Get variance */
+          for (map_itr = S_BGN_IVL(&l3cache, rank, bank, s); 
+              map_itr != S_END_IVL(&l3cache, rank, bank, s); map_itr++)
+          {
+            val = map_itr->second;
+
+            if (val > mean)
+            {
+              diff = pow((val - mean), 2);
+            }
+            else
+            {
+              diff = pow((mean - val), 2);
+            }
+
+            var += diff;
+          }
+        }
+      }
+
+      var = var / total_shared_interval[s];
+
+      printf("%3s; %8ld; %8ld; %2ld; %6ld\n", stream_names[s], 
+          total_shared_access[s], total_shared_interval[s], mean, var);
+    }
+  }
+
+#undef STREAM_ROW
+#undef STREAM_ACCESS
+#undef STREAM_IACCESS
+#undef STREAM_TOTAL
+#undef STREAM_INTERVAL
+#undef BGN_IVL
+#undef END_IVL
+#undef STREAM_S_IACCESS
+#undef STREAM_S_TOTAL
+#undef STREAM_S_INTERVAL
+#undef S_BGN_IVL
+#undef S_END_IVL
 
   return 0;
 }
