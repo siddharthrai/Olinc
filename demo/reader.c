@@ -314,4 +314,3 @@ int main(int argc, char **argv)
 #undef BANK
 #undef RANK
 #undef ROW
-
