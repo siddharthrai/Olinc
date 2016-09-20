@@ -38,11 +38,19 @@
 
 #define INTERVAL_SIZE             (1 << 14)
 #define EPOCH_SIZE                (1 << 19)
+#if 0
+#define EPOCH_SIZE                (1 << 21)
+#endif
 #define PAGE_COVERAGE             (8)
 #define PSEL_WIDTH                (20)
 #define PSEL_MIN_VAL              (0x00)  
 #define PSEL_MAX_VAL              (0xfffff)  
 #define PSEL_MID_VAL              (1 << 19)
+
+#define RCTR_WIDTH                (12)
+#define RCTR_MIN_VAL              (0)
+#define RCTR_MAX_VAL              (0xfff)
+#define RCTR_MID_VAL              (0x7ff)
 
 #define ECTR_WIDTH                (20)
 #define ECTR_MIN_VAL              (0x00)  
@@ -68,7 +76,7 @@
 #define DYNP(b, o)                ((b).dynamic_proc[o] == TRUE)
 #define KNOWN_STREAM(s)           (s == CS || s == ZS || s == TS || s == BS || s >= PS)
 #define OTHER_STREAM(s)           (!(KNOWN_STREAM(s)))
-#define NEW_STREAM(i)             (KNOWN_STREAM((i)->stream) ? (i)->stream : OS)
+#define NEW_STREAM(i)             (KNOWN_STREAM((i)->stream) ? (i)->stream : (i)->stream)
 #define DYNBP(b ,o, i)            (DYNB(b ,o) ? DBS : DYNP(b ,o) ? DPS : NEW_STREAM(i))
 #define SARP_STREAM(b, o, i)      (DYNC(b, o) ? DCS : DYNZ(b, o) ? DZS : DYNBP(b, o, i))
 #define OLD_STREAM(b, o)          (KNOWN_STREAM((b).stream[o]) ? (b).stream[o] : OS)
@@ -112,6 +120,12 @@
 #define FILL_FOLLOW_SHIP(g)       (SAT_CTR_VAL((g)->fill_ctr) <= PSEL_MID_VAL)
 #define FILL_WITH_SHIP(p, g)      (FILL_FOLLOW_SET(p) && FILL_FOLLOW_SHIP(g))
 #define GET_FILL_POLICY(p, g)     ((FILL_SHIP_SET(p) || FILL_WITH_SHIP(p, g)) ? FILL_TEST_SHIP : FILL_TEST_SRRIP)
+
+#if 0
+#define RID(a)                    ((a) & 0x0ffff000)
+#endif
+
+#define RID(a)                    ((a) & 0xfffffff000)
 
 #define CACHE_UPDATE_BLOCK_STATE(block, tag, va, state_in)        \
 do                                                                \
@@ -199,20 +213,27 @@ do                                                                              
 
 
 /* Macros to obtain signature */
-#define SHIP_MAX                      (7)
-#define SIGNSIZE(g)                   ((g)->sign_size)
-#define SHCTSIZE(g)                   ((g)->shct_size)
-#define SIGMAX_VAL(g)                 (((1 << SIGNSIZE(g)) - 1))
-#define SIGNM(g, i)                   ((((i)->address >> SHCTSIZE(g)) & SIGMAX_VAL(g)))
-#define GET_SSIGN(g, i)               (SIGNM(g, i))
-#define SHIPSIGN(g, i)                (GET_SSIGN(g, i))
+#define SIGNSIZE(g)     ((g)->sign_size)
+#define SHCTSIZE(g)     ((g)->shct_size)
+#define COREBTS(g)      ((g)->core_size)
+#define SB(g)           ((g)->sign_source == USE_MEMPC)
+#define SP(g)           ((g)->sign_source == USE_PC)
+#define SM(g)           ((g)->sign_source == USE_MEM)
+#define SIGMAX_VAL(g)   (((1 << SIGNSIZE(g)) - 1))
+#define SIGNMASK(g)     (SIGMAX_VAL(g) << SHCTSIZE(g))
+#define SIGNP(g, i)     (((i)->pc) & SIGMAX_VAL(g))
+#define SIGNM(g, i)     ((((i)->address >> SHCTSIZE(g)) & SIGMAX_VAL(g)))
+#define SIGNCORE(g, i)  (((i)->core - 1) << (SHCTSIZE(g) - COREBTS(g)))
+#define GET_SSIGN(g, i) ((i)->stream < PS ? SIGNM(g, i) : SIGNP(g, i) ^ SIGNCORE(g, i))
+#define GET_SIGN(g, i)  (SM(g) ? SIGNM(g, i) : SIGNP(g, i))
+#define SHIPSIGN(g, i)  (SB(g) ? GET_SSIGN(g, i) : GET_SIGN(g, i))
 
 #define CACHE_INC_SHCT(block, g)                              \
 do                                                            \
 {                                                             \
   assert(block->ship_sign <= SIGMAX_VAL(g));                  \
                                                               \
-  if ((g)->ship_shct[block->ship_sign] < SHIP_MAX)            \
+  if ((g)->ship_shct[block->ship_sign] < SIGMAX_VAL(g))       \
   {                                                           \
     (g)->ship_shct[block->ship_sign] += 1;                    \
   }                                                           \
@@ -232,40 +253,194 @@ do                                                            \
   }                                                           \
 }while(0)
 
-void shnt_sampler_cache_lookup(shnt_sampler_cache *sampler, srriphint_data *policy_data, 
+int max_dead_time = 6;
+int dead_times[6] = {150, 100, 50, 10, 5, 0};
+
+void shnt_sampler_cache_lookup(srriphint_gdata *global_data, srriphint_data *policy_data, 
     memory_trace *info, ub1 update_time);
+
+// make a trace from a PC (just extract some bits)
+unsigned int sdbp_make_trace (sdbp_sampler *sampler, ub4 tid, sdbp_predictor *pred, ub8 PC) 
+{
+	return PC & ((1 << sampler->dan_sampler_trace_bits)-1);
+}
 
 static ub4 get_set_type_srriphint(long long int indx)
 {
-  int lsb_bits;
-  int msb_bits;
-  int mid_bits;
+  return SRRIPHINT_SRRIP_SET;
+}
 
-  lsb_bits = indx & 0x0f;
-  msb_bits = (indx >> 6) & 0x0f;
-  mid_bits = (indx >> 4) & 0x03;
+/* Get expected age and update the block. 5 bits of the age are 
+ * taken from sequence number learned for PCs. 5 bits are taken 
+ * from block address */
+static ub8 get_expected_age(srriphint_gdata *global_data, ub8 address, ub8 pc)
+{
+  cs_qnode           *region_table;
+  shnt_region_data   *region_data;
+  shnt_region_pc     *region_pc;
+  shnt_pc_data       *pc_data;
+  ub8                 pc_age; 
+  ub8                 block_age; 
+  ub8                 final_age;
 
-  if (lsb_bits == msb_bits && mid_bits == 0)
+  pc_age    = 0;
+  block_age = 0;
+  final_age = 0xdead;
+
+#define GET_AGE(p, b)       (((p) << 12) | (b))
+#define RPHASE(g)           ((g)->sampler->current_reuse_pahse)
+#define RNPHASE(g)          ((RPHASE(g) + 1) % RPHASE_CNT)
+#define USE_SREGION(g)      (!SAT_CTR_VAL(g->sampler->region_usage))
+#define SDISTANCE(r, g, p)  ((r)->distance[(p)])
+#define LDISTANCE(r, g, p)  ((r)->distance[(p)])
+#define RDISTANCE(r, g, p)  (USE_SREGION(g) ? SDISTANCE(r, g, p) : LDISTANCE(r, g, p))
+
+  if (pc == 134534192 || pc == 134513744 || pc == 134615973 || pc == 134616026 || 
+    pc == 134615914 || pc == 134614624 || pc == 134515647 || pc == 134515657)
   {
-    return SRRIPHINT_GPU_SET;
+    assert(1);
+#if 0
+    printf("%d\n", pc);
+#endif
   }
 
-  if (lsb_bits == (~msb_bits & 0x0f) && mid_bits == 0)
+  pc_data = (shnt_pc_data *)attila_map_lookup(global_data->sampler->all_pc_list, pc, ATTILA_MASTER_KEY);
+
+  if (pc_data && pc_data->end_pc <= global_data->sampler->pc_distance)
   {
-    return SRRIPHINT_GPU_COND_SET;
+    pc_age = 0xfff; 
+  }
+  else
+  {
+    region_table = global_data->sampler->all_region_list;
+
+    region_data = (shnt_region_data *)attila_map_lookup(region_table, RID(address), 
+        ATTILA_MASTER_KEY);
+
+#define REGION_LIVE(g, r) ((r)->dead_limit >= (g)->sampler->pc_distance)
+#define PC_LIVE(g, p)     ((p) && ((p)->dead_limit >= (g)->sampler->pc_distance))
+#define IS_LIVE(g, r, p)  (REGION_LIVE(g, r) || PC_LIVE(g, p))
+
+    if (region_data && IS_LIVE(global_data, region_data, pc_data))
+    {
+      if (pc_data && PC_LIVE(global_data, pc_data))
+      {
+        pc_age = 0x00f;
+      }
+      else
+      {
+        region_pc = (shnt_region_pc *)attila_map_lookup(region_data->pc, pc, ATTILA_MASTER_KEY);
+        if (region_pc && region_pc->distance[RNPHASE(global_data)])
+        {
+          if (RDISTANCE(region_pc, global_data, RNPHASE(global_data)) != 0xfffff)
+          {
+            pc_age = RDISTANCE(region_pc, global_data, RNPHASE(global_data)) & 0xfff; 
+          }
+          else
+          {
+#if 0
+            if (pc == 134513789)
+            {
+              pc_age = RDISTANCE(region_pc, global_data, RPHASE(global_data)) & 0xfff; 
+            }
+            else
+#endif
+            {
+              pc_age = RDISTANCE(region_pc, global_data, RNPHASE(global_data)) & 0xfff; 
+            }
+          }
+#if 0
+          if (region_pc->distance[RNPHASE(global_data)] != 0xfffff)
+          {
+            pc_age = region_pc->distance[RNPHASE(global_data)] & 0xfff; 
+          }
+          else
+          {
+            if (pc == 134513789)
+            {
+              pc_age = region_pc->distance[RPHASE(global_data)] & 0xfff; 
+            }
+            else
+            {
+              pc_age = region_pc->distance[RNPHASE(global_data)] & 0xfff; 
+            }
+          }
+#endif
+        }
+        else
+        {
+          if (IS_LIVE(global_data, region_data, pc_data))
+          {
+#if 0
+            if ((RDISTANCE(region_data, global_data, RNPHASE(global_data)) == 0xfffff) && 
+                (pc == 134605840 || pc == 134599541))
+            {
+              pc_age = RDISTANCE(region_data, global_data, RPHASE(global_data)) & 0xfff; 
+            }
+            else
+#endif
+            {
+
+              pc_age = RDISTANCE(region_data, global_data, RNPHASE(global_data)) & 0xfff; 
+            }
+#if 0
+            if ((region_data->distance[RNPHASE(global_data)] == 0xfffff) && 
+                (pc == 134605840 || pc == 134599541))
+            {
+              pc_age = (region_data->distance[RPHASE(global_data)]) & 0xfff; 
+            }
+            else
+            {
+
+              pc_age = (region_data->distance[RNPHASE(global_data)]) & 0xfff; 
+            }
+#endif
+          }
+          else
+          {
+            pc_age = 0xfff;
+          }
+        }
+      }
+    }
+    else
+    {
+      pc_age = 0xfff; 
+    }
+
+#undef REGION_LIVE
+#undef PC_LIVE
+#undef IS_LIVE
   }
 
-  if (lsb_bits == msb_bits && mid_bits == 1)
+  block_age = (address >> 6) & 0xff;
+  final_age = GET_AGE(pc_age, block_age);
+  
+  return final_age;
+
+#undef GET_AGE
+#undef RPHASE
+}
+
+static void increment_dead_limit(srriphint_gdata *global_data, ub8 old_pc, ub8 pc)
+{
+  shnt_pc_data  *pc_data;
+
+  pc_data = (shnt_pc_data *)attila_map_lookup(global_data->sampler->all_pc_list, old_pc, 
+      ATTILA_MASTER_KEY);
+
+#define RDSTNCE(g)  ((g)->sampler->pc_distance)
+
+  if (pc_data && pc_data->dead_limit < RDSTNCE(global_data))
   {
-    return SRRIPHINT_SHIP_FILL_SET;
+    pc_data->dead_limit = RDSTNCE(global_data) + 5;
+
+    assert(RDSTNCE(global_data) >= pc_data->start_pc);
+
+    pc_data->dead_distance = RDSTNCE(global_data) - pc_data->start_pc;
   }
 
-  if (lsb_bits == (~msb_bits & 0xf) && mid_bits == 1)
-  {
-    return SRRIPHINT_SRRIP_FILL_SET;
-  }
-
-  return SRRIPHINT_FOLLOWER_SET;
+#undef RDSTNCE
 }
 
 #define BLK_PER_ENTRY (64)
@@ -300,16 +475,38 @@ void shnt_sampler_cache_init(shnt_sampler_cache *sampler, ub4 sets, ub4 ways)
       (sampler->blocks)[i][j].stream        = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
       (sampler->blocks)[i][j].valid         = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
       (sampler->blocks)[i][j].hit_count     = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
+      (sampler->blocks)[i][j].pc            = (ub8 *)xcalloc(BLK_PER_ENTRY, sizeof(ub8));
       (sampler->blocks)[i][j].dynamic_color = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
       (sampler->blocks)[i][j].dynamic_depth = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
       (sampler->blocks)[i][j].dynamic_blit  = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
       (sampler->blocks)[i][j].dynamic_proc  = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
+
+      for (ub4 off = 0; off < BLK_PER_ENTRY; off++)
+      {
+        (sampler->blocks)[i][j].pc[off] = 0xdead;
+      }
     }
   }
   
   /* Initialize sampler performance counters */
   memset(&(sampler->perfctr), 0 , sizeof(srriphint_sampler_perfctr));
   memset(sampler->stream_occupancy, 0 , sizeof(ub4) * (TST + 1));
+  
+  sampler->spc_count          = 0;
+  sampler->pc_distance        = 0;
+  sampler->reuse_phase_size   = 0;
+  sampler->reuse_phase_count  = 0;
+
+  for (ub4 i = 0; i < HTBLSIZE; i++)
+  {
+    cs_qinit(&(sampler->spc_list[i]));
+    cs_qinit(&(sampler->all_pc_list[i]));
+    cs_qinit(&(sampler->all_region_list[i]));
+  }
+
+  /* Initialize replacement policy selection counter */
+  SAT_CTR_INI(sampler->region_usage, RCTR_WIDTH, RCTR_MIN_VAL, RCTR_MAX_VAL);
+  SAT_CTR_SET(sampler->region_usage, RCTR_MID_VAL);
 }
 
 void shnt_sampler_cache_reset(srriphint_gdata *global_data, shnt_sampler_cache *sampler)
@@ -317,68 +514,8 @@ void shnt_sampler_cache_reset(srriphint_gdata *global_data, shnt_sampler_cache *
   int sampler_occupancy;
 
   assert(sampler);
-#if 0  
-  printf("SMPLR RESET : Replacments [%d] Fill [%ld] Hit [%ld]\n", sampler->perfctr.sampler_replace,
-      sampler->perfctr.sampler_fill, sampler->perfctr.sampler_hit);
-#endif
+
   sampler_occupancy = 0;
-#if 0  
-  printf("[C] F:%5ld FR: %5ld S: %5ld SR: %5ld\n", sampler->perfctr.fill_count[CS], 
-      sampler->perfctr.fill_reuse_count[CS], sampler->perfctr.spill_count[CS],
-      sampler->perfctr.spill_reuse_count[CS]);
-
-  printf("[Z] F:%5ld R: %5ld S: %5ld SR: %5ld\n", sampler->perfctr.fill_count[ZS], 
-      sampler->perfctr.fill_reuse_count[ZS], sampler->perfctr.spill_count[ZS],
-      sampler->perfctr.spill_reuse_count[ZS]);
-
-  printf("[B] F:%5ld R: %5ld S: %5ld SR: %5ld\n", sampler->perfctr.fill_count[BS], 
-      sampler->perfctr.fill_reuse_count[BS], sampler->perfctr.spill_count[BS],
-      sampler->perfctr.spill_reuse_count[BS]);
-#endif 
-
-  printf("[P] F:%5ld R: %5ld S: %5ld SR: %5ld\n", sampler->perfctr.fill_count[PS], 
-      sampler->perfctr.fill_reuse_count[PS], sampler->perfctr.spill_count[PS],
-      sampler->perfctr.spill_reuse_count[PS]);
-#if 0
-  printf("[T] F:%5ld R: %5ld\n", sampler->perfctr.fill_count[TS], 
-      sampler->perfctr.fill_reuse_count[TS]);
-
-  printf("[O] F:%5ld R: %5ld\n", sampler->perfctr.fill_count[OS], 
-      sampler->perfctr.fill_reuse_count[OS]);
-
-  printf("[CT] F:%5ld R: %5ld\n", sampler->perfctr.fill_count[DCS], 
-      sampler->perfctr.fill_reuse_count[DCS]);
-
-  printf("[C] FDLOW:%5ld FDHIGH: %5ld SDLOW:%5ld SDHIGH: %5ld\n", sampler->perfctr.fill_reuse_distance_low[CS], 
-      sampler->perfctr.fill_reuse_distance_high[CS], sampler->perfctr.spill_reuse_distance_low[CS],
-      sampler->perfctr.spill_reuse_distance_high[CS]);
-
-  printf("[Z] FDLOW:%5ld FDHIGH: %5ld SDLOW:%5ld SDHIGH: %5ld\n", sampler->perfctr.fill_reuse_distance_low[ZS], 
-      sampler->perfctr.fill_reuse_distance_high[ZS], sampler->perfctr.spill_reuse_distance_low[ZS],
-      sampler->perfctr.spill_reuse_distance_high[ZS]);
-
-  printf("[B] FDLOW:%5ld FDHIGH: %5ld SDLOW:%5ld SDHIGH: %5ld\n", sampler->perfctr.fill_reuse_distance_low[BS], 
-      sampler->perfctr.fill_reuse_distance_high[BS], sampler->perfctr.spill_reuse_distance_low[BS],
-      sampler->perfctr.spill_reuse_distance_high[BS]);
-
-  printf("[P] FDLOW:%5ld FDHIGH: %5ld SDLOW:%5ld SDHIGH: %5ld\n", sampler->perfctr.fill_reuse_distance_low[PS], 
-      sampler->perfctr.fill_reuse_distance_high[PS], sampler->perfctr.spill_reuse_distance_low[PS],
-      sampler->perfctr.spill_reuse_distance_high[PS]);
-
-  printf("[T] SDLOW:%5ld SDHIGH: %5ld\n", sampler->perfctr.fill_reuse_distance_low[TS], 
-      sampler->perfctr.fill_reuse_distance_high[TS]);
-
-  printf("[O] SDLOW:%5ld SDHIGH: %5ld\n", sampler->perfctr.fill_reuse_distance_low[OS], 
-      sampler->perfctr.fill_reuse_distance_high[OS]);
-
-  printf("[CT] FDLOW:%5ld FDHIGH: %5ld SDLOW:%5ld SDHIGH: %5ld\n", sampler->perfctr.fill_reuse_distance_low[DCS], 
-      sampler->perfctr.fill_reuse_distance_high[DCS], sampler->perfctr.spill_reuse_distance_low[DCS],
-      sampler->perfctr.spill_reuse_distance_high[DCS]);
-
-  printf("[BT] FDLOW:%5ld FDHIGH: %5ld SDLOW:%5ld SDHIGH: %5ld\n", sampler->perfctr.fill_reuse_distance_low[DBS], 
-      sampler->perfctr.fill_reuse_distance_high[DBS], sampler->perfctr.spill_reuse_distance_low[DBS],
-      sampler->perfctr.spill_reuse_distance_high[DBS]);
-#endif
 
   /* Reset sampler */
   for (ub4 i = 0; i < sampler->sets; i++)
@@ -399,6 +536,7 @@ void shnt_sampler_cache_reset(srriphint_gdata *global_data, shnt_sampler_cache *
         (sampler->blocks)[i][j].stream[off]         = NN;
         (sampler->blocks)[i][j].valid[off]          = 0;
         (sampler->blocks)[i][j].hit_count[off]      = 0;
+        (sampler->blocks)[i][j].pc[off]             = 0xdead;
         (sampler->blocks)[i][j].dynamic_color[off]  = 0;
         (sampler->blocks)[i][j].dynamic_depth[off]  = 0;
         (sampler->blocks)[i][j].dynamic_blit[off]   = 0;
@@ -438,6 +576,8 @@ void shnt_sampler_cache_reset(srriphint_gdata *global_data, shnt_sampler_cache *
       sampler->perfctr.stream_fill_rrpv[strm][rrpv] = 0;
       sampler->perfctr.stream_hit_rrpv[strm][rrpv]  = 0;
     }
+
+#undef MAX_RRPV
   }
 
   for (ub1 strm = NN; strm <= TST; strm++)
@@ -451,6 +591,7 @@ void shnt_sampler_cache_reset(srriphint_gdata *global_data, shnt_sampler_cache *
 }
 
 #define SPEEDUP(n) (n == sarp_stream_x)
+
 void cache_init_srriphint(ub4 set_indx, struct cache_params *params, srriphint_data *policy_data, 
     srriphint_gdata *global_data)
 {
@@ -465,12 +606,34 @@ void cache_init_srriphint(ub4 set_indx, struct cache_params *params, srriphint_d
     global_data->shct_size  = params->ship_shct_size;
     global_data->core_size  = params->ship_core_size;
     global_data->cpu_bmc    = 0;
+    global_data->threshold  = params->threshold;
+
+    if (params->ship_use_pc && params->ship_use_mem)
+    {
+      global_data->sign_source = USE_MEMPC;
+    }
+    else
+    {
+      if (params->ship_use_pc)
+      {
+        global_data->sign_source = USE_PC;
+      }
+      else
+      {
+        global_data->sign_source = USE_MEM;
+      }
+    }
 
     for (int i = NN; i <= TST; i++)
     {
       global_data->stream_blocks[i] = 0;
       global_data->stream_reuse[i]  = 0;
     }
+    
+    global_data->dbp_sampler = (sdbp_sampler *)xcalloc(1, sizeof(sdbp_sampler));
+    assert(global_data->dbp_sampler);
+    
+    sdbp_sampler_init(global_data->dbp_sampler, params->num_sets, params->ways);
 
     /* Allocate and initialize sampler cache */
     global_data->sampler = (shnt_sampler_cache *)xcalloc(1, sizeof(shnt_sampler_cache));
@@ -479,12 +642,13 @@ void cache_init_srriphint(ub4 set_indx, struct cache_params *params, srriphint_d
     shnt_sampler_cache_init(global_data->sampler, params->sampler_sets, 
         params->sampler_ways);
 
-    global_data->cpu_rpsel  = 0;
-    global_data->gpu_rpsel  = 0;
-    global_data->cpu_zevct  = 0;
-    global_data->gpu_zevct  = 0;
-    global_data->cpu_blocks = 0;
-    global_data->gpu_blocks = 0;
+    global_data->cpu_rpsel    = 0;
+    global_data->gpu_rpsel    = 0;
+    global_data->cpu_zevct    = 0;
+    global_data->gpu_zevct    = 0;
+    global_data->cpu_blocks   = 0;
+    global_data->gpu_blocks   = 0;
+    global_data->dead_region  = 0;
 
     global_data->ship_shct = (ub1 *) xcalloc((1 << global_data->shct_size), sizeof(ub1));
     assert(global_data->ship_shct);
@@ -504,9 +668,11 @@ void cache_init_srriphint(ub4 set_indx, struct cache_params *params, srriphint_d
     SAT_CTR_SET(global_data->fill_ctr, PSEL_MID_VAL);
   }
 
-  policy_data->set_type   = get_set_type_srriphint(set_indx);
-  policy_data->cpu_blocks = 0;
-  policy_data->gpu_blocks = 0;
+  policy_data->set_indx       = set_indx;
+  policy_data->set_type       = get_set_type_srriphint(set_indx);
+  policy_data->cpu_blocks     = 0;
+  policy_data->gpu_blocks     = 0;
+  policy_data->shared_blocks  = 0;
   
   switch (policy_data->set_type)
   {
@@ -522,22 +688,6 @@ void cache_init_srriphint(ub4 set_indx, struct cache_params *params, srriphint_d
       SRRIPHINT_DATA_DRPOLICY(policy_data) = cache_policy_srrip;
       break;
 
-    case SRRIPHINT_FOLLOWER_SET:
-    case SRRIPHINT_GPU_SET:
-    case SRRIPHINT_GPU_COND_SET:
-    case SRRIPHINT_SHIP_FILL_SET:
-    case SRRIPHINT_SRRIP_FILL_SET:
-      policy_data->following = cache_policy_srriphint;
-
-      /* Set current and default fill policy to SRRIP */
-      SRRIPHINT_DATA_CFPOLICY(policy_data) = cache_policy_srriphint;
-      SRRIPHINT_DATA_DFPOLICY(policy_data) = cache_policy_srriphint;
-      SRRIPHINT_DATA_CAPOLICY(policy_data) = cache_policy_srriphint;
-      SRRIPHINT_DATA_DAPOLICY(policy_data) = cache_policy_srriphint;
-      SRRIPHINT_DATA_CRPOLICY(policy_data) = cache_policy_srriphint;
-      SRRIPHINT_DATA_DRPOLICY(policy_data) = cache_policy_srriphint;
-      break;
-
     default:
       panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
   }
@@ -547,25 +697,13 @@ void cache_init_srriphint(ub4 set_indx, struct cache_params *params, srriphint_d
 #define MEM_ALLOC(size) ((rrip_list *)xcalloc(size, sizeof(rrip_list)))
 
   /* Create RRPV buckets */
-  SRRIPHINT_DATA_VALID_HEAD(policy_data) = MEM_ALLOC(MAX_RRPV + 1);
-  SRRIPHINT_DATA_VALID_TAIL(policy_data) = MEM_ALLOC(MAX_RRPV + 1);
+  SRRIPHINT_DATA_VALID_HEAD(policy_data) = MEM_ALLOC(INVALID_RRPV + 1);
+  SRRIPHINT_DATA_VALID_TAIL(policy_data) = MEM_ALLOC(INVALID_RRPV + 1);
   
-  /* Create CPU RRPV buckets */
-  SRRIPHINT_DATA_CVALID_HEAD(policy_data) = MEM_ALLOC(MAX_RRPV + 1);
-  SRRIPHINT_DATA_CVALID_TAIL(policy_data) = MEM_ALLOC(MAX_RRPV + 1);
-  
-  /* Create GPU RRPV buckets */
-  SRRIPHINT_DATA_GVALID_HEAD(policy_data) = MEM_ALLOC(MAX_RRPV + 1);
-  SRRIPHINT_DATA_GVALID_TAIL(policy_data) = MEM_ALLOC(MAX_RRPV + 1);
-
 #undef MEM_ALLOC  
 
   assert(SRRIPHINT_DATA_VALID_HEAD(policy_data));
   assert(SRRIPHINT_DATA_VALID_TAIL(policy_data));
-  assert(SRRIPHINT_DATA_CVALID_HEAD(policy_data));
-  assert(SRRIPHINT_DATA_CVALID_TAIL(policy_data));
-  assert(SRRIPHINT_DATA_GVALID_HEAD(policy_data));
-  assert(SRRIPHINT_DATA_GVALID_TAIL(policy_data));
 
   /* Set max RRPV for the set */
   SRRIPHINT_DATA_MAX_RRPV(policy_data)    = MAX_RRPV;
@@ -574,19 +712,11 @@ void cache_init_srriphint(ub4 set_indx, struct cache_params *params, srriphint_d
   assert(params->spill_rrpv <= MAX_RRPV);
 
   /* Initialize head nodes */
-  for (int i = 0; i <= MAX_RRPV; i++)
+  for (int i = 0; i <= INVALID_RRPV; i++)
   {
     SRRIPHINT_DATA_VALID_HEAD(policy_data)[i].rrpv  = i;
     SRRIPHINT_DATA_VALID_HEAD(policy_data)[i].head  = NULL;
     SRRIPHINT_DATA_VALID_TAIL(policy_data)[i].head  = NULL;
-
-    SRRIPHINT_DATA_CVALID_HEAD(policy_data)[i].rrpv = i;
-    SRRIPHINT_DATA_CVALID_HEAD(policy_data)[i].head = NULL;
-    SRRIPHINT_DATA_CVALID_TAIL(policy_data)[i].head = NULL;
-
-    SRRIPHINT_DATA_GVALID_HEAD(policy_data)[i].rrpv = i;
-    SRRIPHINT_DATA_GVALID_HEAD(policy_data)[i].head = NULL;
-    SRRIPHINT_DATA_GVALID_TAIL(policy_data)[i].head = NULL;
   }
 
   /* Create array of blocks */
@@ -617,14 +747,123 @@ void cache_init_srriphint(ub4 set_indx, struct cache_params *params, srriphint_d
       (&SRRIPHINT_DATA_BLOCKS(policy_data)[way + 1]) : NULL;
   }
 
+#define CORE_COUNT(g)  ((1 << (g)->core_size) + 1)
+
+  global_data->brrip_ctr = xcalloc(CORE_COUNT(global_data), sizeof(ub1));
+
+#undef CORE_COUNT
+
   assert(SRRIPHINT_DATA_MAX_RRPV(policy_data) != 0);
 
 #undef MAX_RRPV
 }
 
 /* Free all blocks, sets, head and tail buckets */
-void cache_free_srriphint(srriphint_data *policy_data)
+void cache_free_srriphint(ub4 set_indx, srriphint_data *policy_data, srriphint_gdata *global_data)
 {
+  cs_qnode *pc_table;
+  cs_qnode *region_table;
+  cs_qnode *head;
+  cs_qnode *head1;
+  cs_qnode *node;
+  cs_qnode *node1;
+  cs_knode *knode;
+  cs_knode *knode1;
+
+  shnt_pc_data *pc_data;
+  shnt_d_data  *d_data;
+
+  shnt_region_data *region_data;
+
+  if (set_indx == 0)
+  {
+    global_data->shared_pc_file = gzopen("Shared-PC-list.csv.gz", "wb9");
+    assert(global_data->shared_pc_file);
+
+    pc_table = global_data->sampler->all_pc_list;
+
+    /* Dump statistics */
+    for (ub8 i = 0; i < HTBLSIZE; i++)
+    {
+      head = &pc_table[i];
+
+      /* Iterate through each bucket and dump the PC */  
+      for (node = head->next; node != head; node = node->next)
+      {
+        knode = (cs_knode *)(node->data);
+
+        pc_data = (shnt_pc_data *)(knode->data);
+        assert(pc_data);
+
+        gzprintf(global_data->shared_pc_file, "(%ld;%ld;)", knode->key, pc_data->start_pc);
+
+        for (ub8 i = 0; i < HTBLSIZE; i++)
+        {
+          head1 = &(pc_data->ppc[i]);
+          for (node1 = head1->next; node1 != head1; node1 = node1->next)
+          {
+            knode1 = (cs_knode *)(node1->data);
+
+            d_data = (shnt_d_data *)(knode1->data);
+            gzprintf(global_data->shared_pc_file, ";(%ld; %ld; %ld)", d_data->ppc, 
+                d_data->distance, d_data->reuse);
+          }
+        }
+
+        gzprintf(global_data->shared_pc_file, "\n");
+      }
+    }
+
+    gzclose(global_data->shared_pc_file);
+
+    global_data->shared_pc_file = gzopen("Shared-Region-list.csv.gz", "wb9");
+    assert(global_data->shared_pc_file);
+    
+    region_table = global_data->sampler->all_region_list;
+
+    shnt_region_pc *region_pc;
+
+    /* Dump statistics */
+    for (ub8 i = 0; i < HTBLSIZE; i++)
+    {
+      head = &region_table[i];
+
+      /* Iterate through each bucket and dump the PC */  
+      for (node = head->next; node != head; node = node->next)
+      {
+        knode = (cs_knode *)(node->data);
+
+        region_data = (shnt_region_data *)(knode->data);
+        assert(region_data);
+
+        gzprintf(global_data->shared_pc_file, "(%ld;)", knode->key);
+
+        for (ub8 i = 0; i < HTBLSIZE; i++)
+        {
+          head1 = &(region_data->pc[i]);
+          for (node1 = head1->next; node1 != head1; node1 = node1->next)
+          {
+            knode1 = (cs_knode *)(node1->data);
+            region_pc = (shnt_region_pc *)knode1->data;
+
+#define RPHASE(g)   ((g)->sampler->current_reuse_pahse)
+#define RNPHASE(g)  ((RPHASE(g) + 1) % RPHASE_CNT)
+
+            gzprintf(global_data->shared_pc_file, ";(%ld; %ld; %ld);", region_pc->pc,
+                region_pc->distance[RNPHASE(global_data)], region_pc->distance[RPHASE(global_data)]);
+
+#undef RPHASE
+#undef RNPHASE
+          }
+        }
+
+        gzprintf(global_data->shared_pc_file, "\n");
+      }
+    }
+
+    gzclose(global_data->shared_pc_file);
+  }
+
   /* Free all data blocks */
   free(SRRIPHINT_DATA_BLOCKS(policy_data));
 
@@ -640,29 +879,6 @@ void cache_free_srriphint(srriphint_data *policy_data)
     free(SRRIPHINT_DATA_VALID_TAIL(policy_data));
   }
 
-  /* Free valid head buckets */
-  if (SRRIPHINT_DATA_CVALID_HEAD(policy_data))
-  {
-    free(SRRIPHINT_DATA_CVALID_HEAD(policy_data));
-  }
-
-  /* Free valid tail buckets */
-  if (SRRIPHINT_DATA_CVALID_TAIL(policy_data))
-  {
-    free(SRRIPHINT_DATA_CVALID_TAIL(policy_data));
-  }
-
-  /* Free valid head buckets */
-  if (SRRIPHINT_DATA_GVALID_HEAD(policy_data))
-  {
-    free(SRRIPHINT_DATA_GVALID_HEAD(policy_data));
-  }
-
-  /* Free valid tail buckets */
-  if (SRRIPHINT_DATA_GVALID_TAIL(policy_data))
-  {
-    free(SRRIPHINT_DATA_GVALID_TAIL(policy_data));
-  }
 }
 
 struct cache_block_t* cache_find_block_srriphint(srriphint_data *policy_data, 
@@ -672,25 +888,437 @@ struct cache_block_t* cache_find_block_srriphint(srriphint_data *policy_data,
   struct  cache_block_t *head;
   struct  cache_block_t *node;
 
+  if (info && info->fill && info->pc)
+  {
+    shnt_pc_data      *pc_data;
+    shnt_region_data  *region_data;
+    shnt_region_pc    *region_pc;
+    
+    if (!SAT_CTR_VAL(global_data->sampler->region_usage))
+    {
+      global_data->dead_region += 1;
+    }
+
+    pc_data = attila_map_lookup(global_data->sampler->all_pc_list, info->pc, ATTILA_MASTER_KEY);
+    if (!pc_data)
+    {
+      pc_data = xcalloc(1, sizeof(shnt_pc_data));
+      assert(pc_data);
+
+      pc_data->start_pc       = ++(global_data->sampler->pc_distance);
+      pc_data->end_pc         = 0xffffffff;
+      pc_data->distance       = 0;
+      pc_data->region_count   = 0;
+      pc_data->dead_limit     = 0;
+      pc_data->dead_distance  = 0;
+
+      for (ub4 i = 0; i < HTBLSIZE; i++)
+      {
+        cs_qinit(&(pc_data->ppc[i]));
+      }
+      
+      cs_qinit(&(pc_data->distance_list));
+
+      attila_map_insert(global_data->sampler->all_pc_list, info->pc, ATTILA_MASTER_KEY, pc_data);
+    }
+    else
+    {
+      pc_data->start_pc = global_data->sampler->pc_distance;
+    }
+
+    region_data = attila_map_lookup(global_data->sampler->all_region_list, RID(info->address), ATTILA_MASTER_KEY);
+    if (!region_data)
+    {
+      region_data = (shnt_region_data *)xcalloc(1, sizeof(shnt_region_data));
+      assert(region_data);
+      
+      for (ub4 i = 0; i < HTBLSIZE; i++)
+      {
+        cs_qinit(&(region_data->pc[i]));
+      }
+
+#define RPHASE(g)   ((g)->sampler->current_reuse_pahse)
+#define RNPHASE(g)  ((RPHASE(g) + 1) % RPHASE_CNT)
+#define RDSTNCE(g)  ((g)->sampler->pc_distance)
+
+      region_data->id = RID(info->address);
+      region_data->distance[RPHASE(global_data)]        = RDSTNCE(global_data);
+      region_data->short_distance[RPHASE(global_data)]  = RDSTNCE(global_data);
+      region_data->next_distance                        = 0;
+      region_data->short_next_distance                  = 0;
+      region_data->distance[RNPHASE(global_data)]       = 0;
+      region_data->short_distance[RNPHASE(global_data)] = 0;
+      region_data->pc_count                             = 1;
+#if 0
+      region_data->dead_limit = RDSTNCE(global_data) + 10;
+#endif
+      region_data->dead_limit = RDSTNCE(global_data) + 0xfffff;
+
+
+      shnt_region_pc *region_pc;
+
+      region_pc = (shnt_region_pc *)xcalloc(1, sizeof(shnt_region_pc));
+      assert(region_pc);
+      
+      region_pc->pc       = info->pc;
+      region_pc->index    = region_data->pc_count;
+      region_pc->phase_id = global_data->sampler->reuse_phase_count;
+
+      region_pc->distance[RPHASE(global_data)]  = global_data->sampler->pc_distance;
+      region_pc->distance[RNPHASE(global_data)] = 0xfffff;
+
+      region_pc->short_distance[RPHASE(global_data)]  = global_data->sampler->pc_distance;
+      region_pc->short_distance[RNPHASE(global_data)] = 0;
+      
+      attila_map_insert(region_data->pc, info->pc, ATTILA_MASTER_KEY, (ub8)region_pc);
+
+      attila_map_insert(global_data->sampler->all_region_list, region_data->id,
+          ATTILA_MASTER_KEY, (ub8)region_data);
+    
+#undef RPHASE
+#undef RNPHASE
+#undef RDSTNCE
+      
+      assert(pc_data);
+      pc_data->region_count += 1;
+    }
+    else
+    {
+#define RPHASE(g)   ((g)->sampler->current_reuse_pahse)
+#define RNPHASE(g)  ((RPHASE(g) + 1) % RPHASE_CNT)
+#define RDSTNCE(g)  ((g)->sampler->pc_distance)
+        
+      if (region_data->distance[RPHASE(global_data)] == 0xfffff)
+      {
+        region_data->distance[RPHASE(global_data)] = RDSTNCE(global_data);
+      }
+      else
+      {
+        region_data->next_distance        = RDSTNCE(global_data);
+        region_data->short_next_distance  = RDSTNCE(global_data);
+      }
+
+      if (region_data->short_distance[RPHASE(global_data)] == 0xfffff)
+      {
+        region_data->short_distance[RPHASE(global_data)] = RDSTNCE(global_data);
+      }
+
+#if 0
+      if (info->pc == 134534192 || info->pc == 134513744 || info->pc == 134615973 || info->pc == 134616026 || 
+          info->pc == 134615914 || info->pc == 134614624 || info->pc == 134515647 || info->pc == 134515657)
+      {
+#if 0
+        region_data->dead_limit = RDSTNCE(global_data);
+#endif
+        region_data->dead_limit = RDSTNCE(global_data) + 1;
+      }
+      else
+      {
+        if (info->pc == 134534209)
+        {
+          region_data->dead_limit = RDSTNCE(global_data) + 10;
+        }
+        else
+        {
+          if (info->pc == 134513789)
+          {
+            region_data->dead_limit = RDSTNCE(global_data) + 110;
+          }
+          else
+          {
+            if (info->pc == 134615923)
+            {
+              region_data->dead_limit = RDSTNCE(global_data) + 200;
+            }
+            else
+            {
+              if (info->pc == 134599541)
+              {
+                region_data->dead_limit = RDSTNCE(global_data) + 90;
+              }
+              else
+              {
+                if (info->pc == 134614487)
+                {
+                  region_data->dead_limit = RDSTNCE(global_data) + 10;
+                }
+                else
+                {
+                  region_data->dead_limit = RDSTNCE(global_data) + 50;
+                }
+              }
+            }
+          }
+        }
+      }
+#endif
+      
+      region_pc = attila_map_lookup(region_data->pc, info->pc, ATTILA_MASTER_KEY);
+      if (!region_pc)
+      {
+        region_data->pc_count += 1;
+
+        region_pc = (shnt_region_pc *)xcalloc(1, sizeof(shnt_region_pc));
+        assert(region_pc);
+
+        region_pc->pc       = info->pc;
+        region_pc->index    = region_data->pc_count;
+        region_pc->phase_id = global_data->sampler->reuse_phase_count;
+
+        region_pc->distance[RPHASE(global_data)]        = global_data->sampler->pc_distance;
+        region_pc->short_distance[RPHASE(global_data)]  = global_data->sampler->pc_distance;
+#if 0
+        region_pc->distance[RNPHASE(global_data)]       = 0xfffff;
+        region_pc->short_distance[RNPHASE(global_data)] = 0xfffff;
+#endif
+
+        attila_map_insert(region_data->pc, info->pc, ATTILA_MASTER_KEY, (ub8)region_pc);
+
+        pc_data->region_count += 1;
+      }
+
+      if (region_pc->index > max_dead_time)
+      {
+        region_data->dead_limit = RDSTNCE(global_data);
+      }
+      else
+      {
+        if (region_pc->index == 1)
+        {
+          region_data->dead_limit = RDSTNCE(global_data) + 4;
+        }
+        else
+        {
+          region_data->dead_limit = RDSTNCE(global_data) + dead_times[region_pc->index - 1];
+        }
+      }
+
+#undef RPHASE
+#undef RNPHASE
+#undef RDSTNCE
+    }
+    
+#define RPHASE(g)   ((g)->sampler->current_reuse_pahse)
+#define RNPHASE(g)  ((RPHASE(g) + 1) % RPHASE_CNT)
+
+    /* If region was not used in the previous phase decrement to region usage
+     * counter */
+    if (region_data)
+    {
+      if (region_data->distance[RNPHASE(global_data)] == 0xfffff || 
+          region_data->distance[RNPHASE(global_data)] == 0)
+      {
+        SAT_CTR_DEC(global_data->sampler->region_usage); 
+      }
+      else
+      {
+        SAT_CTR_INC(global_data->sampler->region_usage); 
+      }
+    }
+
+#undef RPHASE
+#undef RNPHASE
+
+    shnt_pc_data *dead_pc;
+#if 0    
+    if (info->pc == 134514245)
+    {
+      dead_pc = attila_map_lookup(global_data->sampler->all_pc_list, 134513789, ATTILA_MASTER_KEY);
+      if (dead_pc)
+      {
+        dead_pc->end_pc = global_data->sampler->pc_distance;
+      }
+    }
+#endif
+
+    if (++(global_data->sampler->reuse_phase_size) == RPHASE_SIZE)
+    {
+#define RPHASE(g) ((g)->sampler->current_reuse_pahse)
+#define RNPHASE(g)  ((RPHASE(g) + 1) % RPHASE_CNT)
+
+      /* Reset old reuse distance learned in the previous phase */
+      cs_qnode *region_table;
+      cs_qnode *head;
+      cs_qnode *node;
+      cs_knode *knode;
+      cs_qnode *head1;
+      cs_qnode *node1;
+      cs_knode *knode1;
+      
+      shnt_region_data *region_data;
+      shnt_region_pc   *region_pc;
+      shnt_pc_data     *pc_data;
+
+      region_table = global_data->sampler->all_region_list;
+
+      RPHASE(global_data) = (RPHASE(global_data) + 1) % RPHASE_CNT;
+
+      /* Dump statistics */
+      for (ub8 i = 0; i < HTBLSIZE; i++)
+      {
+        head = &region_table[i];
+
+        /* Iterate through each bucket and dump the PC */  
+        for (node = head->next; node != head; node = node->next)
+        {
+          knode = (cs_knode *)(node->data);
+
+          region_data = (shnt_region_data *)(knode->data);
+          assert(region_data);
+          
+          ub8 max_region = 0;
+
+          /* Iterate through PC list */
+          for (ub8 j = 0; j < HTBLSIZE; j++)
+          {
+            head1 = &(region_data->pc[j]);
+            assert(head1);
+
+            for (node1 = head1->next; node1 != head1; node1 = node1->next)
+            {
+              knode1 = (cs_knode *)(node1->data);
+
+              region_pc = (shnt_region_pc *)(knode1->data);
+              assert(region_pc);
+              
+              pc_data = attila_map_lookup(global_data->sampler->all_pc_list, region_pc->pc, ATTILA_MASTER_KEY);
+              assert(pc_data);
+
+              if (pc_data->region_count > max_region)
+              {
+                region_data->distance[RNPHASE(global_data)] = region_pc->distance[RNPHASE(global_data)];
+                max_region = pc_data->region_count;
+              }
+            } 
+          }
+
+          region_data->distance[RPHASE(global_data)]  = 0xfffff;
+          region_data->pc_count = 0;
+
+          if (region_data->next_distance != 0)
+          {
+            region_data->distance[RNPHASE(global_data)] = region_data->next_distance;
+            region_data->next_distance = 0;
+          }
+        }
+      }
+
+      for (ub8 i = 0; i < HTBLSIZE; i++)
+      {
+        head = &(global_data->sampler->all_pc_list[i]);
+        assert(head);
+
+        for (node = head->next; node != head; node = node->next)
+        {
+          knode = (cs_knode *)(node->data);
+
+          pc_data = (shnt_pc_data *)(knode->data);
+          assert(region_pc);
+          
+          pc_data->region_count = 0;
+        }
+      }
+
+#undef RPHASE
+#undef RNPHASE
+
+      global_data->sampler->reuse_phase_size   = 0;
+      global_data->sampler->reuse_phase_count += 1;
+
+      printf("Reuse phase %ld \n", global_data->sampler->reuse_phase_count);
+      printf("Dead region %ld\n", global_data->dead_region);
+
+      SAT_CTR_SET(global_data->sampler->region_usage, RCTR_MID_VAL);
+      global_data->dead_region = 0;
+    }
+
+    if (++(global_data->sampler->reuse_short_phase_size) == SPHASE_SIZE)
+    {
+#define RPHASE(g)   ((g)->sampler->current_short_reuse_pahse)
+#define RNPHASE(g)  ((RPHASE(g) + 1) % RPHASE_CNT)
+
+      /* Reset old reuse distance learned in the previous phase */
+      cs_qnode *region_table;
+      cs_qnode *head;
+      cs_qnode *node;
+      cs_knode *knode;
+      cs_qnode *head1;
+      cs_qnode *node1;
+      cs_knode *knode1;
+      
+      shnt_region_data *region_data;
+      shnt_region_pc   *region_pc;
+      shnt_pc_data     *pc_data;
+
+      region_table = global_data->sampler->all_region_list;
+
+      RPHASE(global_data) = (RPHASE(global_data) + 1) % RPHASE_CNT;
+
+      /* Update reuse distance */
+      for (ub8 i = 0; i < HTBLSIZE; i++)
+      {
+        head = &region_table[i];
+
+        /* Iterate through each bucket and dump the PC */  
+        for (node = head->next; node != head; node = node->next)
+        {
+          knode = (cs_knode *)(node->data);
+
+          region_data = (shnt_region_data *)(knode->data);
+          assert(region_data);
+          
+          ub8 max_region = 0;
+
+          /* Iterate through PC list */
+          for (ub8 j = 0; j < HTBLSIZE; j++)
+          {
+            head1 = &(region_data->pc[j]);
+            assert(head1);
+
+            for (node1 = head1->next; node1 != head1; node1 = node1->next)
+            {
+              knode1 = (cs_knode *)(node1->data);
+
+              region_pc = (shnt_region_pc *)(knode1->data);
+              assert(region_pc);
+              
+              pc_data = attila_map_lookup(global_data->sampler->all_pc_list, region_pc->pc, ATTILA_MASTER_KEY);
+              assert(pc_data);
+
+              if (pc_data->region_count > max_region)
+              {
+                region_data->short_distance[RNPHASE(global_data)] = region_pc->short_distance[RNPHASE(global_data)];
+                max_region = pc_data->region_count;
+              }
+            } 
+          }
+
+          region_data->short_distance[RPHASE(global_data)]  = 0xfffff;
+
+          if (region_data->short_next_distance != 0)
+          {
+            region_data->short_distance[RNPHASE(global_data)] = region_data->short_next_distance;
+            region_data->short_next_distance = 0;
+          }
+        }
+      }
+
+#undef RPHASE
+#undef RNPHASE
+
+      global_data->sampler->reuse_short_phase_size   = 0;
+    }
+  }
+
+#if 0
   max_rrpv  = policy_data->max_rrpv;
+#endif
+  max_rrpv  = INVALID_RRPV;
   node      = NULL;
 
   for (int rrpv = 0; rrpv <= max_rrpv; rrpv++)
   {
-    head = SRRIPHINT_DATA_GVALID_HEAD(policy_data)[rrpv].head;
-
-    for (node = head; node; node = node->prev)
-    {
-      assert(node->state != cache_block_invalid);
-
-      if (node->tag == tag)
-        goto end;
-    }
-  }
-
-  for (int rrpv = 0; rrpv <= max_rrpv; rrpv++)
-  {
-    head = SRRIPHINT_DATA_CVALID_HEAD(policy_data)[rrpv].head;
+    head = SRRIPHINT_DATA_VALID_HEAD(policy_data)[rrpv].head;
 
     for (node = head; node; node = node->prev)
     {
@@ -702,43 +1330,6 @@ struct cache_block_t* cache_find_block_srriphint(srriphint_data *policy_data,
   }
 
 end:
-  if (!node)
-  {
-    if (info->fill)
-    {
-      switch (policy_data->set_type)
-      {
-        case SRRIPHINT_GPU_SET:
-          SAT_CTR_INC(global_data->rpl_ctr);
-          break;
-
-        case SRRIPHINT_GPU_COND_SET:
-          SAT_CTR_DEC(global_data->rpl_ctr);
-          break;
-
-        case SRRIPHINT_SHIP_FILL_SET:
-          if (CPU_STREAM(info->stream))
-          {
-            SAT_CTR_INC(global_data->fill_ctr);
-          }
-          break;
-
-        case SRRIPHINT_SRRIP_FILL_SET:
-          if (CPU_STREAM(info->stream))
-          {
-            SAT_CTR_DEC(global_data->fill_ctr);
-          }
-          break;
-
-        case SRRIPHINT_FOLLOWER_SET:
-          break;
-
-        default:
-          panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
-      }
-    }
-  }
-
   return node;
 }
 
@@ -756,35 +1347,10 @@ void cache_fill_block_srriphint(srriphint_data *policy_data, srriphint_gdata *gl
   switch (policy_data->following)
   {
     case cache_policy_srrip:
-      if (++(global_data->cache_access) >= INTERVAL_SIZE)
-      {
-        printf("Blocks CPU:%6ld GPU:%6ld\n", global_data->cpu_blocks, global_data->gpu_blocks);
-#if 0
-        printf("Block Count C:%6ld Z:%6ld T:%6ld B:%6ld P:%6ld\n", global_data->stream_blocks[CS], 
-            global_data->stream_blocks[ZS], global_data->stream_blocks[TS], global_data->stream_blocks[BS],
-            global_data->stream_blocks[PS]);
-
-        printf("Block Reuse C:%6ld Z:%6ld T:%6ld B:%6ld P:%6ld\n", global_data->stream_reuse[CS], 
-            global_data->stream_reuse[ZS], global_data->stream_reuse[TS], global_data->stream_reuse[BS],
-            global_data->stream_reuse[PS]);
-#endif
-
-        for (ub1 i = 0; i <= TST; i++)
-        {
-          global_data->stream_reuse[i]  /= 2;
-        }
-
-        global_data->cache_access = 0;
-        global_data->cpu_zevct    = 0;
-        global_data->gpu_zevct    = 0;
-      }
-
-    case cache_policy_srriphint:
       if (way != BYPASS_WAY)
       {
         /* Obtain SRRIP specific data */
         block = &(SRRIPHINT_DATA_BLOCKS(policy_data)[way]);
-        block->access = 0;
 
         assert(block->stream == 0);
 
@@ -796,7 +1362,10 @@ void cache_fill_block_srriphint(srriphint_data *policy_data, srriphint_gdata *gl
         if (rrpv != BYPASS_RRPV)
         {
           /* Ensure a valid RRPV */
+#if 0
           assert(rrpv >= 0 && rrpv <= policy_data->max_rrpv); 
+#endif
+          assert((rrpv >= 0 && rrpv <= policy_data->max_rrpv) || rrpv == INVALID_RRPV || rrpv == INVALID_RRPV - 1); 
 
           /* Remove block from free list */
           free_list_remove_block(policy_data, block);
@@ -810,30 +1379,53 @@ void cache_fill_block_srriphint(srriphint_data *policy_data, srriphint_gdata *gl
           block->last_rrpv        = rrpv;
           block->ship_sign        = SHIPSIGN(global_data, info);
           block->ship_sign_valid  = TRUE;
+          block->access           = 0;
+          block->expected_age     = 0;
+
+          if (info->pc && info->fill)
+          {
+            block->pc       = info->pc;
+            block->fill_pc  = info->pc;
+
+            /* Get expected age and update the block. 5 bits of the age are 
+             * taken from sequence number learned for PCs. 5 bits are taken 
+             * from block address */
+            
+            cs_qnode           *region_table;
+            shnt_region_data   *region_data;
+            ub8                 pc_age; 
+            ub8                 block_age; 
+
+#define GET_AGE(p, b) (((p) << 8) | (b))
+#define RPHASE(g)     (((g)->sampler->current_reuse_pahse + 1) % RPHASE_CNT)
+
+            region_table = global_data->sampler->all_region_list;
+
+            region_data = (shnt_region_data *)attila_map_lookup(region_table, RID(info->address), 
+                ATTILA_MASTER_KEY);
+            if (region_data)
+            {
+              pc_age = region_data->distance[RPHASE(global_data)] & 0xff; 
+            }
+            
+            block_age = (info->address >> 6) & 0xff;
+
+            block->expected_age = GET_AGE(pc_age, block_age);
+
+#undef GET_AGE
+#undef RPHASE
+          }
+          else
+          {
+            block->pc = 0xdead;
+          }
 
           assert(block->next == NULL && block->prev == NULL);
 
           /* Insert block in to the corresponding RRPV queue */
-          if (GPU_STREAM(strm))
-          {
-            CACHE_APPEND_TO_QUEUE(block, 
-                SRRIPHINT_DATA_GVALID_HEAD(policy_data)[rrpv], 
-                SRRIPHINT_DATA_GVALID_TAIL(policy_data)[rrpv]);
-
-            global_data->gpu_blocks += 1;
-            policy_data->gpu_blocks += 1;
-          }
-          else
-          {
-            CACHE_APPEND_TO_QUEUE(block, 
-                SRRIPHINT_DATA_CVALID_HEAD(policy_data)[rrpv], 
-                SRRIPHINT_DATA_CVALID_TAIL(policy_data)[rrpv]);
-
-            global_data->cpu_blocks += 1;
-            policy_data->cpu_blocks += 1;
-
-            assert(policy_data->cpu_blocks <= 16);
-          }
+          CACHE_APPEND_TO_QUEUE(block, 
+            SRRIPHINT_DATA_VALID_HEAD(policy_data)[rrpv], 
+            SRRIPHINT_DATA_VALID_TAIL(policy_data)[rrpv]);
 
           if (policy_data->set_type == SRRIPHINT_SRRIP_SET)
           {
@@ -851,14 +1443,26 @@ void cache_fill_block_srriphint(srriphint_data *policy_data, srriphint_gdata *gl
   {
     if (++((global_data->sampler)->epoch_length) == EPOCH_SIZE)
     {
-
       shnt_sampler_cache_reset(global_data, global_data->sampler);
 
       (global_data->sampler)->epoch_length = 0;
     }
-  }
 
-  shnt_sampler_cache_lookup(global_data->sampler, policy_data, info, TRUE);
+    shnt_sampler_cache_lookup(global_data, policy_data, info, TRUE);
+
+    if (info->pc)
+    {
+	    if (policy_data->set_indx % global_data->dbp_sampler->sampler_modulus == 0) 
+      {
+        int set = policy_data->set_indx / global_data->dbp_sampler->sampler_modulus;
+        if (set >= 0 && set < global_data->dbp_sampler->nsampler_sets)
+        {
+          sdbp_sampler_access(global_data->dbp_sampler, info->pid, set,
+              info->address, info->pc);
+        }
+      }
+    }
+  }
 
   SRRIPHINT_DATA_CFPOLICY(policy_data) = SRRIPHINT_DATA_DFPOLICY(policy_data);
 }
@@ -869,12 +1473,17 @@ int cache_replace_block_srriphint(srriphint_data *policy_data, srriphint_gdata *
   struct  cache_block_t *block;
   struct  cache_block_t *vctm_block;
   sb4     rrpv;
+  sb4     max_rrpv;
   ub4     min_wayid;
+  ub8     max_age;
+  ub8     expected_age;
   ub4     gpu_zblocks;
   ub4     cpu_zblocks;
 
   /* Remove a nonbusy block from the tail */
   min_wayid   = ~(0);
+  max_age     = 1;
+  max_rrpv    = -1;
   vctm_block  = NULL;
   cpu_zblocks = 0;
   gpu_zblocks = 0;
@@ -891,183 +1500,104 @@ int cache_replace_block_srriphint(srriphint_data *policy_data, srriphint_gdata *
     return block->way;
   }
 
-  /* Obtain RRPV from where to replace the block */
-  rrpv = cache_get_replacement_rrpv_srriphint(policy_data);
-
-  /* Ensure rrpv is with in max_rrpv bound */
-  assert(rrpv >= 0 && rrpv <= SRRIPHINT_DATA_MAX_RRPV(policy_data));
-
-  /* If there is no block with required RRPV, increment RRPV of all the blocks
-   * until we get one with the required RRPV */
-  if (!SRRIPHINT_DATA_GVALID_HEAD(policy_data)[rrpv].head && !SRRIPHINT_DATA_CVALID_HEAD(policy_data)[rrpv].head)
+  /* Get block with valid max age */
+  for (rrpv = SRRIP_DATA_MAX_RRPV(policy_data); rrpv >= 0; rrpv--)
   {
-    if (!SRRIPHINT_DATA_GVALID_HEAD(policy_data)[rrpv].head)
+    for (block = SRRIP_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
     {
-      /* All blocks which are already pinned are promoted to RRPV 0 
-       * and are unpinned. So we iterate through the blocks at RRPV 3 
-       * and move all the blocks which are pinned to RRPV 0 */
-      CACHE_SRRIPHINT_INCREMENT_RRPV(SRRIPHINT_DATA_GVALID_HEAD(policy_data), 
-          SRRIPHINT_DATA_GVALID_TAIL(policy_data), rrpv);
-    }
+#if 0
+      if (block->expected_age > max_age)
+#endif
+      expected_age = get_expected_age(global_data, block->vtl_addr, block->pc);
 
-    if (!SRRIPHINT_DATA_CVALID_HEAD(policy_data)[rrpv].head)
-    {
-      /* All blocks which are already pinned are promoted to RRPV 0 
-       * and are unpinned. So we iterate through the blocks at RRPV 3 
-       * and move all the blocks which are pinned to RRPV 0 */
-      CACHE_SRRIPHINT_INCREMENT_RRPV(SRRIPHINT_DATA_CVALID_HEAD(policy_data), 
-          SRRIPHINT_DATA_CVALID_TAIL(policy_data), rrpv);
-    }
-  }
-
-
-  switch (SRRIPHINT_DATA_CRPOLICY(policy_data))
-  {
-    case cache_policy_srriphint:
-    case cache_policy_cpulast:
-    case cache_policy_srrip:
-
-#define PU_STR(g, s) ((g)->sampler->perfctr.fill_reuse_count[(s)])
-#define PU_STF(g, s) ((g)->sampler->perfctr.fill_count[(s)])
-#define CPU_FREUSE(g) (PU_STR(g, PS) + PU_STR(g, PS1) + PU_STR(g, PS2) + PU_STR(g, PS3))
-#define CPU_FCOUNT(g) (PU_STF(g, PS) + PU_STF(g, PS1) + PU_STF(g, PS2) + PU_STF(g, PS3))
-
-      if (THROTTLE_ACTIVE && GPU_STREAM(info->stream)) 
+      if (expected_age > max_age)
       {
-        assert(policy_data->set_type == SRRIPHINT_GPU_SET || 
-            policy_data->set_type == SRRIPHINT_GPU_COND_SET || 
-            SRRIPHINT_FOLLOWER_SET);
-
-        switch(GET_RPOLICY(policy_data, global_data))
-        {
-          case RPL_GPU_FIRST:
-            if (PU_STR(global_data, info->stream) < PU_STF(global_data, info->stream) / 2)
-            {
-              if (!SRRIPHINT_DATA_GVALID_HEAD(policy_data)[rrpv].head)
-              {
-                /* All blocks which are already pinned are promoted to RRPV 0 
-                 * and are unpinned. So we iterate through the blocks at RRPV 3 
-                 * and move all the blocks which are pinned to RRPV 0 */
-                CACHE_SRRIPHINT_INCREMENT_RRPV(SRRIPHINT_DATA_GVALID_HEAD(policy_data), 
-                    SRRIPHINT_DATA_GVALID_TAIL(policy_data), rrpv);
-              }
-
-              for (block = SRRIPHINT_DATA_GVALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
-              {
-                if (!block->busy && (block->way < min_wayid))
-                {
-                  min_wayid = block->way;
-                  vctm_block  = block;
-                }
-              }
-            }
-            break;
-
-          case RPL_GPU_COND_FIRST:
-            if (PU_STR(global_data, info->stream) < PU_STF(global_data, info->stream) / 2)
-            {
-              if (CPU_FREUSE(global_data) > CPU_FCOUNT(global_data) / 2)
-              {
-                if (!SRRIPHINT_DATA_GVALID_HEAD(policy_data)[rrpv].head)
-                {
-                  /* All blocks which are already pinned are promoted to RRPV 0 
-                   * and are unpinned. So we iterate through the blocks at RRPV 3 
-                   * and move all the blocks which are pinned to RRPV 0 */
-                  CACHE_SRRIPHINT_INCREMENT_RRPV(SRRIPHINT_DATA_GVALID_HEAD(policy_data), 
-                      SRRIPHINT_DATA_GVALID_TAIL(policy_data), rrpv);
-                }
-
-                for (block = SRRIPHINT_DATA_GVALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
-                {
-                  if (!block->busy && (block->way < min_wayid))
-                  {
-                    min_wayid = block->way;
-                    vctm_block  = block;
-                  }
-                }
-              }
-            }
-            break;
-
-          default:
-            panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
-        }
+        max_age   = expected_age;
+        min_wayid = block->way;
+        max_rrpv  = rrpv;
       }
-
-#undef GPU_STR
-#undef GPU_STF
-#undef CPU_FREUSE
-#undef CPU_FCOUNT
-
-      if (min_wayid == ~(0))
-      {
-        for (block = SRRIPHINT_DATA_GVALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
-        {
-          if (!block->busy && (block->way < min_wayid))
-          {
-            min_wayid = block->way;
-            vctm_block  = block;
-          }
-        }
-
-        for (block = SRRIPHINT_DATA_CVALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
-        {
-          if (!block->busy && (block->way < min_wayid))
-          {
-            min_wayid = block->way;
-            vctm_block  = block;
-          }
-        }
-      }
-
-      break;
-
-    default:
-      panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
-  }
-
-end:
-  if (vctm_block)
-  {
-    if (GPU_STREAM(vctm_block->stream))
-    {
-      if (!vctm_block->access)
-      {
-        global_data->gpu_zevct += 1;
-      }
-
-      if (global_data->gpu_blocks)
-      {
-        global_data->gpu_blocks -= 1;
-        policy_data->gpu_blocks -= 1;
-      }
-    }
-    else
-    {
-      if (!vctm_block->access)
-      {
-        global_data->cpu_zevct += 1;
-      }
-
-      if (global_data->cpu_blocks)
-      {
-        global_data->cpu_blocks -= 1;
-      }
-
-      assert(policy_data->cpu_blocks);
-
-      policy_data->cpu_blocks -= 1;
-    }
-
-    if (CPU_STREAM(vctm_block->stream) && vctm_block->ship_sign_valid)
-    {
-      CACHE_DEC_SHCT(vctm_block, global_data);
     }
   }
   
-  if (min_wayid != ~(0) && min_wayid != BYPASS_WAY)
+  /* Obtain RRPV from where to replace the block */
+  if (max_rrpv == -1)
   {
-    assert(vctm_block);
+    rrpv = cache_get_replacement_rrpv_srriphint(policy_data);
+  }
+  else
+  {
+    rrpv = max_rrpv;
+  }
+
+  /* Ensure rrpv is with in max_rrpv bound */
+  assert((rrpv >= 0 && rrpv <= SRRIPHINT_DATA_MAX_RRPV(policy_data)) || 
+      rrpv == INVALID_RRPV || rrpv == INVALID_RRPV - 1);
+
+  if (min_wayid == ~(0))
+  {
+    /* If there is no block with required RRPV, increment RRPV of all the blocks
+     * until we get one with the required RRPV */
+    if (!SRRIPHINT_DATA_VALID_HEAD(policy_data)[rrpv].head)
+    {
+      CACHE_SRRIPHINT_INCREMENT_RRPV(SRRIPHINT_DATA_VALID_HEAD(policy_data), 
+          SRRIPHINT_DATA_VALID_TAIL(policy_data), rrpv);
+    }
+
+    switch (SRRIPHINT_DATA_CRPOLICY(policy_data))
+    {
+      case cache_policy_srrip:
+        if (min_wayid == ~(0))
+        {
+          for (block = SRRIP_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
+          {
+            if (!block->busy && block->way < min_wayid)
+              min_wayid = block->way;
+          }
+        }
+
+        /* If a replacement has happeded, update signature counter table  */
+        if (min_wayid != ~(0))
+        {
+          block = &(policy_data->blocks[min_wayid]);
+
+          if (rrpv != INVALID_RRPV && rrpv != INVALID_RRPV - 1)
+          {
+            CACHE_DEC_SHCT(block, global_data);
+          }
+        }
+        break;
+
+      case cache_policy_cpulast:
+        /* First try to find a GPU block */
+        for (block = SRRIP_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
+        {
+          if (!block->busy && (block->way < min_wayid && block->stream < TST))
+            min_wayid = block->way;
+        }
+
+        /* If there so no GPU replacement candidate, replace CPU block */
+        if (min_wayid == ~(0))
+        {
+          for (block = SRRIP_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
+          {
+            if (!block->busy && (block->way < min_wayid))
+              min_wayid = block->way;
+          }
+        }
+        break;
+
+      default:
+        panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
+    }
+  }
+
+end:
+  if (min_wayid != ~(0) && policy_data->blocks[min_wayid].pc == 134534209)
+  {
+    assert(1);
+#if 0
+    printf("%d\n", min_wayid);
+#endif
   }
 
   /* If no non busy block can be found, return -1 */
@@ -1105,29 +1635,6 @@ void cache_access_block_srriphint(srriphint_data *policy_data, srriphint_gdata *
 
       global_data->stream_reuse[blk->stream]  += 1;
 
-
-      if (++(global_data->cache_access) >= INTERVAL_SIZE)
-      {
-        printf("Blocks CPU:%6ld GPU:%6ld\n", global_data->cpu_blocks, global_data->gpu_blocks);
-#if 0
-        printf("Block Count C:%6ld Z:%6ld T:%6ld B:%6ld P:%6ld\n", global_data->stream_blocks[CS], 
-            global_data->stream_blocks[ZS], global_data->stream_blocks[TS], global_data->stream_blocks[BS],
-            global_data->stream_blocks[PS]);
-
-        printf("Block Reuse C:%6ld Z:%6ld T:%6ld B:%6ld P:%6ld\n", global_data->stream_reuse[CS], 
-            global_data->stream_reuse[ZS], global_data->stream_reuse[TS], global_data->stream_reuse[BS],
-            global_data->stream_reuse[PS]);
-#endif
-        for (ub1 i = 0; i <= TST; i++)
-        {
-          global_data->stream_reuse[i]  /= 2;
-        }
-
-        global_data->cache_access = 0;
-      }
-
-    case cache_policy_srriphint:
-
       /* Get old RRPV from the block */
       old_rrpv = (((rrip_list *)(blk->data))->rrpv);
       new_rrpv = old_rrpv;
@@ -1141,31 +1648,37 @@ void cache_access_block_srriphint(srriphint_data *policy_data, srriphint_gdata *
       {
         blk->last_rrpv = new_rrpv;
 
-        if (GPU_STREAM(info->stream))
-        {
-          CACHE_REMOVE_FROM_QUEUE(blk, SRRIPHINT_DATA_GVALID_HEAD(policy_data)[old_rrpv],
-              SRRIPHINT_DATA_GVALID_TAIL(policy_data)[old_rrpv]);
-          CACHE_APPEND_TO_QUEUE(blk, SRRIPHINT_DATA_GVALID_HEAD(policy_data)[new_rrpv], 
-              SRRIPHINT_DATA_GVALID_TAIL(policy_data)[new_rrpv]);
-        }
-        else
-        {
-          CACHE_REMOVE_FROM_QUEUE(blk, SRRIPHINT_DATA_CVALID_HEAD(policy_data)[old_rrpv],
-              SRRIPHINT_DATA_CVALID_TAIL(policy_data)[old_rrpv]);
-          CACHE_APPEND_TO_QUEUE(blk, SRRIPHINT_DATA_CVALID_HEAD(policy_data)[new_rrpv], 
-              SRRIPHINT_DATA_CVALID_TAIL(policy_data)[new_rrpv]);
-        }
+        CACHE_REMOVE_FROM_QUEUE(blk, SRRIPHINT_DATA_VALID_HEAD(policy_data)[old_rrpv],
+            SRRIPHINT_DATA_VALID_TAIL(policy_data)[old_rrpv]);
+        CACHE_APPEND_TO_QUEUE(blk, SRRIPHINT_DATA_VALID_HEAD(policy_data)[new_rrpv], 
+            SRRIPHINT_DATA_VALID_TAIL(policy_data)[new_rrpv]);
       }
 
       CACHE_UPDATE_BLOCK_STREAM(blk, strm);
 
       blk->dirty  |= (info && info->spill) ? TRUE : FALSE;
       blk->spill   = (info && info->spill) ? TRUE : FALSE;
-      blk->access += 1;
 
-      if (CPU_STREAM(info->stream) && info->fill && blk->ship_sign_valid)
+#if 0
+      if (info->fill && blk->ship_sign_valid)
+#endif
+      if (info->fill)
       {
-        CACHE_INC_SHCT(blk, global_data);
+        blk->access += 1;
+
+        if (new_rrpv != INVALID_RRPV && new_rrpv != INVALID_RRPV - 1)
+        {
+          CACHE_INC_SHCT(blk, global_data);
+        }
+        
+        if (info->pc)
+        {
+          blk->pc = info->pc;
+        }
+        else
+        {
+          blk->pc = 0xdead;
+        }
       }
       break;
 
@@ -1180,274 +1693,156 @@ void cache_access_block_srriphint(srriphint_data *policy_data, srriphint_gdata *
   {
     if (++((global_data->sampler)->epoch_length) == EPOCH_SIZE)
     {
-
       shnt_sampler_cache_reset(global_data, global_data->sampler);
 
       (global_data->sampler)->epoch_length = 0;
+
+      printf("\nSampler shared PC %ld \n", (global_data->sampler)->spc_count);
+    }
+
+    shnt_sampler_cache_lookup(global_data, policy_data, info, FALSE);
+
+    if (info->pc)
+    {
+	    if (policy_data->set_indx % global_data->dbp_sampler->sampler_modulus == 0) 
+      {
+		    int set = policy_data->set_indx / global_data->dbp_sampler->sampler_modulus;
+		    if (set >= 0 && set < global_data->dbp_sampler->nsampler_sets)
+        {
+          sdbp_sampler_access(global_data->dbp_sampler, info->pid, set,
+              info->address, info->pc);
+        }
+      }
     }
   }
-
-  shnt_sampler_cache_lookup(global_data->sampler, policy_data, info, FALSE);
 }
 
 int cache_get_fill_rrpv_srriphint(srriphint_data *policy_data, 
     srriphint_gdata *global_data, memory_trace *info, ub4 epoch)
 {
-  srriphint_sampler_perfctr *perfctr;
-
   int ret_rrpv;
-  ub1 strm;
+  
+  ret_rrpv = SRRIPHINT_DATA_MAX_RRPV(policy_data) - 1;
 
-  if (THROTTLE_ACTIVE)
+  if (info->fill)
   {
-    switch (SRRIPHINT_DATA_CFPOLICY(policy_data))
+    if (global_data->brrip_ctr[info->core] == global_data->threshold - 1)
     {
-      case cache_policy_srriphint:
-        if (GPU_STREAM(info->stream) && info->spill)
-        {
-          strm      = NEW_STREAM(info);
-          perfctr   = &((global_data->sampler)->perfctr);
-          ret_rrpv  = 2;
-
-#define SCOUNT(p, s)      (SMPLRPERF_SPILL(p, s))
-#define SRUSE(p, s)       (SMPLRPERF_SREUSE(p, s))
-#define SREUSE(p, s)      (SMPLRPERF_SREUSE(p, s))
-#define MRUSE(p)          (SMPLRPERF_MREUSE(p))
-#define SDLOW(p, s)       (SMPLRPERF_SDLOW(p, s))
-#define SDHIGH(p, s)      (SMPLRPERF_SDHIGH(p, s))
-#define SMPIN_TH(p, s)    (SRUSE(p, s) * SMTH_DENM > SCOUNT(p, s) * SMTH_NUMR)
-#define RRPV1(p, s)       ((SRUSE(p, s) > MRUSE(p) / 2) || SMPIN_TH(p, s))
-#define RRPV2(p, s)       ((SRUSE(p, s) > MRUSE(p) / 3))
-#define SRD_LOW(p, s)     (SDLOW(p, s) < SDHIGH(p, s))
-#define SREUSE_LOW(p, s)  (SREUSE(p, s) == 0 && SCOUNT(p, s) > BYPASS_ACCESS_TH)
-
-          ret_rrpv =  SRRIPHINT_DATA_MAX_RRPV(policy_data) - 1;
-
-          if (RRPV1(perfctr, strm) || RRPV2(perfctr, strm))
-          {
-            ret_rrpv = 0;
-          }
-          else
-          {
-            if (SRD_LOW(perfctr, strm) || SREUSE_LOW(perfctr, strm))
-            {
-              ret_rrpv = 3;
-            }
-          }
-
-          return ret_rrpv;
-
-#undef SCOUNT
-#undef SRUSE
-#undef MRUSE
-#undef SDLOW
-#undef SDHIGH
-#undef SMPIN_TH
-#undef RRPV1
-#undef RRPV2
-#undef SRD_LOW
-#undef SREUSE_LOW
-        }
-        else
-        {
-          strm      = NEW_STREAM(info);
-          perfctr   = &((global_data->sampler)->perfctr);
-
-#define MAX_BMC           (32)
-#define FREUSE(p, s)      (SMPLRPERF_FREUSE(p, s))
-#define FILLS(p, s)       (SMPLRPERF_FILL(p, s))
-#define SREUSE(p, s)      (SMPLRPERF_SREUSE(p, s))
-#define MRUSE(p)          (SMPLRPERF_MREUSE(p))
-#define SPILLS(p, s)      (SMPLRPERF_SPILL(p, s))
-#define RRPV1(p, s)       ((SREUSE(p, s) > MRUSE(p) / 2))
-#define RRPV2(p, s)       ((SREUSE(p, s) > MRUSE(p) / 3))
-#define SMLPR_EFCTV(g, i) ((g)->ship_shct[SHIPSIGN(g, i)])
-
-          if (info->fill)
-          {
-            switch (GET_FILL_POLICY(policy_data, global_data))
-            {
-              /* Ship sample set fills with ship */
-              case FILL_TEST_SHIP:
-                if (CPU_STREAM(info->stream))
-                {
-                  if (!(global_data->ship_shct[SHIPSIGN(global_data, info)]))
-                  {
-                    return SRRIPHINT_DATA_MAX_RRPV(policy_data);
-                  }
-                }
-                break;
-
-                /* Non ship sample set fills with srrip */
-              case FILL_TEST_SRRIP:
-                break;
-
-              default:
-                panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
-            }
-          }
-
-#undef MAX_BMC
-#undef FREUSE
-#undef FILLS
-#undef SREUSE
-#undef SPILLS
-#undef MRUSE
-#undef RRPV1
-#undef RRPV2
-#undef SMLPR_EFCTV
-        }
-
-        return SRRIPHINT_DATA_MAX_RRPV(policy_data) - 1;
-
-        break;
-
-      case cache_policy_srrip:
-        return SRRIPHINT_DATA_MAX_RRPV(policy_data) - 1;
-
-      default:
-        panic("%s: line no %d - invalid policy type", __FUNCTION__, __LINE__);
-        return 0;
+      global_data->brrip_ctr[info->core] = 0;
+      ret_rrpv = SRRIPHINT_DATA_MAX_RRPV(policy_data) - 1;
     }
+    else
+    {
+      if (global_data->ship_shct[SHIPSIGN(global_data, info)])
+      {
+        ret_rrpv = SRRIPHINT_DATA_MAX_RRPV(policy_data) - 1;
+      }
+      else
+      {
+        ret_rrpv = SRRIPHINT_DATA_MAX_RRPV(policy_data);
+      }
+    }
+
+    global_data->brrip_ctr[info->core] += 1;
   }
-  else
-  {
-    return SRRIPHINT_DATA_MAX_RRPV(policy_data) - 1;
-  }
+
+  return ret_rrpv;
 }
 
 int cache_get_replacement_rrpv_srriphint(srriphint_data *policy_data)
 {
+  /* Replacement RRPV decision is based on the state of lists at MAX_RRPV and INVALID_RRPV.
+   * 
+   * If there are blocks at MAX_RRPV, MAX_RRPV is chosen for victimization. else If there 
+   * are blocks in list at INVALID_RRPV, blocks at RRPV below MAX_RRPV ate aged and 
+   * INVALID_RRPV is chosen for victimization. If these conditions fail MAX_RRPV is chosed
+   * for victimization.
+   * */
+#if 0
+  if (SRRIPHINT_DATA_VALID_HEAD(policy_data)[SRRIPHINT_DATA_MAX_RRPV(policy_data)].head)
+  {
+    return SRRIPHINT_DATA_MAX_RRPV(policy_data);
+  }
+
+  if (SRRIPHINT_DATA_VALID_HEAD(policy_data)[INVALID_RRPV].head)
+  {
+#if 0
+    if (!SRRIPHINT_DATA_VALID_HEAD(policy_data)[SRRIPHINT_DATA_MAX_RRPV(policy_data) - 1].head)
+    {
+      CACHE_SRRIPHINT_INCREMENT_RRPV(SRRIPHINT_DATA_VALID_HEAD(policy_data), 
+          SRRIPHINT_DATA_VALID_TAIL(policy_data), SRRIPHINT_DATA_MAX_RRPV(policy_data));
+    }
+#endif    
+
+    assert(policy_data->shared_blocks);
+    
+    if (policy_data->shared_blocks > 2)
+    {
+      policy_data->shared_blocks -= 1;
+      return INVALID_RRPV;
+    }
+    
+    if (SRRIPHINT_DATA_VALID_HEAD(policy_data)[2].head)
+    {
+      return 2;
+    }
+    else if (SRRIPHINT_DATA_VALID_HEAD(policy_data)[1].head)
+    {
+      return 1;
+    }
+    else if (SRRIPHINT_DATA_VALID_HEAD(policy_data)[0].head)
+    {
+      return 0;
+    }
+
+  }
+#endif
+
   return SRRIPHINT_DATA_MAX_RRPV(policy_data);
 }
-
-#define SCOUNT(p, s)      (SMPLRPERF_SPILL(p, s))
-#define FCOUNT(p, s, e)   (SMPLRPERF_FILL_RE(p, s, e))
-#define SRUSE(p, s)       (SMPLRPERF_SREUSE(p, s))
-#define FRUSE(p, s, e)    (SMPLRPERF_FREUSE_RE(p, s, e))
-#define MRUSE(p)          (SMPLRPERF_MREUSE(p))
-#define SDLOW(p, s)       (SMPLRPERF_SDLOW(p, s))
-#define SDHIGH(p, s)      (SMPLRPERF_SDHIGH(p, s))
-#define SHPIN_TH(p, s)    (SRUSE(p, s) * SHTH_DENM > SCOUNT(p, s) * SHTH_NUMR)
-#define RRPV1(p, s)       ((SRUSE(p, s) > MRUSE(p) / 2) || SHPIN_TH(p, s))
-#define RRPV2(p, s)       ((SRUSE(p, s) > MRUSE(p) / 3))
-#define RRPV3(p, s)       ((SRUSE(p, s) > SCOUNT(p, s) / 2))
-#define SRD_LOW(p, s)     (SDLOW(p, s) < SDHIGH(p, s))
-#define SREUSE_LOW(p, s)  (SREUSE(p, s) == 0 && SCOUNT(p, s) > BYPASS_ACCESS_TH)
-#define CT_TH1            (64)
-#define BT_TH1            (32)
-#define TH2               (2)
-
-
-#define CSBYTH_D                (2)
-#define CSBYTH_N                (1)
-#define CFBYTH_D                (2)
-#define CFBYTH_N                (1)
-#define FBYPASS_TH(sp, s, e)    (FRUSE(&((sp)->perfctr), s, e) * CFBYTH_D <= FCOUNT(&((sp)->perfctr), s, e) * CFBYTH_N)
-#define SBYPASS_TH(sp, s)       (SRUSE(&((sp)->perfctr), s) * CSBYTH_D <= SCOUNT(&((sp)->perfctr), s) * CSBYTH_N)
-#define CBYPASS(sp, i, e)       ((i)->fill ? FBYPASS_TH(sp, (i)->stream, e) : SBYPASS_TH(sp, (i)->stream))
-#define NCRTCL_BYPASS(g, i, e)  (!CRITICAL_STREAM(g, i) && CBYPASS((g)->sampler, i, e))
-#define CHK_SCRTCL(g, i)        ((g)->speedup_enabled ? CRITICAL_STREAM(g, i) : TRUE)
-#define CHK_SSPD(g, i, e)       ((g)->speedup_enabled ? !NCRTCL_BYPASS(g, i, e) : TRUE)
-#define CHK_FSPD(g, i, e)       ((g)->speedup_enabled ? NCRTCL_BYPASS(g, i, e) : FALSE)
 
 int cache_get_new_rrpv_srriphint(srriphint_data *policy_data, srriphint_gdata *global_data, 
     memory_trace *info, sb4 old_rrpv, struct cache_block_t *block, ub4 epoch)
 {
-  int ret_rrpv;
-  int strm;
+  int new_rrpv;
 
-  srriphint_sampler_perfctr *perfctr;
-  
-  perfctr = &((global_data->sampler)->perfctr);
-  strm    = NEW_STREAM(info);
-  
-  ret_rrpv = 0;
-  
-  if (THROTTLE_ACTIVE)
+  /* Return replacement RRPV based on the state of MAX_RRPV and INVALID_RRPV */
+#define LTP0(i) ((i)->pc == 134515657 || (i)->pc == 134515647 || (i)->pc == 134603813 || (i)->pc == 134558835)
+#define LTP1(i) ((i)->pc == 134559019 || (i)->pc == 134558903)
+#define LTP2(i) ((i)->pc == 134513744 || (i)->pc == 134518229 || (i)->pc == 134558835)
+#define LTP3(i) ((i)->pc == 134605840 || (i)->pc == 134615624 || (i)->pc == 134615658)
+#define LTP4(i) ((i)->pc == 134615572 || (i)->pc == 134822902)
+
+#if 0
+#define LTP(i)  (LTP0(i) || LTP1(i) || LTP2(i) || LTP3(i) || LTP4(i))
+#endif
+
+#define LTP(i)  (LTP4(i))
+
+  new_rrpv = 0;
+
+#if 0
+  if (!LTP(info) && info->fill && info->pc)
   {
-    if (GPU_STREAM(info->stream))
-    {
-      if (info->spill)
-      {
-        if (RRPV1(perfctr, strm) && old_rrpv >= 3)
-        {
-          ret_rrpv = 0;
-        }
-        else
-        {
-          ret_rrpv = old_rrpv;
-        }
-      }
-      else
-      {
-        assert(info->fill == TRUE);
+	  unsigned int trace = sdbp_make_trace(global_data->dbp_sampler, info->pid, 
+        global_data->dbp_sampler->pred, info->pc);
 
-        if (block->is_ct_block)
-        {
-          if (FRUSE(perfctr, DCS, epoch) * CT_TH1 <= FCOUNT(perfctr, DCS, epoch))
-          {
-            ret_rrpv = 3;
-          }
-          else
-          {
-            if (FRUSE(perfctr, DCS, epoch) * TH2 <= FCOUNT(perfctr, DCS, epoch))
-            {
-              ret_rrpv = 2;
-            }
-          }
-        }
-        else
-        {
-          if (block->is_bt_block)
-          {
-            if (FRUSE(perfctr, DBS, epoch) * CT_TH1 <= FCOUNT(perfctr, DBS, epoch))
-            {
-              ret_rrpv = 3;
-            }
-            else
-            {
-              if (FRUSE(perfctr, DBS, epoch) * TH2 <= FCOUNT(perfctr, DBS, epoch))
-              {
-                ret_rrpv = 2;
-              }
-            }
-          }
-        }
-      }
+    if (sdbp_predictor_get_prediction(global_data->dbp_sampler, global_data->dbp_sampler->pred, 
+        info->pid, trace, policy_data->set_indx))
+    {
+      new_rrpv = 3;
     }
   }
+#endif
 
-  return (info && !(info->fill)) ? old_rrpv : ret_rrpv;
+  return (info->spill) ? old_rrpv : new_rrpv;
+
+#undef LTP0
+#undef LTP1
+#undef LTP2
+#undef LTP3
+#undef LTP
 }
-
-#undef SCOUNT
-#undef FCOUNT
-#undef SRUSE
-#undef FRUSE
-#undef MRUSE
-#undef SDLOW
-#undef SDHIGH
-#undef SHPIN_TH
-#undef RRPV1
-#undef RRPV2
-#undef RRPV3
-#undef SRD_LOW
-#undef SREUSE_LOW
-#undef CT_TH1
-#undef BT_TH1
-#undef TH2
-#undef CSBYTH_D
-#undef CSBYTH_N
-#undef CFBYTH_D
-#undef CFBYTH_N
-#undef FBYPASS_TH
-#undef SBYPASS_TH
-#undef CBYPASS
-#undef NCRTCL_BYPASS
-#undef CHK_SCRTCL
-#undef CHK_SSPD
-#undef CHK_FSPD
 
 /* Update state of block. */
 void cache_set_block_srriphint(srriphint_data *policy_data, int way, long long tag,
@@ -1481,22 +1876,11 @@ void cache_set_block_srriphint(srriphint_data *policy_data, int way, long long t
   int old_rrpv = (((rrip_list *)(block->data))->rrpv);
 
   /* Remove block from valid list and insert into free list */
-  if (GPU_STREAM(stream))
-  {
-    CACHE_REMOVE_FROM_QUEUE(block, SRRIPHINT_DATA_GVALID_HEAD(policy_data)[old_rrpv],
-        SRRIPHINT_DATA_GVALID_TAIL(policy_data)[old_rrpv]);
-    CACHE_APPEND_TO_SQUEUE(block, SRRIPHINT_DATA_FREE_HEAD(policy_data), 
-        SRRIPHINT_DATA_FREE_TAIL(policy_data));
-  }
-  else
-  {
-    CACHE_REMOVE_FROM_QUEUE(block, SRRIPHINT_DATA_CVALID_HEAD(policy_data)[old_rrpv],
-        SRRIPHINT_DATA_CVALID_TAIL(policy_data)[old_rrpv]);
-    CACHE_APPEND_TO_SQUEUE(block, SRRIPHINT_DATA_FREE_HEAD(policy_data), 
-        SRRIPHINT_DATA_FREE_TAIL(policy_data));
-  }
+  CACHE_REMOVE_FROM_QUEUE(block, SRRIPHINT_DATA_VALID_HEAD(policy_data)[old_rrpv],
+      SRRIPHINT_DATA_VALID_TAIL(policy_data)[old_rrpv]);
+  CACHE_APPEND_TO_SQUEUE(block, SRRIPHINT_DATA_FREE_HEAD(policy_data), 
+      SRRIPHINT_DATA_FREE_TAIL(policy_data));
 }
-
 
 /* Get tag and state of a block. */
 struct cache_block_t cache_get_block_srriphint(srriphint_data *policy_data, int way,
@@ -1534,39 +1918,25 @@ int cache_count_block_srriphint(srriphint_data *policy_data, ub1 strm)
   int     count;
   struct  cache_block_t *head;
   struct  cache_block_t *node;
-  
+
   assert(policy_data);
 
+#if 0
   max_rrpv  = policy_data->max_rrpv;
+#endif
+  max_rrpv  = INVALID_RRPV;
   node      = NULL;
   count     = 0;
-  
-  if (GPU_STREAM(strm))
-  {
-    for (int rrpv = 0; rrpv <= max_rrpv; rrpv++)
-    {
-      head = SRRIPHINT_DATA_GVALID_HEAD(policy_data)[rrpv].head;
 
-      for (node = head; node; node = node->prev)
-      {
-        assert(node->state != cache_block_invalid);
-        if (node->stream == strm)
-          count++;
-      }
-    }
-  }
-  else
+  for (int rrpv = 0; rrpv <= max_rrpv; rrpv++)
   {
-    for (int rrpv = 0; rrpv <= max_rrpv; rrpv++)
-    {
-      head = SRRIPHINT_DATA_CVALID_HEAD(policy_data)[rrpv].head;
+    head = SRRIPHINT_DATA_VALID_HEAD(policy_data)[rrpv].head;
 
-      for (node = head; node; node = node->prev)
-      {
-        assert(node->state != cache_block_invalid);
-        if (node->stream == strm)
-          count++;
-      }
+    for (node = head; node; node = node->prev)
+    {
+      assert(node->state != cache_block_invalid);
+      if (node->stream == strm)
+        count++;
     }
   }
 
@@ -1662,7 +2032,6 @@ void update_shnt_sampler_spill_reuse_perfctr(shnt_sampler_cache *sampler, ub4 in
 
 #undef REUSE_DISTANCE
   
-  /* If reuse is xstream reuse */
   if (strm != ostrm)
   {
     sampler->perfctr.xstream_reuse += 1;
@@ -1897,6 +2266,15 @@ void shnt_sampler_cache_fill_block(shnt_sampler_cache *sampler, ub4 index, ub4 w
   sampler->blocks[index][way].dynamic_blit[offset]  = FALSE;
   sampler->blocks[index][way].dynamic_proc[offset]  = FALSE;
   sampler->blocks[index][way].timestamp[offset]     = policy_data->miss_count;
+  
+  if (info->pc)
+  {
+    sampler->blocks[index][way].pc[offset] = info->pc;
+  }
+  else
+  {
+    sampler->blocks[index][way].pc[offset] = 0xdead;
+  }
 
   /* Update fill */
   if (info->fill == TRUE)
@@ -1966,25 +2344,76 @@ void shnt_sampler_cache_access_block(shnt_sampler_cache *sampler, ub4 index, ub4
   sampler->blocks[index][way].stream[offset]        = info->stream;
   sampler->blocks[index][way].timestamp[offset]     = policy_data->miss_count;
   
+  ub8 old_pc;
+
+  if (info->pc)
+  {
+    old_pc = sampler->blocks[index][way].pc[offset];
+
+    if (old_pc != 0xdead && info->pc != old_pc)
+    {
+      /* Insert pc into shared PC list */
+      if (!attila_map_lookup(sampler->spc_list, old_pc, ATTILA_MASTER_KEY))
+      {
+        sampler->spc_count += 1;
+        attila_map_insert(sampler->spc_list, old_pc, ATTILA_MASTER_KEY, info->pc);
+      }
+
+      shnt_pc_data *pc_data;
+      shnt_d_data *d_data;
+
+      pc_data = (shnt_pc_data *)attila_map_lookup(sampler->all_pc_list, old_pc, ATTILA_MASTER_KEY);
+      if (pc_data)
+      {
+        d_data = (shnt_d_data *)attila_map_lookup(pc_data->ppc, info->pc, ATTILA_MASTER_KEY);
+        if (!d_data)
+        {
+          d_data = (shnt_d_data*)xcalloc(1, sizeof(shnt_d_data));
+          assert(d_data);
+
+          d_data->distance  = ++(sampler->pc_distance);
+          d_data->ppc       = info->pc;
+          d_data->pc        = old_pc;
+          d_data->reuse     = 0;
+
+          /* Insert distance into a list */
+          attila_map_insert(pc_data->ppc, info->pc, ATTILA_MASTER_KEY, (ub8)d_data);
+        }
+        else
+        {
+          d_data->reuse += 1;
+        }
+      }
+    }
+
+    sampler->blocks[index][way].pc[offset] = info->pc;
+  }
+
   sampler->perfctr.sampler_hit += 1;
 }
 
-void shnt_sampler_cache_lookup(shnt_sampler_cache *sampler, srriphint_data *policy_data, 
+void shnt_sampler_cache_lookup(srriphint_gdata *global_data, srriphint_data *policy_data, 
     memory_trace *info, ub1 update_time)
 {
+  shnt_sampler_cache *sampler;
+
   ub4 way;
   ub4 index;
   ub8 page;
   ub8 offset;
   ub1 strm;
+  
+  sampler = global_data->sampler;
 
   /* Obtain sampler index, tag, offset and cache index of the access */
   index   = SAMPLER_INDX(info, sampler);
   page    = SAMPLER_TAG(info, sampler);
   offset  = SAMPLER_OFFSET(info, sampler);
   strm    = NEW_STREAM(info);
-  
+
+#if 0
   if ((offset % ((1 << (LOG_GRAIN_SIZE - LOG_BLOCK_SIZE)) / PAGE_COVERAGE)) == 0)
+#endif
   {
     sampler->perfctr.sampler_access += 1;
 
@@ -2018,7 +2447,6 @@ void shnt_sampler_cache_lookup(shnt_sampler_cache *sampler, srriphint_data *poli
       /* No invalid entry. Replace only if stream occupancy in the sampler is 
        * still below minimum occupancy threshold
        **/
-
       if (sampler->stream_occupancy[strm] < STREAM_OCC_THRESHOLD)
       {
         way = (ub4)(random() % sampler->ways);
@@ -2028,6 +2456,7 @@ void shnt_sampler_cache_lookup(shnt_sampler_cache *sampler, srriphint_data *poli
         for (ub1 off = 0; off < sampler->entry_size; off++)
         {
           sampler->blocks[index][way].valid[off]          = 0;
+          sampler->blocks[index][way].pc[off]             = 0xdead;
           sampler->blocks[index][way].dynamic_color[off]  = 0;
           sampler->blocks[index][way].dynamic_depth[off]  = 0;
           sampler->blocks[index][way].dynamic_blit[off]   = 0;
@@ -2056,17 +2485,373 @@ void shnt_sampler_cache_lookup(shnt_sampler_cache *sampler, srriphint_data *poli
         }
 
         /* If sampler access was a miss and an entry has been replaced */
-        shnt_sampler_cache_fill_block(sampler, index, way, policy_data, info, 
-            FALSE);    
+        shnt_sampler_cache_fill_block(sampler, index, way, policy_data, info, FALSE);    
       }
       else
       {
+        increment_dead_limit(global_data, sampler->blocks[index][way].pc[offset], info->pc);
+
         /* If sampler access was a hit */
-        shnt_sampler_cache_access_block(sampler, index, way, policy_data, info, 
-            TRUE);
+        shnt_sampler_cache_access_block(sampler, index, way, policy_data, info, TRUE);
+      }
+      
+      if (info->pc)
+      {
+        sampler->blocks[index][way].pc[offset] = info->pc;
+      }
+      else
+      {
+        sampler->blocks[index][way].pc[offset] = 0xdead;
       }
     }
   }
+}
+
+// constructor for a sampler set
+void sdbp_sampler_set_init(sdbp_sampler *sampler, sdbp_sampler_set *sampler_set)
+{
+  // allocate some sampler entries
+  sampler_set->blocks = (sdbp_sampler_entry *)xcalloc(1, sizeof(sdbp_sampler_entry) * sampler->dan_sampler_assoc);
+  assert(sampler_set->blocks);
+
+  // initialize the LRU replacement algorithm for these entries
+  for (int i = 0; i < sampler->dan_sampler_assoc; i++)
+  {
+    sampler_set->blocks[i].lru_stack_position = i;
+  }
+}
+
+// constructor for sampler entry
+void sdbp_sampler_entry_init(sdbp_sampler_entry *entry)
+{
+  entry->lru_stack_position = 0;
+  entry->valid      = FALSE;
+  entry->tag        = 0;
+  entry->trace      = 0;
+  entry->prediction = 0;
+}
+
+void sdbp_sampler_init(sdbp_sampler *sampler, int nsets, int assoc) 
+{
+	// four-core version gets slightly different parameters
+  
+	sampler->dan_sampler_assoc = 12;
+
+	// number of bits used to index predictor; determines number of
+	// entries in prediction tables (changed for 4MB cache)
+
+	sampler->dan_predictor_index_bits = 12;
+
+	// number of prediction tables
+
+	sampler->dan_predictor_tables = 3;
+
+	// width of prediction saturating counters
+
+	sampler->dan_counter_width = 2;
+
+	// predictor must meet this threshold to predict a block is dead
+
+	sampler->dan_threshold = 8;
+
+	// number of partial tag bits kept per sampler entry
+
+	sampler->dan_sampler_tag_bits = 31;
+
+	// number of trace (partial PC) bits kept per sampler entry
+
+	sampler->dan_sampler_trace_bits = 31;
+
+	// here, we figure out the total number of bits used by the various
+	// structures etc.  along the way we will figure out how many
+	// sampler sets we have room for
+
+	// figure out number of entries in each table
+
+	sampler->dan_predictor_table_entries = 1 << sampler->dan_predictor_index_bits;
+
+	// compute the total number of bits used by the replacement policy
+
+	// total number of bits available for the contest
+
+	int nbits_total = (nsets * assoc * 8 + 1024);
+
+	// the real LRU policy consumes log(assoc) bits per block
+
+	int nbits_lru = assoc * nsets * (int) log2 (assoc);
+
+	// the dead block predictor consumes (counter width) * (number of tables) 
+	// * (entries per table) bits
+
+	int nbits_predictor = 
+		sampler->dan_counter_width * sampler->dan_predictor_tables * sampler->dan_predictor_table_entries;
+
+	// one prediction bit per cache block.
+
+	int nbits_cache = 1 * nsets * assoc;
+
+	// some extra bits we account for to be safe; figure we need about 85 bits
+	// for the various run-time constants and variables the CRC guys might want
+	// to charge us for.  in reality we leave a bigger surplus than this so we
+	// should be safe.
+
+	int nbits_extra = 85; 
+
+	// number of bits left over for the sampler sets
+
+	int nbits_left_over = 
+		nbits_total - (nbits_predictor + nbits_cache + nbits_lru + nbits_extra);
+
+	// number of bits in one sampler set: associativity of sampler * bits per sampler block entry
+
+	int nbits_one_sampler_set = 
+		sampler->dan_sampler_assoc 
+		// tag bits, valid bit, prediction bit, trace bits, lru stack position bits
+		* (sampler->dan_sampler_tag_bits + 1 + 1 + 4 + sampler->dan_sampler_trace_bits);
+
+	// maximum number of sampler of sets we can afford with the space left over
+
+	sampler->nsampler_sets = nbits_left_over / nbits_one_sampler_set;
+
+	// compute the maximum saturating counter value; predictor constructor
+	// needs this so we do it here
+
+	sampler->dan_counter_max = (1 << sampler->dan_counter_width) -1;
+
+	// make a predictor
+	sampler->pred = (sdbp_predictor *)xcalloc(1, sizeof(sdbp_predictor));
+  assert(sampler->pred);
+  
+  sdbp_predictor_init(sampler, sampler->pred);
+
+	// we should have at least one sampler set
+	assert (sampler->nsampler_sets >= 0);
+
+	// make the sampler sets
+	sampler->sets = (sdbp_sampler_set *)xcalloc(1, sizeof(sdbp_sampler_set) * sampler->nsampler_sets);
+  assert(sampler->sets);
+  
+  /* Initialize sampler sets */
+  for (ub4 i = 0; i < sampler->nsampler_sets; i++)
+  {
+    sdbp_sampler_set_init(sampler, &(sampler->sets[i]));
+  }
+
+	// figure out what should divide evenly into a set index to be
+	// considered a sampler set
+	sampler->sampler_modulus = nsets / sampler->nsampler_sets;
+
+	// compute total number of bits used; we can print this out to validate
+	// the computation in the paper
+
+	sampler->total_bits_used = 
+		(nbits_total - nbits_left_over) + (nbits_one_sampler_set * sampler->nsampler_sets);
+	//fprintf (stderr, "total bits used %d\n", total_bits_used);
+}
+
+// access the sampler with an LLC tag
+void sdbp_sampler_access(sdbp_sampler *sampler, ub4 tid, sb4 set, ub8 tag, ub8 PC) 
+{
+	// get a pointer to this set's sampler entries
+	sdbp_sampler_entry *blocks = &sampler->sets[set].blocks[0];
+
+	// get a partial tag to search for
+	unsigned int partial_tag = tag & ((1 << sampler->dan_sampler_tag_bits)-1);
+
+	// assume we do not miss
+	ub1 miss = FALSE;
+
+	// this will be the way of the sampler entry we end up hitting or replacing
+	int i;
+
+	// search for a matching tag
+	for (i=0; i < sampler->dan_sampler_assoc; i++) 
+  {
+    if (blocks[i].valid && (blocks[i].tag == partial_tag)) 
+    {
+      // we know this block is not dead; inform the predictor
+      sdbp_predictor_block_is_dead(sampler, sampler->pred, tid, blocks[i].trace, FALSE);
+      break;
+    }
+  }
+
+	// did we find a match?
+	if (i == sampler->dan_sampler_assoc) 
+  {
+		// no, so this is a miss in the sampler
+		miss = TRUE;
+
+		// look for an invalid block to replace
+		for (i=0; i < sampler->dan_sampler_assoc; i++) 
+    {
+      if (blocks[i].valid == FALSE) 
+      {
+        break;
+      }
+    }
+
+		// no invalid block?  look for a dead block.
+		if (i == sampler->dan_sampler_assoc) 
+    {
+			// find the LRU dead block
+			for (i = 0; i < sampler->dan_sampler_assoc; i++) 
+      {
+        if (blocks[i].prediction) 
+        {
+          break;
+        }
+      }
+		}
+
+		// no invalid or dead block?  use the LRU block
+		if (i == sampler->dan_sampler_assoc) 
+    {
+			int j;
+
+			for (j = 0; j < sampler->dan_sampler_assoc; j++)
+      {
+				if (blocks[j].lru_stack_position == (unsigned int) (sampler->dan_sampler_assoc - 1)) 
+        {
+          break;
+        }
+      }
+
+			assert (j < sampler->dan_sampler_assoc);
+
+			i = j;
+		}
+
+		// previous trace leads to block being dead; inform the predictor
+		sdbp_predictor_block_is_dead(sampler, sampler->pred, tid, blocks[i].trace, TRUE);
+
+		// fill the victim block
+		blocks[i].tag   = partial_tag;
+		blocks[i].valid = TRUE;
+	}
+
+	// record the trace
+	blocks[i].trace = sdbp_make_trace(sampler, tid, sampler->pred, PC);
+
+	// get the next prediction for this entry
+	blocks[i].prediction = sdbp_predictor_get_prediction(sampler, sampler->pred, tid, blocks[i].trace, -1);
+
+	// now the replaced entry should be moved to the MRU position
+	ub4 position = blocks[i].lru_stack_position;
+
+	for(sb4 way = 0; way < sampler->dan_sampler_assoc; way++)
+  {
+		if (blocks[way].lru_stack_position < position)
+    {
+			blocks[way].lru_stack_position++;
+    }
+  }
+
+	blocks[i].lru_stack_position = 0;
+}
+
+// hash three numbers into one
+static unsigned int mix (unsigned int a, unsigned int b, unsigned int c) 
+{
+	a=a-b;  a=a-c;  a=a^(c >> 13);
+	b=b-c;  b=b-a;  b=b^(a << 8);
+	c=c-a;  c=c-b;  c=c^(b >> 13);
+	return c;
+}
+
+// first hash function
+static unsigned int f1 (unsigned int x) 
+{
+	return mix (0xfeedface, 0xdeadb10c, x);
+}
+
+// second hash function
+static unsigned int f2 (unsigned int x) 
+{
+	return mix (0xc001d00d, 0xfade2b1c, x);
+}
+
+// generalized hash function
+static unsigned int fi (unsigned int x, int i) 
+{
+	return f1 (x) + (f2 (x) >> i);
+}
+
+// hash a trace, thread ID, and predictor table number into a predictor table index
+static unsigned int sdbp_predictor_get_table_index(sdbp_sampler *sampler, ub4 tid, ub4 trace, sb4 t) 
+{
+	unsigned int x = fi(trace ^ (tid << 2), t);
+
+	return x & ((1 << sampler->dan_predictor_index_bits)-1);
+}
+
+// constructor for the predictor
+void sdbp_predictor_init(sdbp_sampler *sampler, sdbp_predictor *pred) 
+{
+  // make the tables
+  pred->tables = (int **)xcalloc(1, sizeof(int *) * sampler->dan_predictor_tables);
+
+  // initialize each table to all 0s
+  for (int i = 0; i < sampler->dan_predictor_tables; i++) 
+  {
+    pred->tables[i] = (int *)xcalloc(1, sizeof(int) * sampler->dan_predictor_table_entries);
+    memset(pred->tables[i], 0, sizeof(int) * sampler->dan_predictor_table_entries);
+  }
+}
+
+// inform the predictor that a block is either dead or not dead
+void sdbp_predictor_block_is_dead(sdbp_sampler *sampler, sdbp_predictor *pred, 
+    ub4 tid, ub4 trace, ub1 d) 
+{
+
+	// for each predictor table...
+	for (int i = 0; i < sampler->dan_predictor_tables; i++) 
+  {
+		// ...get a pointer to the corresponding entry in that table
+		int *c = &(pred->tables[i][sdbp_predictor_get_table_index(sampler, tid, trace, i)]);
+
+		// if the block is dead, increment the counter
+		if (d) 
+    {
+			if (*c < sampler->dan_counter_max) (*c)++;
+		} 
+    else 
+    {
+			// otherwise, decrease the counter
+			if (i & 1) 
+      {
+				// odd numbered tables decrease exponentially
+				(*c) >>= 1;
+			} 
+      else 
+      {
+				// even numbered tables decrease by one
+				if (*c > 0) 
+        {
+          (*c)--;
+        }
+			}
+		}
+	}
+}
+
+// get a prediction for a given trace
+ub1 sdbp_predictor_get_prediction (sdbp_sampler *sampler, sdbp_predictor *pred, ub4 tid, ub4 trace, sb4 set) 
+{
+	// start the confidence sum as 0
+	int conf = 0;
+
+	// for each table...
+	for (int i = 0; i < sampler->dan_predictor_tables; i++) 
+  {
+		// ...get the counter value for that table...
+		int val = pred->tables[i][sdbp_predictor_get_table_index(sampler, tid, trace, i)];
+
+		// and add it to the running total
+		conf += val;
+	}
+
+	// if the counter is at least the threshold, the block is predicted dead
+	return conf >= sampler->dan_threshold;
 }
 
 #undef RPL_GPU_FIRST
@@ -2086,12 +2871,19 @@ void shnt_sampler_cache_lookup(shnt_sampler_cache *sampler, srriphint_data *poli
 #undef ECTR_MID_VAL
 #undef SRRIPHINT_SRRIP_SET
 #undef SRRIPHINT_FOLLOWER_SET
-#undef SHIP_MAX
 #undef SIGNSIZE
 #undef SHCTSIZE
+#undef COREBTS
+#undef SB
+#undef SP
+#undef SM
 #undef SIGMAX_VAL
+#undef SIGNMASK
+#undef SIGNP
 #undef SIGNM
+#undef SIGNCORE
 #undef GET_SSIGN
+#undef GET_SIGN
 #undef SHIPSIGN
 #undef CACHE_INC_SHCT
 #undef CACHE_DEC_SHCT
@@ -2108,3 +2900,4 @@ void shnt_sampler_cache_lookup(shnt_sampler_cache *sampler, srriphint_data *poli
 #undef FILL_FOLLOW_SHIP
 #undef FILL_WITH_SHIP
 #undef GET_FILL_POLICY
+#undef RID

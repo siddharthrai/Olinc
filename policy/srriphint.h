@@ -22,6 +22,8 @@
 
 #include "../common/intermod-common.h"
 #include "../common/sat-counter.h"
+#include "../common/List.h"
+#include "zlib.h"
 #include "policy.h"
 #include "rrip.h"
 #include "brrip.h"
@@ -35,12 +37,87 @@
 #define SRRIPHINT_SRRIP_FILL_SET  (4)
 #define SRRIPHINT_FOLLOWER_SET    (5)
 
+#define USE_NN    (0)  
+#define USE_PC    (1)  
+#define USE_MEM   (2)  
+#define USE_MEMPC (3)  
+
+#define INVALID_RRPV (16)
+
 /* Head node of a list, which corresponds to a particular RRPV */
 typedef struct cache_list_head_srriphint_t
 {
   ub4 rrpv;
   struct cache_block_t *head;
 }srriphint_list;
+
+// Jimenez's sampler code
+typedef struct sdbp_sampler_entry 
+{
+	ub4 lru_stack_position;
+  ub4 tag;
+	ub4 trace;
+	ub4 prediction;
+	ub1 valid;
+}sdbp_sampler_entry;
+
+// constructor for sampler entry
+void sdbp_sampler_entry_init(sdbp_sampler_entry *entry);
+
+// one sampler set (just a pointer to the entries)
+typedef struct sdbp_sampler_set 
+{
+	sdbp_sampler_entry *blocks;
+}sdbp_sampler_set;
+
+// the dead block predictor
+typedef struct sdbp_predictor 
+{
+	sb4 **tables; 	// tables of two-bit counters
+}sdbp_predictor;
+
+// SDBP sampler
+typedef struct sdbp_sampler 
+{
+	sb4 nsampler_sets;            // number of sampler sets
+  sb4	sampler_modulus;          // determines which LLC sets are sampler sets
+
+	ub4 dan_sampler_assoc;
+
+	// number of bits used to index predictor; determines number of
+	// entries in prediction tables (changed for 4MB cache)
+	ub4 dan_predictor_index_bits;
+	// number of prediction tables
+	ub4 dan_predictor_tables;
+	// width of prediction saturating counters
+	ub4 dan_counter_width;
+	// predictor must meet this threshold to predict a block is dead
+	ub4 dan_threshold;
+	// number of partial tag bits kept per sampler entry
+	ub4 dan_sampler_tag_bits;
+	// number of trace (partial PC) bits kept per sampler entry
+	ub4 dan_sampler_trace_bits;
+	// number of entries in prediction table; derived from # of index bits
+	ub4 dan_predictor_table_entries;
+	// maximum value of saturating counter; derived from counter width
+	ub4 dan_counter_max;
+	// total number of bits used by all structures; computed in sampler::sampler
+	ub4 total_bits_used;
+
+	sdbp_sampler_set *sets;
+	sdbp_predictor   *pred;
+}sdbp_sampler;
+
+void sdbp_sampler_init(sdbp_sampler *sampler, sb4 nsets, sb4 assoc);
+void sdbp_smpler_access(sdbp_sampler *sampler, ub4 tid, sb4 set, ub8 tag, ub8 PC);
+
+void sdbp_sampler_set_init(sdbp_sampler *sampler, sdbp_sampler_set *sampler_set);
+
+void sdbp_predictor_init(sdbp_sampler *sampler, sdbp_predictor *pred);
+
+ub1 sdbp_predictor_get_prediction(sdbp_sampler *sampler, sdbp_predictor *pred, ub4 tid, ub4 trace, sb4 set);
+
+void sdbp_predictor_block_is_dead(sdbp_sampler *sampler, sdbp_predictor *pred, ub4 tid, ub4 trace, ub1 d);
 
 #define SRRIPHINT_DATA_CFPOLICY(data)     ((data)->current_fill_policy)
 #define SRRIPHINT_DATA_DFPOLICY(data)     ((data)->default_fill_policy)
@@ -148,6 +225,8 @@ typedef struct srriphint_sampler_entry
   ub1  *stream;         /* Id of the last stream to access this block */
   ub1  *valid;          /* Valid or invalid */
   ub1  *hit_count;      /* Current reuse epoch id */
+  ub8  *pc;             /* PC last accessing the block */
+  ub8  *reuse;          /* PC last accessing the block */
   ub1  *dynamic_color;  /* True, if dynamic CS */
   ub1  *dynamic_depth;  /* True, if dynamic ZS */
   ub1  *dynamic_blit;   /* True, if dynamic BS */
@@ -159,18 +238,78 @@ typedef struct srriphint_sampler_entry
  *
  */
 
+typedef struct srriphint_d_data
+{
+  ub8 distance;
+  ub8 ppc;
+  ub8 pc;
+  ub8 reuse;
+}shnt_d_data;
+
+typedef struct srriphint_pc_data
+{
+  ub8       distance;         /* Current measure PC distance */
+  ub8       start_pc;         /* Start distance */
+  ub8       region_count;     /* Regions touched by the PC */
+  ub8       end_pc;           /* Regions touched by the PC */
+  ub8       dead_limit;       /* Dead limit, if PC has seen reuse */
+  ub8       dead_distance;    /* Dead distance, if PC has seen reuse */
+  cs_qnode  ppc[HTBLSIZE];    /* Previous PC */
+  cs_qnode  distance_list;    /* All measured distances */
+}shnt_pc_data;
+
+#define RPHASE_SIZE   (256 * 1024)
+#define SPHASE_SIZE   (128 * 1024)
+#define RPHASE_CNT    (2)
+#define RPHASE_0      (0)
+#define RPHASE_1      (1)
+
+typedef struct srriphint_region_pc
+{
+  ub8 pc;
+  ub8 index;
+  ub8 phase_id;
+  ub8 use_count;
+  ub8 use_distance;
+  ub8 distance[RPHASE_CNT];
+  ub8 short_distance[RPHASE_CNT];
+}shnt_region_pc;
+
+typedef struct srriphint_region_data
+{
+  ub8       id;                         /* Current measure PC distance */
+  ub8       dead_limit;                 /* Limit to consider region to be dead */
+  ub8       short_distance[RPHASE_CNT]; /* Latest short distance learned for each phase */
+  ub8       distance[RPHASE_CNT];       /* Latest distance learned for each phase */
+  ub8       next_distance;              /* Up-to-date next distance */
+  ub8       short_next_distance;        /* Up-to-date short next distance */
+  ub4       pc_count;                   /* # distinct pc in the region */
+  cs_qnode  pc[HTBLSIZE];               /* PC which belong to this region */
+}shnt_region_data;
+
 typedef struct srriphint_sampler_cache
 {
-  ub4             sets;                     /* # sampler sets */
-  ub1             ways;                     /* # sampler ways */
-  ub1             entry_size;               /* Sampler entry size */
-  ub1             log_grain_size;           /* Log of sampler entry size */
-  ub1             log_block_size;           /* Log of sampler entry size */
-  ub8             epoch_length;             /* Length of sampler epoch */
-  ub8             epoch_count;              /* Total epochs seen by the sampler */
-  ub4             stream_occupancy[TST + 1];/* Block array */
-  srriphint_sampler_entry **blocks;         /* Block array */
-  srriphint_sampler_perfctr perfctr;        /* Performance counter used in sampler */
+  ub4             sets;                       /* # sampler sets */
+  ub1             ways;                       /* # sampler ways */
+  ub1             entry_size;                 /* Sampler entry size */
+  ub1             log_grain_size;             /* Log of sampler entry size */
+  ub1             log_block_size;             /* Log of sampler entry size */
+  ub8             epoch_length;               /* Length of sampler epoch */
+  ub8             epoch_count;                /* Total epochs seen by the sampler */
+  ub4             stream_occupancy[TST + 1];  /* Block array */
+  ub8             spc_count;                  /* Shared PC count */
+  ub8             pc_distance;                /* PC reuse distance  */
+  cs_qnode        spc_list[HTBLSIZE];         /* List of shared PCs */
+  cs_qnode        all_pc_list[HTBLSIZE];      /* List of all PCs */
+  ub8             reuse_phase_size;           /* Phase size in terms of access count */
+  ub8             reuse_short_phase_size;     /* Short phase size in terms of access count */
+  ub8             reuse_phase_count;          /* Phase count */
+  ub1             current_reuse_pahse;        /* Current phase of execution for reuse distance */
+  ub1             current_short_reuse_pahse;  /* Current phase of execution for reuse distance */
+  sctr            region_usage;               /* Counter to track region usage */
+  cs_qnode        all_region_list[HTBLSIZE];  /* List of all memory regions */
+  srriphint_sampler_entry **blocks;           /* Block array */
+  srriphint_sampler_perfctr perfctr;          /* Performance counter used in sampler */
 }shnt_sampler_cache;
 
 /* RRIP specific data */
@@ -183,21 +322,19 @@ typedef struct cache_policy_srriphint_data_t
   cache_policy_t default_access_policy;       /* Default fill policy */
   cache_policy_t current_replacement_policy;  /* If non-default fill policy is enforced */
   cache_policy_t default_replacement_policy;  /* Default fill policy */
+  ub4            set_indx;                    /* Set index */
   ub4            set_type;                    /* Set type */
   ub4            max_rrpv;                    /* Maximum RRPV supported */
   ub4            spill_rrpv;                  /* Spill RRPV supported */
   rrip_list     *valid_head;                  /* Head pointers of RRPV specific list */
   rrip_list     *valid_tail;                  /* Tail pointers of RRPV specific list */
-  rrip_list     *cpu_valid_head;              /* CPU head pointers of RRPV specific list */
-  rrip_list     *cpu_valid_tail;              /* CPU tail pointers of RRPV specific list */
-  rrip_list     *gpu_valid_head;              /* GPU head pointers of RRPV specific list */
-  rrip_list     *gpu_valid_tail;              /* GPU tail pointers of RRPV specific list */
   list_head_t   *free_head;                   /* Free list head */
   list_head_t   *free_tail;                   /* Free list tail */
   ub8            miss_count;                  /* # miss in the set */
   ub8            hit_count;                   /* # hit in the set */
   ub8            cpu_blocks;                  /* # CPU blocks */
   ub8            gpu_blocks;                  /* # GPU blocks */
+  ub8            shared_blocks;               /* # Shared blocks in the set */
   struct cache_block_t *blocks;               /* Actual blocks */
 }srriphint_data;
 
@@ -217,17 +354,23 @@ typedef struct cache_policy_srriphint_gdata_t
   ub4    sign_size;                           /* # Ship signature size */
   ub4    shct_size;                           /* # Counter table entries */
   ub4    core_size;                           /* # Core count */
+  ub1   sign_source;                          /* Source of sign (PC / MEM / PC + MEM) */
   ub8    ship_access;                         /* # Access to ship sampler */
   ub8    ship_inc;                            /* # Access to ship sampler */
   ub8    ship_dec;                            /* # Access to ship sampler */
   ub1   *ship_shct;                           /* SHiP signature counter table */
+  ub1    threshold;                           /* BRRIP threshold */
+  ub1   *brrip_ctr;                           /* BRRIP counter used for ship */
   ub8    cpu_blocks;                          /* CPU blocks in cache */
   ub8    gpu_blocks;                          /* GPU blocks in cache */
   ub1    cpu_bmc;                             /* CPU bimodal fill counter */
+  ub8    dead_region;                         /* # replacement find dead region */
   sctr   rpl_ctr;                             /* Replacement policy selection counter */
   sctr   fill_ctr;                            /* Fill policy selection counter */
+  gzFile *shared_pc_file;                     /* Trace file for shared PC */
   shnt_sampler_cache *sampler;                /* Sampler cache used for tracking reuses */
   shnt_sampler_cache *cpu_sampler;            /* Sampler cache used for tracking reuses */
+  sdbp_sampler *dbp_sampler;                  /* SDBP sampler */
 }srriphint_gdata;
 
 /*
@@ -268,14 +411,17 @@ void cache_init_srriphint(ub4 set_indx, struct cache_params *params,
  *
  * PARAMETERS
  *  
+ *  set_indx    (IN)  - Set index
  *  policy_data (IN)  - Set to be freed 
+ *  global_data (IN)  - Cache-wide data
  *
  * RETURNS
  *  
  *  Nothing
  */
 
-void cache_free_srriphint(srriphint_data *policy_data);
+void cache_free_srriphint(ub4 set_indx, srriphint_data *policy_data, 
+    srriphint_gdata *global_data);
 
 /*
  *
