@@ -123,9 +123,11 @@
 
 #if 0
 #define RID(a)                    ((a) & 0x0ffff000)
-#endif
 
 #define RID(a)                    ((a) & 0xfffffff000)
+#endif
+
+#define RID(a)                    ((a) & 0xffffff0000)
 
 #define CACHE_UPDATE_BLOCK_STATE(block, tag, va, state_in)        \
 do                                                                \
@@ -254,7 +256,8 @@ do                                                            \
 }while(0)
 
 int max_dead_time = 6;
-int dead_times[6] = {150, 100, 50, 10, 5, 0};
+int dead_times[6] = {5, 2, 1, 0, 0, 0};
+int fake_counter;
 
 void shnt_sampler_cache_lookup(srriphint_gdata *global_data, srriphint_data *policy_data, 
     memory_trace *info, ub1 update_time);
@@ -317,14 +320,62 @@ static ub8 get_expected_age(srriphint_gdata *global_data, ub8 address, ub8 pc)
     region_data = (shnt_region_data *)attila_map_lookup(region_table, RID(address), 
         ATTILA_MASTER_KEY);
 
+#define PC_NOT_DEAD(g, p) ((p) && (((p)->start_pc + (p)->dead_distance) >= (g)->sampler->pc_distance))
 #define REGION_LIVE(g, r) ((r)->dead_limit >= (g)->sampler->pc_distance)
-#define PC_LIVE(g, p)     ((p) && ((p)->dead_limit >= (g)->sampler->pc_distance))
+#define PC_IS_LIVE(g, p)  ((p) && ((p)->dead_limit >= (g)->sampler->pc_distance))
+#define PC_LIST1(p)       (p == 134798576 || p == 134797184 || p == 134667523 || p == 134798159 || p == 134798582 || p == 134667535 || p == 134668591 || p == 134781450 || p == 134781463 || p == 134781516 || p == 134781507 || p == 134798374 || p == 134798647 || p == 134800348)
+#define PC_LIST2(p)       (p == 134800208 || p == 134822904 || p == 134819881)
+#define PC_LIST3(p)       (p == 134798159 || p == 134798161)
+
+#if 0
+#define PC_LIST(p)        (PC_LIST1(p))
+#endif
+
+#if 0
+#define PC_LIST(g, p)     ((p) && (p)->region_count <= 10 && (p)->dead_distance < 60 && (p)->dead_distance > 1 && PC_NOT_DEAD(g, p) && !PC_IS_LIVE(g, p))
+#endif
+
+#define PC_LIST(g, p)     (((p) && (p)->dead_distance < 60 && (p)->dead_distance > 1 && PC_NOT_DEAD(g, p) && !PC_IS_LIVE(g, p)))
+
+#if 0
+#define PC_LIST(p)        (PC_LIST1(p) || PC_LIST2(p))
+#endif
+
+#if 0
+#define PC_LIST(g, p)     ((g)->sampler->reuse_phase_count > 3 && (p) && (p)->region_count <= 1)
+#endif
+
+#if 0
+#define PC_LIVE(g, p)     (PC_LIST(pc)? PC_IS_LIVE(g, p) : PC_NOT_DEAD(g, p))
+#endif
+
+#if 0
+#define PC_LIVE(g, p)     (PC_LIST(pc)? PC_NOT_DEAD(g, p) : PC_IS_LIVE(g, p))
+#endif
+
+#define PC_LIVE(g, p)     (PC_LIST(g, p)? PC_NOT_DEAD(g, p) : PC_IS_LIVE(g, p))
+
+#if 0
+#define PC_LIVE(g, p)     (PC_LIST(p)? PC_NOT_DEAD(g, p) : PC_IS_LIVE(g, p))
+#endif
+
 #define IS_LIVE(g, r, p)  (REGION_LIVE(g, r) || PC_LIVE(g, p))
 
     if (region_data && IS_LIVE(global_data, region_data, pc_data))
     {
       if (pc_data && PC_LIVE(global_data, pc_data))
       {
+        if (PC_LIST(global_data, pc_data))
+        {
+          assert(1);
+          fake_counter += 1;
+        }
+        else
+        {
+          assert(1);
+          fake_counter += 1;
+        }
+
         pc_age = 0x00f;
       }
       else
@@ -422,7 +473,8 @@ static ub8 get_expected_age(srriphint_gdata *global_data, ub8 address, ub8 pc)
 #undef RPHASE
 }
 
-static void increment_dead_limit(srriphint_gdata *global_data, ub8 old_pc, ub8 pc)
+static void increment_dead_limit(srriphint_gdata *global_data, ub8 old_pc, 
+    ub8 pc, ub8 reuse_seen)
 {
   shnt_pc_data  *pc_data;
 
@@ -433,7 +485,8 @@ static void increment_dead_limit(srriphint_gdata *global_data, ub8 old_pc, ub8 p
 
   if (pc_data && pc_data->dead_limit < RDSTNCE(global_data))
   {
-    pc_data->dead_limit = RDSTNCE(global_data) + 5;
+    pc_data->dead_limit = RDSTNCE(global_data);
+    pc_data->reuse_seen = reuse_seen;
 
     assert(RDSTNCE(global_data) >= pc_data->start_pc);
 
@@ -878,7 +931,6 @@ void cache_free_srriphint(ub4 set_indx, srriphint_data *policy_data, srriphint_g
   {
     free(SRRIPHINT_DATA_VALID_TAIL(policy_data));
   }
-
 }
 
 struct cache_block_t* cache_find_block_srriphint(srriphint_data *policy_data, 
@@ -911,6 +963,7 @@ struct cache_block_t* cache_find_block_srriphint(srriphint_data *policy_data,
       pc_data->region_count   = 0;
       pc_data->dead_limit     = 0;
       pc_data->dead_distance  = 0;
+      pc_data->reuse_seen     = 0;
 
       for (ub4 i = 0; i < HTBLSIZE; i++)
       {
@@ -1071,10 +1124,13 @@ struct cache_block_t* cache_find_block_srriphint(srriphint_data *policy_data,
         region_pc->distance[RNPHASE(global_data)]       = 0xfffff;
         region_pc->short_distance[RNPHASE(global_data)] = 0xfffff;
 #endif
+        pc_data->region_count += 1;
 
         attila_map_insert(region_data->pc, info->pc, ATTILA_MASTER_KEY, (ub8)region_pc);
-
-        pc_data->region_count += 1;
+      }
+      else
+      {
+        region_pc->distance[RPHASE(global_data)] = global_data->sampler->pc_distance;
       }
 
       if (region_pc->index > max_dead_time)
@@ -1214,7 +1270,7 @@ struct cache_block_t* cache_find_block_srriphint(srriphint_data *policy_data,
 
           pc_data = (shnt_pc_data *)(knode->data);
           assert(region_pc);
-          
+
           pc_data->region_count = 0;
         }
       }
@@ -1230,83 +1286,6 @@ struct cache_block_t* cache_find_block_srriphint(srriphint_data *policy_data,
 
       SAT_CTR_SET(global_data->sampler->region_usage, RCTR_MID_VAL);
       global_data->dead_region = 0;
-    }
-
-    if (++(global_data->sampler->reuse_short_phase_size) == SPHASE_SIZE)
-    {
-#define RPHASE(g)   ((g)->sampler->current_short_reuse_pahse)
-#define RNPHASE(g)  ((RPHASE(g) + 1) % RPHASE_CNT)
-
-      /* Reset old reuse distance learned in the previous phase */
-      cs_qnode *region_table;
-      cs_qnode *head;
-      cs_qnode *node;
-      cs_knode *knode;
-      cs_qnode *head1;
-      cs_qnode *node1;
-      cs_knode *knode1;
-      
-      shnt_region_data *region_data;
-      shnt_region_pc   *region_pc;
-      shnt_pc_data     *pc_data;
-
-      region_table = global_data->sampler->all_region_list;
-
-      RPHASE(global_data) = (RPHASE(global_data) + 1) % RPHASE_CNT;
-
-      /* Update reuse distance */
-      for (ub8 i = 0; i < HTBLSIZE; i++)
-      {
-        head = &region_table[i];
-
-        /* Iterate through each bucket and dump the PC */  
-        for (node = head->next; node != head; node = node->next)
-        {
-          knode = (cs_knode *)(node->data);
-
-          region_data = (shnt_region_data *)(knode->data);
-          assert(region_data);
-          
-          ub8 max_region = 0;
-
-          /* Iterate through PC list */
-          for (ub8 j = 0; j < HTBLSIZE; j++)
-          {
-            head1 = &(region_data->pc[j]);
-            assert(head1);
-
-            for (node1 = head1->next; node1 != head1; node1 = node1->next)
-            {
-              knode1 = (cs_knode *)(node1->data);
-
-              region_pc = (shnt_region_pc *)(knode1->data);
-              assert(region_pc);
-              
-              pc_data = attila_map_lookup(global_data->sampler->all_pc_list, region_pc->pc, ATTILA_MASTER_KEY);
-              assert(pc_data);
-
-              if (pc_data->region_count > max_region)
-              {
-                region_data->short_distance[RNPHASE(global_data)] = region_pc->short_distance[RNPHASE(global_data)];
-                max_region = pc_data->region_count;
-              }
-            } 
-          }
-
-          region_data->short_distance[RPHASE(global_data)]  = 0xfffff;
-
-          if (region_data->short_next_distance != 0)
-          {
-            region_data->short_distance[RNPHASE(global_data)] = region_data->short_next_distance;
-            region_data->short_next_distance = 0;
-          }
-        }
-      }
-
-#undef RPHASE
-#undef RNPHASE
-
-      global_data->sampler->reuse_short_phase_size   = 0;
     }
   }
 
@@ -2489,7 +2468,8 @@ void shnt_sampler_cache_lookup(srriphint_gdata *global_data, srriphint_data *pol
       }
       else
       {
-        increment_dead_limit(global_data, sampler->blocks[index][way].pc[offset], info->pc);
+        increment_dead_limit(global_data, sampler->blocks[index][way].pc[offset],
+            info->pc, sampler->blocks[index][way].hit_count[offset]);
 
         /* If sampler access was a hit */
         shnt_sampler_cache_access_block(sampler, index, way, policy_data, info, TRUE);

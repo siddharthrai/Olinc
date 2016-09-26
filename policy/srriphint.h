@@ -254,6 +254,7 @@ typedef struct srriphint_pc_data
   ub8       end_pc;           /* Regions touched by the PC */
   ub8       dead_limit;       /* Dead limit, if PC has seen reuse */
   ub8       dead_distance;    /* Dead distance, if PC has seen reuse */
+  ub8       reuse_seen;       /* Reuse seen by the PC */
   cs_qnode  ppc[HTBLSIZE];    /* Previous PC */
   cs_qnode  distance_list;    /* All measured distances */
 }shnt_pc_data;
