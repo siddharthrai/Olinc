@@ -256,7 +256,7 @@ do                                                            \
 }while(0)
 
 int max_dead_time = 6;
-int dead_times[6] = {5, 2, 1, 0, 0, 0};
+int dead_times[6] = {15, 5, 2, 0, 0, 0};
 int fake_counter;
 
 void shnt_sampler_cache_lookup(srriphint_gdata *global_data, srriphint_data *policy_data, 
@@ -323,41 +323,8 @@ static ub8 get_expected_age(srriphint_gdata *global_data, ub8 address, ub8 pc)
 #define PC_NOT_DEAD(g, p) ((p) && (((p)->start_pc + (p)->dead_distance) >= (g)->sampler->pc_distance))
 #define REGION_LIVE(g, r) ((r)->dead_limit >= (g)->sampler->pc_distance)
 #define PC_IS_LIVE(g, p)  ((p) && ((p)->dead_limit >= (g)->sampler->pc_distance))
-#define PC_LIST1(p)       (p == 134798576 || p == 134797184 || p == 134667523 || p == 134798159 || p == 134798582 || p == 134667535 || p == 134668591 || p == 134781450 || p == 134781463 || p == 134781516 || p == 134781507 || p == 134798374 || p == 134798647 || p == 134800348)
-#define PC_LIST2(p)       (p == 134800208 || p == 134822904 || p == 134819881)
-#define PC_LIST3(p)       (p == 134798159 || p == 134798161)
-
-#if 0
-#define PC_LIST(p)        (PC_LIST1(p))
-#endif
-
-#if 0
-#define PC_LIST(g, p)     ((p) && (p)->region_count <= 10 && (p)->dead_distance < 60 && (p)->dead_distance > 1 && PC_NOT_DEAD(g, p) && !PC_IS_LIVE(g, p))
-#endif
-
-#define PC_LIST(g, p)     (((p) && (p)->dead_distance < 60 && (p)->dead_distance > 1 && PC_NOT_DEAD(g, p) && !PC_IS_LIVE(g, p)))
-
-#if 0
-#define PC_LIST(p)        (PC_LIST1(p) || PC_LIST2(p))
-#endif
-
-#if 0
-#define PC_LIST(g, p)     ((g)->sampler->reuse_phase_count > 3 && (p) && (p)->region_count <= 1)
-#endif
-
-#if 0
-#define PC_LIVE(g, p)     (PC_LIST(pc)? PC_IS_LIVE(g, p) : PC_NOT_DEAD(g, p))
-#endif
-
-#if 0
-#define PC_LIVE(g, p)     (PC_LIST(pc)? PC_NOT_DEAD(g, p) : PC_IS_LIVE(g, p))
-#endif
-
+#define PC_LIST(g, p)     (((p) && (p)->dead_distance < 50 && (p)->dead_distance > 1 && PC_NOT_DEAD(g, p) && !PC_IS_LIVE(g, p)))
 #define PC_LIVE(g, p)     (PC_LIST(g, p)? PC_NOT_DEAD(g, p) : PC_IS_LIVE(g, p))
-
-#if 0
-#define PC_LIVE(g, p)     (PC_LIST(p)? PC_NOT_DEAD(g, p) : PC_IS_LIVE(g, p))
-#endif
 
 #define IS_LIVE(g, r, p)  (REGION_LIVE(g, r) || PC_LIVE(g, p))
 
@@ -389,63 +356,14 @@ static ub8 get_expected_age(srriphint_gdata *global_data, ub8 address, ub8 pc)
           }
           else
           {
-#if 0
-            if (pc == 134513789)
-            {
-              pc_age = RDISTANCE(region_pc, global_data, RPHASE(global_data)) & 0xfff; 
-            }
-            else
-#endif
-            {
-              pc_age = RDISTANCE(region_pc, global_data, RNPHASE(global_data)) & 0xfff; 
-            }
+            pc_age = RDISTANCE(region_pc, global_data, RNPHASE(global_data)) & 0xfff; 
           }
-#if 0
-          if (region_pc->distance[RNPHASE(global_data)] != 0xfffff)
-          {
-            pc_age = region_pc->distance[RNPHASE(global_data)] & 0xfff; 
-          }
-          else
-          {
-            if (pc == 134513789)
-            {
-              pc_age = region_pc->distance[RPHASE(global_data)] & 0xfff; 
-            }
-            else
-            {
-              pc_age = region_pc->distance[RNPHASE(global_data)] & 0xfff; 
-            }
-          }
-#endif
         }
         else
         {
           if (IS_LIVE(global_data, region_data, pc_data))
           {
-#if 0
-            if ((RDISTANCE(region_data, global_data, RNPHASE(global_data)) == 0xfffff) && 
-                (pc == 134605840 || pc == 134599541))
-            {
-              pc_age = RDISTANCE(region_data, global_data, RPHASE(global_data)) & 0xfff; 
-            }
-            else
-#endif
-            {
-
-              pc_age = RDISTANCE(region_data, global_data, RNPHASE(global_data)) & 0xfff; 
-            }
-#if 0
-            if ((region_data->distance[RNPHASE(global_data)] == 0xfffff) && 
-                (pc == 134605840 || pc == 134599541))
-            {
-              pc_age = (region_data->distance[RPHASE(global_data)]) & 0xfff; 
-            }
-            else
-            {
-
-              pc_age = (region_data->distance[RNPHASE(global_data)]) & 0xfff; 
-            }
-#endif
+            pc_age = RDISTANCE(region_data, global_data, RNPHASE(global_data)) & 0xfff; 
           }
           else
           {
@@ -490,7 +408,7 @@ static void increment_dead_limit(srriphint_gdata *global_data, ub8 old_pc,
 
     assert(RDSTNCE(global_data) >= pc_data->start_pc);
 
-    pc_data->dead_distance = RDSTNCE(global_data) - pc_data->start_pc;
+    pc_data->dead_distance = RDSTNCE(global_data) - pc_data->start_pc + 10;
   }
 
 #undef RDSTNCE
@@ -1128,10 +1046,12 @@ struct cache_block_t* cache_find_block_srriphint(srriphint_data *policy_data,
 
         attila_map_insert(region_data->pc, info->pc, ATTILA_MASTER_KEY, (ub8)region_pc);
       }
+#if 0
       else
       {
         region_pc->distance[RPHASE(global_data)] = global_data->sampler->pc_distance;
       }
+#endif
 
       if (region_pc->index > max_dead_time)
       {
@@ -1141,7 +1061,7 @@ struct cache_block_t* cache_find_block_srriphint(srriphint_data *policy_data,
       {
         if (region_pc->index == 1)
         {
-          region_data->dead_limit = RDSTNCE(global_data) + 4;
+          region_data->dead_limit = RDSTNCE(global_data) + 15;
         }
         else
         {
