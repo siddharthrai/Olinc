@@ -125,11 +125,11 @@
 #define RID(a)                    ((a) & 0x0ffff000)
 #endif 
 
-#define RID(a)                    ((a) & 0xffffffff80)
-
 #if 0
-#define RID(a)                    ((a) & 0xfffffff000)
+#define RID(a)                    ((a) & 0xffffffff80)
 #endif
+
+#define RID(a)                    ((a) & 0xfffffff000)
 
 #define CACHE_UPDATE_BLOCK_STATE(block, tag, va, state_in)        \
 do                                                                \
