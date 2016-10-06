@@ -225,8 +225,11 @@ typedef struct srriphint_sampler_entry
   ub1  *stream;         /* Id of the last stream to access this block */
   ub1  *valid;          /* Valid or invalid */
   ub1  *hit_count;      /* Current reuse epoch id */
+  ub8  *reuse_count;    /* Current reuse epoch id */
+  ub8  *old_pc_1;       /* Previous PC accessing the block */
+  ub8  *old_pc_2;       /* Previous to previous PC accessing the block */
   ub8  *pc;             /* PC last accessing the block */
-  ub8  *reuse;          /* PC last accessing the block */
+  ub8  *reuse;          /* Reuse seen by the block */
   ub1  *dynamic_color;  /* True, if dynamic CS */
   ub1  *dynamic_depth;  /* True, if dynamic ZS */
   ub1  *dynamic_blit;   /* True, if dynamic BS */
@@ -246,6 +249,8 @@ typedef struct srriphint_d_data
   ub8 reuse;
 }shnt_d_data;
 
+#define H_SIZE (4)
+
 typedef struct srriphint_pc_data
 {
   ub8       distance;         /* Current measure PC distance */
@@ -254,6 +259,12 @@ typedef struct srriphint_pc_data
   ub8       end_pc;           /* Regions touched by the PC */
   ub8       dead_limit;       /* Dead limit, if PC has seen reuse */
   ub8       dead_distance;    /* Dead distance, if PC has seen reuse */
+  ub8       old_pc;           /* Set of previous PCs seen by the PC */
+  ub8       old_pc_1;         /* Set of previous PCs seen by the PC */
+  ub8       old_pc_2;         /* Set of previous PCs seen by the PC */
+  ub8       old_pc_3;         /* Set of previous PCs seen by the PC */
+  ub8       old_pc_4;         /* Set of previous PCs seen by the PC */
+  ub8       buddy_count;      /* PCs buddy with this PC */
   ub8       reuse_seen;       /* Reuse seen by the PC */
   cs_qnode  ppc[HTBLSIZE];    /* Previous PC */
   cs_qnode  distance_list;    /* All measured distances */

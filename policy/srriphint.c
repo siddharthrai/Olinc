@@ -123,11 +123,13 @@
 
 #if 0
 #define RID(a)                    ((a) & 0x0ffff000)
+#endif 
 
+#define RID(a)                    ((a) & 0xffffffff80)
+
+#if 0
 #define RID(a)                    ((a) & 0xfffffff000)
 #endif
-
-#define RID(a)                    ((a) & 0xffffff0000)
 
 #define CACHE_UPDATE_BLOCK_STATE(block, tag, va, state_in)        \
 do                                                                \
@@ -256,7 +258,7 @@ do                                                            \
 }while(0)
 
 int max_dead_time = 6;
-int dead_times[6] = {15, 5, 2, 0, 0, 0};
+int dead_times[6] = {1, 1, 1, 1, 0, 0};
 int fake_counter;
 
 void shnt_sampler_cache_lookup(srriphint_gdata *global_data, srriphint_data *policy_data, 
@@ -276,7 +278,8 @@ static ub4 get_set_type_srriphint(long long int indx)
 /* Get expected age and update the block. 5 bits of the age are 
  * taken from sequence number learned for PCs. 5 bits are taken 
  * from block address */
-static ub8 get_expected_age(srriphint_gdata *global_data, ub8 address, ub8 pc)
+static ub8 get_expected_age(srriphint_gdata *global_data, ub8 address, 
+    ub8 pc, ub8 recency, ub4 spill)
 {
   cs_qnode           *region_table;
   shnt_region_data   *region_data;
@@ -298,15 +301,6 @@ static ub8 get_expected_age(srriphint_gdata *global_data, ub8 address, ub8 pc)
 #define LDISTANCE(r, g, p)  ((r)->distance[(p)])
 #define RDISTANCE(r, g, p)  (USE_SREGION(g) ? SDISTANCE(r, g, p) : LDISTANCE(r, g, p))
 
-  if (pc == 134534192 || pc == 134513744 || pc == 134615973 || pc == 134616026 || 
-    pc == 134615914 || pc == 134614624 || pc == 134515647 || pc == 134515657)
-  {
-    assert(1);
-#if 0
-    printf("%d\n", pc);
-#endif
-  }
-
   pc_data = (shnt_pc_data *)attila_map_lookup(global_data->sampler->all_pc_list, pc, ATTILA_MASTER_KEY);
 
   if (pc_data && pc_data->end_pc <= global_data->sampler->pc_distance)
@@ -320,14 +314,43 @@ static ub8 get_expected_age(srriphint_gdata *global_data, ub8 address, ub8 pc)
     region_data = (shnt_region_data *)attila_map_lookup(region_table, RID(address), 
         ATTILA_MASTER_KEY);
 
+#if 0
+#define PC_LIST(g, p)     (pc == 134894311 || pc == 134894314 || pc == 134894333 || pc == 134894336 || pc == 134894336 || pc == 134909275 || pc == 134850804 || pc == 134809502 || pc == 134809505 || pc == 134811910 || pc == 134811917 || pc == 134811943 || pc == 134812302 || pc == 134895097 || pc == 134895070 || pc == 134895158 || pc == 134896567 || pc == 134894445 || pc == 134895126 || pc == 134937823 || pc == 134939846 || pc == 134939861 || pc == 135483220|| pc == 135483866 || pc == 134894516 || pc == 134894519 || pc == 134812293 || pc == 134845307 || pc == 134889690 || pc == 134996722 || pc == 134894308 || pc == 134894304 || pc == 134894470 || pc == 134895155 || pc == 135482925 ||pc == 135482948 || pc == 134899852 || pc == 134899850 || pc == 134908322 || pc == 135483023 || pc == 135481799 || pc == 134939623 || pc == 134897954 || pc == 134937781 || pc == 134575436 || pc == 134576085 || pc == 134937829 || pc == 134939616 || pc == 134909264 || pc == 134811260)
+#endif
+
+#define STATIC_PC_LIST(g, p)     (pc == 134894478 || pc == 134894311 || pc == 134894314 || pc == 134894333 || pc == 134894336 || pc == 134894336 || pc == 134909275 || pc == 134850804 || pc == 134809502 || pc == 134809505 || pc == 134811910 || pc == 134811917 || pc == 134811943 || pc == 134812302 || pc == 134895097 || pc == 134895070 || pc == 134895158 || pc == 134896567 || pc == 134909264)
+
+#if 0
+#define PC_LIST(g, p)     (pc == 134894311 || pc == 134894314 || pc == 134894333 || pc == 134894336 || pc == 134894336 || pc == 134909275 || pc == 134850804 || pc == 134809502 || pc == 134809505 || pc == 134811910 || pc == 134811917 || pc == 134811943 || pc == 134812302 || pc == 134895097 || pc == 134895070 || pc == 134895158 || pc == 134896567 || pc == 134894445 || pc == 134895126 || pc == 134937823 || pc == 134939846 || pc == 134939861 || pc == 135483220|| pc == 135483866 || pc == 134894516 || pc == 134894519 || pc == 134812293 || pc == 134845307 || pc == 134889690 || pc == 134996722 || pc == 134894308 || pc == 134894304 || pc == 134894470 || pc == 134895155 || pc == 135482925 ||pc == 135482948 || pc == 57005)
+#endif
+
+#define PC_LIST(g, p)     (((p) && (p)->buddy_count >= 5))
 #define PC_NOT_DEAD(g, p) ((p) && (((p)->start_pc + (p)->dead_distance) >= (g)->sampler->pc_distance))
 #define REGION_LIVE(g, r) ((r)->dead_limit >= (g)->sampler->pc_distance)
-#define PC_IS_LIVE(g, p)  ((p) && ((p)->dead_limit >= (g)->sampler->pc_distance))
+#define DBLK_IS_NEW(g, p) (PC_LIST(g, p) ? recency + 30 >= (g)->sampler->pc_distance : FALSE)
+#define IBLK_IS_NEW(g, p) (PC_LIST(g, p) ? recency + 5 >= (g)->sampler->pc_distance : FALSE)
+#define BLK_IS_NEW(g, p)  ((pc == 0xdead && spill == FALSE) ? IBLK_IS_NEW(g, p) : DBLK_IS_NEW(g, p))
+#define PC_IS_LIVE(g, p)  ((p) && ((p)->dead_limit >= (g)->sampler->pc_distance || BLK_IS_NEW(g, p)))
+#if 0
 #define PC_LIST(g, p)     (((p) && (p)->dead_distance < 50 && (p)->dead_distance > 1 && PC_NOT_DEAD(g, p) && !PC_IS_LIVE(g, p)))
+#endif
+
+
+#define PC_LIVE(g, p)     (PC_LIST(g, p)? PC_IS_LIVE(g, p) : PC_IS_LIVE(g, p))
+
+#if 0
+#define PC_LIVE(g, p)     (PC_LIST(g, p)? TRUE : PC_IS_LIVE(g, p))
+#endif
+
+#if 0
 #define PC_LIVE(g, p)     (PC_LIST(g, p)? PC_NOT_DEAD(g, p) : PC_IS_LIVE(g, p))
+#endif
 
 #define IS_LIVE(g, r, p)  (REGION_LIVE(g, r) || PC_LIVE(g, p))
 
+#if 0
+    if (region_data)
+#endif
     if (region_data && IS_LIVE(global_data, region_data, pc_data))
     {
       if (pc_data && PC_LIVE(global_data, pc_data))
@@ -361,20 +384,36 @@ static ub8 get_expected_age(srriphint_gdata *global_data, ub8 address, ub8 pc)
         }
         else
         {
-          if (IS_LIVE(global_data, region_data, pc_data))
-          {
-            pc_age = RDISTANCE(region_data, global_data, RNPHASE(global_data)) & 0xfff; 
-          }
-          else
-          {
-            pc_age = 0xfff;
-          }
+          pc_age = RDISTANCE(region_data, global_data, RNPHASE(global_data)) & 0xfff; 
         }
       }
     }
     else
     {
-      pc_age = 0xfff; 
+      if (pc == 0xdead && spill == FALSE)
+      {
+        if (recency + 10 >= global_data->sampler->pc_distance)
+        {
+          pc_age = 0x0ff;
+        }
+        else
+        {
+          pc_age = 0xfff;
+        }
+      }
+      else
+      {
+#if 0
+        if (STATIC_PC_LIST(global_data, pc_data))
+        {
+          pc_age = 0x0ff; 
+        }
+        else
+#endif
+        {
+          pc_age = 0xfff; 
+        }
+      }
     }
 
 #undef REGION_LIVE
@@ -403,12 +442,12 @@ static void increment_dead_limit(srriphint_gdata *global_data, ub8 old_pc,
 
   if (pc_data && pc_data->dead_limit < RDSTNCE(global_data))
   {
-    pc_data->dead_limit = RDSTNCE(global_data);
+    pc_data->dead_limit = RDSTNCE(global_data) - 1;
     pc_data->reuse_seen = reuse_seen;
 
     assert(RDSTNCE(global_data) >= pc_data->start_pc);
 
-    pc_data->dead_distance = RDSTNCE(global_data) - pc_data->start_pc + 10;
+    pc_data->dead_distance = RDSTNCE(global_data) - pc_data->start_pc;
   }
 
 #undef RDSTNCE
@@ -446,7 +485,10 @@ void shnt_sampler_cache_init(shnt_sampler_cache *sampler, ub4 sets, ub4 ways)
       (sampler->blocks)[i][j].stream        = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
       (sampler->blocks)[i][j].valid         = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
       (sampler->blocks)[i][j].hit_count     = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
+      (sampler->blocks)[i][j].reuse_count   = (ub8 *)xcalloc(BLK_PER_ENTRY, sizeof(ub8));
       (sampler->blocks)[i][j].pc            = (ub8 *)xcalloc(BLK_PER_ENTRY, sizeof(ub8));
+      (sampler->blocks)[i][j].old_pc_1      = (ub8 *)xcalloc(BLK_PER_ENTRY, sizeof(ub8));
+      (sampler->blocks)[i][j].old_pc_2      = (ub8 *)xcalloc(BLK_PER_ENTRY, sizeof(ub8));
       (sampler->blocks)[i][j].dynamic_color = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
       (sampler->blocks)[i][j].dynamic_depth = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
       (sampler->blocks)[i][j].dynamic_blit  = (ub1 *)xcalloc(BLK_PER_ENTRY, sizeof(ub1));
@@ -507,6 +549,7 @@ void shnt_sampler_cache_reset(srriphint_gdata *global_data, shnt_sampler_cache *
         (sampler->blocks)[i][j].stream[off]         = NN;
         (sampler->blocks)[i][j].valid[off]          = 0;
         (sampler->blocks)[i][j].hit_count[off]      = 0;
+        (sampler->blocks)[i][j].reuse_count[off]    = 0;
         (sampler->blocks)[i][j].pc[off]             = 0xdead;
         (sampler->blocks)[i][j].dynamic_color[off]  = 0;
         (sampler->blocks)[i][j].dynamic_depth[off]  = 0;
@@ -877,10 +920,16 @@ struct cache_block_t* cache_find_block_srriphint(srriphint_data *policy_data,
 
       pc_data->start_pc       = ++(global_data->sampler->pc_distance);
       pc_data->end_pc         = 0xffffffff;
+      pc_data->old_pc         = 0xdead;
+      pc_data->old_pc_1       = 0xdead;
+      pc_data->old_pc_2       = 0xdead;
+      pc_data->old_pc_3       = 0xdead;
+      pc_data->old_pc_4       = 0xdead;
       pc_data->distance       = 0;
       pc_data->region_count   = 0;
       pc_data->dead_limit     = 0;
       pc_data->dead_distance  = 0;
+      pc_data->buddy_count    = 0;
       pc_data->reuse_seen     = 0;
 
       for (ub4 i = 0; i < HTBLSIZE; i++)
@@ -1061,7 +1110,7 @@ struct cache_block_t* cache_find_block_srriphint(srriphint_data *policy_data,
       {
         if (region_pc->index == 1)
         {
-          region_data->dead_limit = RDSTNCE(global_data) + 15;
+          region_data->dead_limit = RDSTNCE(global_data) + 5;
         }
         else
         {
@@ -1280,6 +1329,7 @@ void cache_fill_block_srriphint(srriphint_data *policy_data, srriphint_gdata *gl
           block->ship_sign_valid  = TRUE;
           block->access           = 0;
           block->expected_age     = 0;
+          block->recency          = global_data->sampler->pc_distance;
 
           if (info->pc && info->fill)
           {
@@ -1343,7 +1393,6 @@ void cache_fill_block_srriphint(srriphint_data *policy_data, srriphint_gdata *gl
     if (++((global_data->sampler)->epoch_length) == EPOCH_SIZE)
     {
       shnt_sampler_cache_reset(global_data, global_data->sampler);
-
       (global_data->sampler)->epoch_length = 0;
     }
 
@@ -1375,6 +1424,7 @@ int cache_replace_block_srriphint(srriphint_data *policy_data, srriphint_gdata *
   sb4     max_rrpv;
   ub4     min_wayid;
   ub8     max_age;
+  ub8     max_recency;
   ub8     expected_age;
   ub4     gpu_zblocks;
   ub4     cpu_zblocks;
@@ -1382,6 +1432,7 @@ int cache_replace_block_srriphint(srriphint_data *policy_data, srriphint_gdata *
   /* Remove a nonbusy block from the tail */
   min_wayid   = ~(0);
   max_age     = 1;
+  max_recency = 1;
   max_rrpv    = -1;
   vctm_block  = NULL;
   cpu_zblocks = 0;
@@ -1399,7 +1450,25 @@ int cache_replace_block_srriphint(srriphint_data *policy_data, srriphint_gdata *
     return block->way;
   }
 
+#if 0
   /* Get block with valid max age */
+  for (ub4 way = 0; way < global_data->ways; way++)
+  {
+    block = &(policy_data->blocks[way]);
+
+    expected_age = get_expected_age(global_data, block->vtl_addr, block->pc, 
+        block->recency, block->spill);
+
+    if (expected_age > max_age)
+    {
+      max_age     = expected_age;
+      min_wayid   = block->way;
+      max_rrpv    = block->last_rrpv;
+      max_recency = block->recency;
+    }
+  }
+#endif
+
   for (rrpv = SRRIP_DATA_MAX_RRPV(policy_data); rrpv >= 0; rrpv--)
   {
     for (block = SRRIP_DATA_VALID_TAIL(policy_data)[rrpv].head; block; block = block->next)
@@ -1407,13 +1476,15 @@ int cache_replace_block_srriphint(srriphint_data *policy_data, srriphint_gdata *
 #if 0
       if (block->expected_age > max_age)
 #endif
-      expected_age = get_expected_age(global_data, block->vtl_addr, block->pc);
+      expected_age = get_expected_age(global_data, block->vtl_addr, block->pc, 
+          block->recency, block->spill);
 
       if (expected_age > max_age)
       {
-        max_age   = expected_age;
-        min_wayid = block->way;
-        max_rrpv  = rrpv;
+        max_age     = expected_age;
+        min_wayid   = block->way;
+        max_rrpv    = rrpv;
+        max_recency = block->recency;
       }
     }
   }
@@ -1578,6 +1649,8 @@ void cache_access_block_srriphint(srriphint_data *policy_data, srriphint_gdata *
         {
           blk->pc = 0xdead;
         }
+
+        blk->recency = global_data->sampler->pc_distance;
       }
       break;
 
@@ -1593,7 +1666,6 @@ void cache_access_block_srriphint(srriphint_data *policy_data, srriphint_gdata *
     if (++((global_data->sampler)->epoch_length) == EPOCH_SIZE)
     {
       shnt_sampler_cache_reset(global_data, global_data->sampler);
-
       (global_data->sampler)->epoch_length = 0;
 
       printf("\nSampler shared PC %ld \n", (global_data->sampler)->spc_count);
@@ -2160,6 +2232,7 @@ void shnt_sampler_cache_fill_block(shnt_sampler_cache *sampler, ub4 index, ub4 w
   sampler->blocks[index][way].stream[offset]        = info->stream;
   sampler->blocks[index][way].valid[offset]         = TRUE;
   sampler->blocks[index][way].hit_count[offset]     = 0;
+  sampler->blocks[index][way].reuse_count[offset]   = 0;
   sampler->blocks[index][way].dynamic_color[offset] = FALSE;
   sampler->blocks[index][way].dynamic_depth[offset] = FALSE;
   sampler->blocks[index][way].dynamic_blit[offset]  = FALSE;
@@ -2237,6 +2310,8 @@ void shnt_sampler_cache_access_block(shnt_sampler_cache *sampler, ub4 index, ub4
     
     /* Update fill count */
     update_shnt_sampler_fill_perfctr(sampler, index, way, info);     
+
+    sampler->blocks[index][way].reuse_count[offset] += 1;
   }
 
   sampler->blocks[index][way].spill_or_fill[offset] = (info->spill ? TRUE : FALSE);
@@ -2282,10 +2357,45 @@ void shnt_sampler_cache_access_block(shnt_sampler_cache *sampler, ub4 index, ub4
         {
           d_data->reuse += 1;
         }
-      }
-    }
 
-    sampler->blocks[index][way].pc[offset] = info->pc;
+#if 0
+        if (info->pc != sampler->blocks[index][way].old_pc_2[offset] && 
+            info->pc != sampler->blocks[index][way].old_pc_1[offset])
+        {
+          pc_data->buddy_count += 1;
+        }
+#endif
+      }
+      
+      /* Get PC data for new PC */
+      pc_data = (shnt_pc_data *)attila_map_lookup(sampler->all_pc_list, info->pc, ATTILA_MASTER_KEY);
+      if (pc_data)
+      {
+#if 0
+        if (old_pc != pc_data->old_pc && old_pc != pc_data->old_pc_1 && old_pc != pc_data->old_pc_2 && 
+            old_pc != pc_data->old_pc_3 && old_pc != pc_data->old_pc_4)
+#endif
+        if (old_pc != pc_data->old_pc && old_pc != pc_data->old_pc_1 && old_pc != pc_data->old_pc_2)
+        {
+          if (sampler->blocks[index][way].reuse_count[offset] > 4)
+          {
+            pc_data->buddy_count += 1;
+
+            pc_data->old_pc   = pc_data->old_pc_1;
+            pc_data->old_pc_1 = pc_data->old_pc_2;
+            pc_data->old_pc_2 = old_pc;
+#if 0
+            pc_data->old_pc_2 = pc_data->old_pc_3;
+            pc_data->old_pc_3 = pc_data->old_pc_4;
+            pc_data->old_pc_4 = old_pc;
+#endif
+          }
+        }
+      }
+
+      sampler->blocks[index][way].old_pc_2[offset] = sampler->blocks[index][way].old_pc_1[offset];
+      sampler->blocks[index][way].old_pc_1[offset] = old_pc;
+    }
   }
 
   sampler->perfctr.sampler_hit += 1;
@@ -2389,12 +2499,12 @@ void shnt_sampler_cache_lookup(srriphint_gdata *global_data, srriphint_data *pol
       else
       {
         increment_dead_limit(global_data, sampler->blocks[index][way].pc[offset],
-            info->pc, sampler->blocks[index][way].hit_count[offset]);
+            info->pc, sampler->blocks[index][way].reuse_count[offset]);
 
         /* If sampler access was a hit */
         shnt_sampler_cache_access_block(sampler, index, way, policy_data, info, TRUE);
       }
-      
+
       if (info->pc)
       {
         sampler->blocks[index][way].pc[offset] = info->pc;
