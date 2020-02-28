@@ -25,4 +25,4 @@ Execution:
 Simulator can be executing by supplying the simulator configuration and the memory trace file 
 as command line arguments as follows:
 
-./cache-sim -f <config-file-name> -t <memory-trace-file-name>
+./cache-sim -f "config-file-name" -t "memory-trace-file-name"
