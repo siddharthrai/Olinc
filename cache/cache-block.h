@@ -23,7 +23,7 @@ do                                                            \
 #define CACHE_UPDATE_BLOCK_PC(block, pc_in)                   \
 do                                                            \
 {                                                             \
-    (block)->pc = (pc_in);                                    \
+    (block)->pc = (pc_in) ? pc_in : 0xdead;                   \
 }while(0)
 
 #define CACHE_UPDATE_BLOCK_EVENT(block, event, val)           \
@@ -164,10 +164,14 @@ struct cache_block_t
   unsigned long long recency;
 
   unsigned long long pc;
+
+  unsigned long long fill_pc;
   
   /* Ship policy specific signature */
   unsigned long long ship_sign;
   unsigned int ship_sign_valid;
+
+  unsigned int expected_age;
 };
 
 #endif

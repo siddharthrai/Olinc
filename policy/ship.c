@@ -363,9 +363,13 @@ void cache_fill_block_ship(ship_data *policy_data,
     CACHE_UPDATE_STREAM_BLOCKS(block, strm);
     CACHE_UPDATE_BLOCK_SIGN(block, global_data, info);
 
-    if (info)
+    if (info && info->fill)
     {
       CACHE_UPDATE_BLOCK_PC(block, info->pc);
+    }
+    else
+    {
+      block->pc = 0xdead;
     }
 
     block->dirty  = (info && info->dirty) ? TRUE : FALSE;
@@ -523,7 +527,11 @@ struct cache_block_t cache_access_block_ship(ship_data *policy_data, ship_gdata 
             blk->dirty  = TRUE;
           }
 
-          CACHE_UPDATE_BLOCK_PC(blk, info->pc);
+          if (info && info->fill)
+          {
+            CACHE_UPDATE_BLOCK_PC(blk, info->pc);
+          }
+
           CACHE_UPDATE_BLOCK_STREAM(blk, strm);
           CACHE_UPDATE_STREAM_BLOCKS(blk, strm);
 

@@ -569,7 +569,7 @@ void cache_free(struct cache_t *cache)
           }
         }
         
-        cache_free_srriphint(CACHE_SET_DATA_SRRIPHINT(cache_set));
+        cache_free_srriphint(set, CACHE_SET_DATA_SRRIPHINT(cache_set), CACHE_SRRIPHINT_GDATA(cache));
         break;
 
       case cache_policy_srripbypass:

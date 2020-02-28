@@ -159,8 +159,13 @@ typedef double          uf8;
 #define JF_MISS             (4)
 #define JF_MISS_AND_BYPASS  (5)
 
-#define HASHTINDXMASK (0xfffffff)  /* Includes 6 bits of block offset */
-#define HTBLSIZE      (1 << 22)   /* Size of bucket list is 64 */
+#define HASHTINDXMASK (0xffff)     /* Includes 6 bits of block offset */
+#define HTBLSIZE      (1 << 12)    /* Size of bucket list is 64 */
+
+#if 0
+#define HASHTINDXMASK (0xfffffff)   /* Includes 6 bits of block offset */
+#define HTBLSIZE      (1 << 22)     /* Size of bucket list is 64 */
+#endif
 
 #define ATTILA_MASTER_KEY (0xffffffff) /* Universal secondary Key */
 

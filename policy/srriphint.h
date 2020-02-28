@@ -350,6 +350,12 @@ typedef struct cache_policy_srriphint_data_t
   struct cache_block_t *blocks;               /* Actual blocks */
 }srriphint_data;
 
+typedef struct pc_list_data
+{
+  ub8 access;
+  ub8 hit;
+}pc_list_data;
+
 /* SRRIP cache-wide data */
 typedef struct cache_policy_srriphint_gdata_t
 {
@@ -366,7 +372,7 @@ typedef struct cache_policy_srriphint_gdata_t
   ub4    sign_size;                           /* # Ship signature size */
   ub4    shct_size;                           /* # Counter table entries */
   ub4    core_size;                           /* # Core count */
-  ub1   sign_source;                          /* Source of sign (PC / MEM / PC + MEM) */
+  ub1    sign_source;                         /* Source of sign (PC / MEM / PC + MEM) */
   ub8    ship_access;                         /* # Access to ship sampler */
   ub8    ship_inc;                            /* # Access to ship sampler */
   ub8    ship_dec;                            /* # Access to ship sampler */
@@ -377,12 +383,17 @@ typedef struct cache_policy_srriphint_gdata_t
   ub8    gpu_blocks;                          /* GPU blocks in cache */
   ub1    cpu_bmc;                             /* CPU bimodal fill counter */
   ub8    dead_region;                         /* # replacement find dead region */
+  ub8    pc_list_count;                       /* # queries resulted in PC list */
+  ub8    dead_limit_count;                    /* # queries resulted in dead limit */
+  ub8    policy_replace;                      /* # Policy is used for replacement */
+  ub8    srrip_replace;                       /* # SRRIP replacement took place */
   sctr   rpl_ctr;                             /* Replacement policy selection counter */
   sctr   fill_ctr;                            /* Fill policy selection counter */
   gzFile *shared_pc_file;                     /* Trace file for shared PC */
   shnt_sampler_cache *sampler;                /* Sampler cache used for tracking reuses */
   shnt_sampler_cache *cpu_sampler;            /* Sampler cache used for tracking reuses */
   sdbp_sampler *dbp_sampler;                  /* SDBP sampler */
+  cs_qnode pc[HTBLSIZE];                      /* PC predicted to be in PC_LIST */
 }srriphint_gdata;
 
 /*

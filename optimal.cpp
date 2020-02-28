@@ -37,6 +37,21 @@ map<ub8, ub8>::iterator set_itr;            /* Iterator for set */
 map<ub8, ub8>   pc_table;                   /* map of PCs */
 map<ub8, ub8>::iterator pc_table_itr;       /* Iterator for pc_table */
 
+map<ub8, ub8>   sblk_table;                 /* map of all shared cache blocks */
+map<ub8, ub8>::iterator sblk_table_itr;     /* Iterator for shared cache block table */
+
+map<ub8, ub8>   xblk_table;                 /* map of all exclusive cache blocks */
+map<ub8, ub8>::iterator xblk_table_itr;     /* Iterator for exclusive cache block table */
+
+map<ub8, ub8>   spc_table;                  /* map of PCs sharing cache blocks */
+map<ub8, ub8>::iterator spc_table_itr;      /* Iterator for shared cache block table */
+
+map<ub8, ub8>   xpc_table;                  /* map of all exclusive cache blocks */
+map<ub8, ub8>::iterator xpc_table_itr;      /* Iterator for exclusive cache block table */
+
+map<ub8, ub8>   evct_table;                 /* map of per set eviction  */
+map<ub8, ub8>::iterator evct_table_itr;     /* Iterator for evct_table */
+
 map<ub8, ub8>   b_block_table;              /* All blitter block table */
 map<ub8, ub8>::iterator b_block_table_itr;  /* Iterator for b_block_table */
 
@@ -48,7 +63,11 @@ map<ub8, ub8>::iterator bt_block_table_itr;  /* Iterator for b_block_table */
 
 map<ub8, ub8>   ct_block_table;             /* All color block table */
 map<ub8, ub8>::iterator ct_block_table_itr; /* Iterator for c_block_table */
+
 ub8 *sn_set;                                /* Sequence number per set */
+ub8 *fill_set;                              /* Fill per set */
+ub8 *read_set;                              /* Read per set */
+
 ub8  last_rdis;                             /* Used to track last reuse of a block */
 ub8  sn_glbl;                               /* Global sequence number for all accesses */
 
@@ -1007,7 +1026,7 @@ cache_access_status cachesim_opt_replace_or_add(
     line->tag         = BLCKALIGN(addr);
     line->vtl_addr    = BLCKALIGN(info.vtl_addr);
     line->stream      = info.stream;
-    line->pc          = info.pc;
+    line->pc          = info.pc ? info.pc : 0xdead;
     line->fillpc      = info.pc;
     line->dirty       = (info.spill) ? 1 : 0;
     line->epoch       = 0;
@@ -1077,6 +1096,8 @@ cache_access_status cachesim_incl_cache(
   cache_access_status ret;
   cachesim_cacheline  *block;
 
+  block_data *current_block_data;
+
   assert(cache);
 
   addr = BLCKALIGN(addr); 
@@ -1085,9 +1106,14 @@ cache_access_status cachesim_incl_cache(
   ret.way     = -1;
   ret.fate    = CACHE_ACCESS_UNK;
   ret.stream  = NN;
+  
+  current_block_data = NULL;
 
   /* Increase access frequency for this set */
-  CACHE_AFRQ(cache)[indx]++;
+  if (info.fill)
+  {
+    CACHE_AFRQ(cache)[indx]++;
+  }
 
   gettimeofday(&st, NULL);
 
@@ -1154,6 +1180,7 @@ cache_access_status cachesim_incl_cache(
       stall_data->stat_access_llc         = 0;
       stall_data->stat_miss_llc           = 0;
       stall_data->access_count            = 0;
+      stall_data->evct_count              = 0;
       stall_data->fill_op                 = 0;
       stall_data->hit_op                  = 0;
       stall_data->pc_sharing_bitmap       = 0;
@@ -1165,9 +1192,7 @@ cache_access_status cachesim_incl_cache(
       /* Insert stall into pc table */
       pc_table.insert(pair<ub8, ub8>(info.pc, (ub8)stall_data));
     }
-
-    block_data *current_block_data;
-
+    
     /* Find block in the block list of the PC */
     block_itr = (stall_data->blocks).find(info.address);
 
@@ -1182,6 +1207,13 @@ cache_access_status cachesim_incl_cache(
       current_block_data->pc_sharing_bitmap       = 0;
       current_block_data->overflow_count          = 0;
       current_block_data->block_address           = info.address;
+      current_block_data->block_ppc               = 0xdead;
+      current_block_data->block_fsn               = CACHE_EVCT(cache)[indx];
+      current_block_data->block_asn               = CACHE_AFRQ(cache)[indx];
+      current_block_data->block_zevct             = 0;
+      current_block_data->block_hit               = 0;
+      current_block_data->self_hit                = 0;
+      current_block_data->block_access            = 0;
       current_block_data->block_data.access_count = 0;
       current_block_data->block_data.hit_count    = 0;
 
@@ -1193,12 +1225,30 @@ cache_access_status cachesim_incl_cache(
       current_block_data = (block_data *)(block_itr->second);
       assert(current_block_data->block_address == info.address); 
     }
-
-    stall_data->stat_access_llc += 1;
+   
+    stall_data->stat_access_llc       += 1;
+    current_block_data->block_access  += 1;
 
     if (ret.fate == CACHE_ACCESS_MISS)
     {
       stall_data->stat_miss_llc += 1;
+
+      /* Insert block into exclusive block list */
+      xblk_table_itr = xblk_table.find(info.address);
+      if (xblk_table_itr == xblk_table.end())
+      {
+        xblk_table.insert(pair<ub8, ub8>(info.address, 0));
+      }
+      
+      /* Insert new PC into exclusive pc list */
+      if (info.pc)
+      {
+        xpc_table_itr = xpc_table.find(info.pc);
+        if (xpc_table_itr == xpc_table.end())
+        {
+          xpc_table.insert(pair<ub8, ub8>(info.pc, 0));
+        }
+      }
     }
     else
     {
@@ -1206,10 +1256,54 @@ cache_access_status cachesim_incl_cache(
        * to the list. */
       pc_data *data;
 
-      if (ret.pc != info.pc)
+      if (ret.pc != 0xdead && ret.pc != info.pc)
       {
+        /* Insert block into exclusive block list */
+        xblk_table_itr = xblk_table.find(info.address);
+        if (xblk_table_itr != xblk_table.end())
+        {
+          xblk_table.erase(xblk_table_itr);
+        }
+
+        /* Insert block into shared block list */
+        sblk_table_itr = sblk_table.find(info.address);
+        if (sblk_table_itr == sblk_table.end())
+        {
+          sblk_table.insert(pair<ub8, ub8>(info.address, 0));
+        }
+
+        /* Update PC state between shared and exclusive */
+        xpc_table_itr = xpc_table.find(info.pc); 
+        if (xpc_table_itr != xpc_table.end())
+        {
+          xpc_table.erase(xpc_table_itr);
+        }
+
+        spc_table_itr = spc_table.find(info.pc);
+        if (spc_table_itr == spc_table.end())
+        {
+          spc_table.insert(pair<ub8, ub8>(info.pc, 0));
+        }
+
         /* Update previous operation on the PC */
         stall_data->access_count += 1;
+        stall_data->evct_count   += CACHE_EVCT(cache)[indx];
+
+        current_block_data->block_ppc   = ret.pc;
+        current_block_data->block_fsn   = CACHE_EVCT(cache)[indx];
+        current_block_data->block_asn   = CACHE_AFRQ(cache)[indx];
+        current_block_data->block_hit   += 1;
+
+        /* Insert accessed set into stall info */
+        set_itr = stall_data->sets.find(indx);
+        if (set_itr == stall_data->sets.end())
+        {
+          stall_data->sets.insert(pair<ub8, ub8>(indx, 0));
+        }
+
+#if 0
+        CACHE_EVCT(cache)[indx] = 0;
+#endif
 
         switch (ret.op)
         {
@@ -1244,6 +1338,7 @@ cache_access_status cachesim_incl_cache(
 
         /* Update previous operation on the block */
         data->access_count += 1;
+
         switch (ret.op)
         {
           case block_op_fill:
@@ -1256,6 +1351,26 @@ cache_access_status cachesim_incl_cache(
 
           default:
             printf("Invalid operation\n");
+        }
+        
+        pc_data *p_stall_data;
+
+        pc_table_itr = pc_table.find(ret.pc);
+        if (pc_table_itr != pc_table.end())
+        {
+          p_stall_data = (pc_data *)(pc_table_itr->second);
+          block_itr = (p_stall_data->npc).find(info.pc);
+          if (block_itr == p_stall_data->npc.end())
+          {
+            (p_stall_data->npc).insert(pair<ub8, ub8>(info.pc, 0));
+          }
+        }
+      }
+      else
+      {
+        if (ret.pc == info.pc)
+        {
+          current_block_data->self_hit += 1;
         }
       }
     }
@@ -1274,6 +1389,11 @@ cache_access_status cachesim_incl_cache(
       block_data *current_block_data;
 
       CACHE_EVCT(cache)[indx]++;
+      
+      if (ret.access == 0)
+      {
+        CACHE_ZEVCT(cache)[indx]++;
+      }
 
       /* Issue callback for reuse */
       if (USE_INTER_STREAM_CALLBACK)
@@ -1346,6 +1466,16 @@ cache_access_status cachesim_incl_cache(
 
           stall_data->pc_sharing_bitmap   = 0;
           stall_data->overflow_count      = 0;
+        }
+
+        if (ret.access == 0)
+        {
+          current_block_data->block_zevct += 1;
+        }
+
+        if (ret.fillpc == 134576144 && ret.tag == 8239296)
+        {
+          printf("\n%ld %ld %ld\n", ret.fillpc, ret.tag, ret.access);
         }
       }
     }
@@ -1445,11 +1575,19 @@ cache_access_status cachesim_incl_cache(
     ((cachesim_cacheline *)phy_way[indx][ret.way])->rdis    = rdis;
     ((cachesim_cacheline *)phy_way[indx][ret.way])->prdis   = last_rdis;
     ((cachesim_cacheline *)phy_way[indx][ret.way])->stream  = info.stream;
-    ((cachesim_cacheline *)phy_way[indx][ret.way])->pc      = info.pc;
+
+    if (info.fill && info.pc)
+    {
+      ((cachesim_cacheline *)phy_way[indx][ret.way])->pc    = info.pc;
+    }
     ((cachesim_cacheline *)phy_way[indx][ret.way])->dirty   = (info.spill) ? 1 : 0;
     ((cachesim_cacheline *)phy_way[indx][ret.way])->rrpv    = CACHE_MAX_RRPV(cache) - CACHE_MAX_RRPV(cache);
     ((cachesim_cacheline *)phy_way[indx][ret.way])->op      = block_op_hit;
-    ((cachesim_cacheline *)phy_way[indx][ret.way])->access += 1;
+
+    if (info.fill)
+    {
+      ((cachesim_cacheline *)phy_way[indx][ret.way])->access += 1;
+    }
 
     /* Set per pc bit map */
     ub8         pc_seq_id;
@@ -3196,8 +3334,16 @@ int main(int argc, char **argv)
   assert(cache_set);
 
   /* Create sequence number array for each set */
-  sn_set    = new ub8[CACHE_LCNT(&l3cache)];
+  sn_set = new ub8[CACHE_LCNT(&l3cache)];
   assert(sn_set);
+
+  /* Create fill sequence number array for each set */
+  fill_set = new ub8[CACHE_LCNT(&l3cache)];
+  assert(fill_set);
+
+  /* Create fill sequence number array for each set */
+  read_set = new ub8[CACHE_LCNT(&l3cache)];
+  assert(read_set);
 
   for (ub8 i = 0; i < CACHE_LCNT(&l3cache); i++) 
   {
@@ -3218,6 +3364,12 @@ int main(int argc, char **argv)
   /* Set sequence number to 0 */
   memset(sn_set, 0, sizeof(ub8) * CACHE_LCNT(&l3cache));
 
+  /* Set fill sequence number to 0 */
+  memset(fill_set, 0, sizeof(ub8) * CACHE_LCNT(&l3cache));
+
+  /* Set read sequence number to 0 */
+  memset(read_set, 0, sizeof(ub8) * CACHE_LCNT(&l3cache));
+
   /* Initialize global sequence number counter */
   sn_glbl = 0;
 
@@ -3228,6 +3380,10 @@ int main(int argc, char **argv)
   /* Create ways to keep reuse distance */
   CACHE_EVCT(&l3cache) = new ub8[CACHE_LCNT(&l3cache)];
   CLRSTRUCT(*CACHE_EVCT(&l3cache));
+
+  /* Create ways to keep reuse distance */
+  CACHE_ZEVCT(&l3cache) = new ub8[CACHE_LCNT(&l3cache)];
+  CLRSTRUCT(*CACHE_ZEVCT(&l3cache));
 
   /* Set next and previous level of hierarchy */
   CACHE_PLVL(&l3cache) = NULL;
@@ -4287,7 +4443,10 @@ int main(int argc, char **argv)
 
                 cache_access_info *ret_access_info = cachesim_get_access_info(ret.tag);
                 assert(ret_access_info);
+#if 0
                 assert(ret.access == ret_access_info->access_count);
+#endif
+
                 assert(last_rdis != (ub8)(~(0)) && ret_access_info->last_seq >= ret_access_info->first_seq);
 
                 index       = ret_access_info->last_seq - ret_access_info->first_seq;
@@ -4877,6 +5036,51 @@ int main(int argc, char **argv)
   return 0;
 }
 
+void dump_pc_blocks(ub8 pc)
+{
+  /* Dump Reuse stats in file */
+  gzofstream   out_stream;
+  char         tracefile_name[100];
+  
+  assert(strlen("PC-L2-BLOCKS-stats.trace.csv.gz") + 1 < 100);
+  sprintf(tracefile_name, "%ld-L2-BLOCKS-stats.trace.csv.gz", pc);
+  out_stream.open(tracefile_name, ios::out | ios::binary);
+
+  if (!out_stream.is_open())
+  {
+    printf("Error opening output stream\n");
+    exit(EXIT_FAILURE);
+  }
+  
+  printf("Dumping PC BLOCKS %s \n", tracefile_name);
+
+  out_stream << "PC; PrevPC; BLOCKS; ACCESS; HITS; SELFHIT; SETACCESS; ZEVCT" << endl;
+
+  pc_data    *stall_data;
+  block_data *current_block_data;
+  map<ub8, ub8>::iterator block_itr;
+
+  for (pc_table_itr = pc_table.begin(); pc_table_itr != pc_table.end(); pc_table_itr++)
+  {
+    stall_data = (pc_data *)(pc_table_itr->second);
+
+    if (stall_data->pc == pc)
+    {
+      for (block_itr = stall_data->blocks.begin(); block_itr != stall_data->blocks.end(); block_itr++)
+      {
+        current_block_data = (block_data *)(block_itr->second);
+        out_stream << stall_data->pc << ";" <<  current_block_data->block_ppc << ";" 
+          << block_itr->first << ";" << current_block_data->block_access << ";" 
+          << current_block_data->block_hit << ";" << current_block_data->self_hit 
+          << ";" << current_block_data->block_asn << ";" << current_block_data->block_zevct 
+          << ";" << endl;
+      }
+    }
+  }
+
+  out_stream.close();
+}
+
 void dump_pc_table()
 {
   /* Dump Reuse stats in file */
@@ -4895,7 +5099,7 @@ void dump_pc_table()
   
   printf("Dumping PC Table %s \n", tracefile_name);
 
-  out_stream << "PC; LLCACCESS; LLCMISS; BLOCKS; SHARINGPCS; UNIQUEBITMAPS; PCBITMAP; OVERFLOW; FILLOP; HITOP" << endl;
+  out_stream << "PC; LLCACCESS; LLCMISS; BLOCKS; SHAREDACCESS; EVICTION; SETS; SHAREDPC" << endl;
 
   pc_data *stall_data;
 
@@ -4903,9 +5107,9 @@ void dump_pc_table()
   {
     stall_data = (pc_data *)(pc_table_itr->second);
     out_stream << stall_data->pc << ";" <<  stall_data->stat_access_llc << ";" << stall_data->stat_miss_llc 
-      << ";" << (stall_data->blocks).size() << ";" << (stall_data->pc_map.map_seq).size() << ";" 
-      << (stall_data->bitmaps).size() << ";" << stall_data->pc_sharing_bitmap << ";" 
-      << stall_data->overflow_count << ";" << stall_data->fill_op << ";" << stall_data->hit_op << endl;
+      << ";" << (stall_data->blocks).size() << ";" << stall_data->access_count << ";" 
+      << stall_data->evct_count << ";" << (stall_data->sets).size() << ";" << (stall_data->npc).size() 
+      << ";" << endl;
   }
 
   out_stream.close();
@@ -5092,6 +5296,14 @@ void cachesim_fini()
   dump_hist_for_stream(CS);
   dump_hist_for_stream(PS);
   dump_pc_table();
+
+  dump_pc_blocks(135484093);
+
+  cout << endl << "Shared PC blocks " << sblk_table.size() << " exclusive PC blocks " 
+    << xblk_table.size() << endl;
+
+  cout << endl << "Shared PC " << spc_table.size() << " exclusive PC " 
+    << xpc_table.size() << endl;
 }
 
 #undef BLCKALIGN

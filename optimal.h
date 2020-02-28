@@ -156,6 +156,7 @@ typedef struct
 #define CACHE_PLVL(x)     ((x)->cachesim_cache_prev_lvl)
 #define CACHE_AFRQ(x)     ((x)->cachesim_afrq)
 #define CACHE_EVCT(x)     ((x)->cachesim_evct)
+#define CACHE_ZEVCT(x)    ((x)->cachesim_zevct)
 #define CACHE_MAX_RRPV(x) ((x)->cachesim_max_rrpv)
 
 #define CACHE_SNDCNT(x)   ((x)->cachesim_snd_cnt)
@@ -203,6 +204,9 @@ struct cachesim_cache
 
   /* Structure to track evictions */
   ub8 *cachesim_evct;
+
+  /* Structure to track evictions */
+  ub8 *cachesim_zevct;
 
   /* keeps pointer to next level of cache */
   struct cachesim_cache *cachesim_cache_next_lvl; 
@@ -299,6 +303,13 @@ typedef struct block_data
 {
   ub8 pc_sharing_bitmap;        /* Bit-map where each bit corresponds to a PC */
   ub8 block_address;            /* Block align memory address */
+  ub8 block_ppc;                /* Block's previous access PC */
+  ub8 block_asn;                /* Block's access sequence number */
+  ub8 block_fsn;                /* Block's fill sequence number */
+  ub8 block_zevct;              /* Block's zero eviction sequence number */
+  ub8 block_access;             /* Access to block */
+  ub8 block_hit;                /* Hit to block */
+  ub8 self_hit;                 /* Hit to block by previous PC */
   ub8 overflow_count;           /* # PCs which overflow the bit-map */
   cache_access_data block_data; /* Cache access stats for the block */
 }block_data;
@@ -472,6 +483,7 @@ class bitmap_fifo
       return (max > 0) ? this->last_n_bitmaps[0][0] : 0;
     }
 };
+
 /* Per PC data used for statistics collection */
 typedef struct pc_data
 {
@@ -480,6 +492,7 @@ typedef struct pc_data
   ub8 pc_sharing_bitmap;        /* Bit-map where each bit corresponds to a PC */
   ub8 overflow_count;           /* # PCs which overflow the bit-map */
   ub8 access_count;             /* Times pc was at the head */
+  ub8 evct_count;               /* Eviction between successive hits */
   ub8 stat_access_count;        /* Times pc was at the head */
   ub8 stat_miss_l1;             /* L1 miss count */
   ub8 stat_miss_l2;             /* L2 miss count */
@@ -488,7 +501,9 @@ typedef struct pc_data
   ub8 fill_op;                  /* # times last operation was fill */
   ub8 hit_op;                   /* # times last operation was hit */
   map<ub8, ub8> blocks;         /* Blocks accessed by this PC */
+  map<ub8, ub8> sets;           /* Sets blocks accessed by this PC map to */
   map<ub8, ub8> ppc;            /* PCs which last accessed the current block */
+  map<ub8, ub8> npc;            /* PCs which subsequently accessed the block */
   map<ub8, ub8> bitmaps;        /* List of distinct bit-maps seen by the PC */
   bitmap_fifo  *bmp_fifo;       /* FIFO of last N bit maps */
   seq_map pc_map;               /* PCs accessing blocks brought by this PC */

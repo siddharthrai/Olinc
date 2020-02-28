@@ -1,6 +1,25 @@
+/*
+ * Copyright (C) 2014  Siddharth Rai
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301,
+ * USA.
+ */
+
 #include "cache-sim.h"
 #include <unistd.h>
-#include "inter-stream-reuse.h"
+//#include "inter-stream-reuse.h"
 #include "DRAMSim.h"
 
 #define INTERVAL_SIZE             (1 << 19)
@@ -9,7 +28,7 @@
 #define ROW_SET_SIZE              (6)
 #define USE_INTER_STREAM_CALLBACK (FALSE)
 #define MAX_CORES                 (4)
-#define MAX_RRPV                  (3)
+#define MAX_RRPV                  (16)
 #define MAX_MSHR                  (128)
 #define TQ_SIZE                   (128)
 #define ST(i)                     ((i)->stream)
@@ -17,7 +36,7 @@
 #define CST(i)                    ((i)->stream == CS)
 #define ZST(i)                    ((i)->stream == ZS)
 #define BST(i)                    ((i)->stream == BS)
-#define IS_SPILL_ALLOCATED(i)     (TRUE)
+#define IS_SPILL_ALLOCATED(i)     (FALSE)
 #define ACCESS_BYPASS(i)          (FALSE)
 #define MAX_REUSE                 (64)
 #define CS_MSHR_ALLOC             (1)
@@ -341,6 +360,82 @@ extern  sb1 *stream_names[TST + 1];
 speedup_stream_type get_srriphint_stream(cachesim_cache *cache, memory_trace *info)
 {
   return (speedup_stream_type)(info->sap_stream);
+}
+
+void dump_pc_table(cachesim_cache *cache)
+{
+  /* Dump Reuse stats in file */
+  gzofstream   out_stream;
+  char         tracefile_name[100];
+
+  map<ub8, ub8>::iterator pc_table_itr;
+
+  assert(strlen("PC-L2-stats.trace.csv.gz") + 1 < 100);
+  sprintf(tracefile_name, "PC-L2-stats.trace.csv.gz");
+  out_stream.open(tracefile_name, ios::out | ios::binary);
+
+  if (!out_stream.is_open())
+  {
+    printf("Error opening output stream\n");
+    exit(EXIT_FAILURE);
+  }
+  
+  printf("Dumping PC Table %s \n", tracefile_name);
+
+  out_stream << "PC; LLCACCESS; LLCMISS; BLOCKS; SHAREDACCESS; EVICTION;" << endl;
+
+  pc_data *stall_data;
+
+  for (pc_table_itr = cache->pc_table.begin(); pc_table_itr != cache->pc_table.end(); pc_table_itr++)
+  {
+    stall_data = (pc_data *)(pc_table_itr->second);
+    out_stream << stall_data->pc << ";" <<  stall_data->stat_access_llc << ";" 
+      << stall_data->stat_miss_llc << ";" << (stall_data->blocks).size() << ";"
+      << stall_data->access_count << ";" << stall_data->evct_count << endl;
+  }
+
+  out_stream.close();
+}
+
+void dump_pc_blocks(cachesim_cache *cache, ub8 pc)
+{
+  /* Dump Reuse stats in file */
+  gzofstream   out_stream;
+  char         tracefile_name[100];
+
+  map<ub8, ub8>::iterator pc_table_itr;
+  map<ub8, ub8>::iterator pc_block_itr;
+
+  assert(strlen("PC-L2-BLOCKS-stats.trace.csv.gz") + 1 < 100);
+  sprintf(tracefile_name, "PC-L2-BLOCKS-stats.trace.csv.gz");
+  out_stream.open(tracefile_name, ios::out | ios::binary);
+
+  if (!out_stream.is_open())
+  {
+    printf("Error opening output stream\n");
+    exit(EXIT_FAILURE);
+  }
+  
+  printf("Dumping PC Table %s \n", tracefile_name);
+
+  out_stream << "PC; BLOCK;" << endl;
+
+  pc_data *stall_data;
+
+  for (pc_table_itr = cache->pc_table.begin(); pc_table_itr != cache->pc_table.end(); pc_table_itr++)
+  {
+    stall_data = (pc_data *)(pc_table_itr->second);
+
+    if (pc == stall_data->pc)
+    {
+      for (pc_block_itr = stall_data->blocks.begin(); pc_block_itr != stall_data->blocks.end(); pc_block_itr++)
+      {
+        out_stream << stall_data->pc << ";" <<  pc_block_itr->first << ";" << endl;
+      }
+    }
+  }
+
+  out_stream.close();
 }
 
 void dumpDRAMStats(cachesim_cache *cache)
@@ -2529,6 +2624,9 @@ cache_access_status cachesim_fill_block(cachesim_cache *cache, memory_trace *inf
 
         /* Update per-stream per-way eviction */
         per_way_evct[vctm_stream][way] += 1;
+
+        /* Increment per-set eviction count */
+        cache->set_evct[indx] += 1;
       }
       else
       {
@@ -2574,6 +2672,11 @@ cache_access_status cachesim_incl_cache(cachesim_cache *cache, cachesim_cache *s
   cache_access_status ret;
   memory_trace *info_out;
 
+  pc_data  *stall_data;
+
+  map<ub8, ub8>::iterator pc_itr;
+  map<ub8, ub8>::iterator stall_itr;
+
   assert(cache);
 
   indx        = ADDR_NDX(cache, addr);
@@ -2589,6 +2692,41 @@ cache_access_status cachesim_incl_cache(cachesim_cache *cache, cachesim_cache *s
   }
 
   assert(strm != NN && strm <= TST);
+  
+  if (info->pc)
+  {
+    pc_itr = cache->pc_table.find(info->pc);
+
+    if (pc_itr == cache->pc_table.end())
+    {
+      stall_data = new pc_data;
+
+      assert(stall_data);
+
+      stall_data->pc = info->pc;
+
+      stall_data->access_count    = 0;
+      stall_data->evct_count      = 0;
+      stall_data->stat_access_llc = 0;
+      stall_data->stat_miss_llc   = 0;
+      
+      stall_data->blocks.insert(pair<ub8, ub8>(info->address, 0));
+
+      cache->pc_table.insert(pair<ub8, ub8>(info->pc, (ub8)stall_data));
+    }
+    else
+    {
+      stall_data = (pc_data *)(pc_itr->second);
+      stall_itr = stall_data->blocks.find(info->address);
+
+      if (stall_itr == stall_data->blocks.end())
+      {
+        stall_data->blocks.insert(pair<ub8, ub8>(info->address, 0)); 
+      }
+    }
+
+    stall_data->stat_access_llc +=1; 
+  }
 
   block = cache_find_block(cache->cache, indx, addr, info);
 
@@ -2707,6 +2845,19 @@ cache_access_status cachesim_incl_cache(cachesim_cache *cache, cachesim_cache *s
         ret = cachesim_fill_block(cache, info);
       }
     }
+
+    if (info->pc)
+    {
+      pc_itr = cache->pc_table.find(info->pc);
+
+      if (pc_itr != cache->pc_table.end())
+      {
+        stall_data = (pc_data *)(pc_itr->second);
+        assert(stall_data);
+
+        stall_data->stat_miss_llc += 1;
+      }
+    }
   }
   else
   {
@@ -2719,10 +2870,31 @@ cache_access_status cachesim_incl_cache(cachesim_cache *cache, cachesim_cache *s
     ret.epoch     = block->epoch;
     ret.access    = block->access;
     ret.last_rrpv = block->last_rrpv;
-
-    cache_access_block(cache->cache, indx, block->way, strm, info);
+    ret.pc        = block->pc;
 
     real_access++;
+
+    if (info->pc)
+    {
+      pc_itr = cache->pc_table.find(info->pc);
+
+      if (pc_itr != cache->pc_table.end())
+      {
+        stall_data = (pc_data *)(pc_itr->second);
+        assert(stall_data);
+        
+        if (ret.pc != 0xdead && ret.pc != info->pc)
+        {
+          stall_data->access_count += 1;
+        }
+
+        stall_data->evct_count   += cache->set_evct[indx];
+
+        cache->set_evct[indx] = 0;
+      }
+    }
+
+    cache_access_block(cache->cache, indx, block->way, strm, info);
   }
   
   return ret;
@@ -5823,6 +5995,13 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
   }
+  
+  if (config_file_name == NULL || trc_file_name == NULL)
+  {
+    printf("Usage:cache-sim -f <config-file-name> -t <memory-trace-file-name>\n");  
+
+    exit(-1);
+  }
 
   cfg_loader = new ConfigLoader(config_file_name);
   cfg_loader->getParameters(&sim_params);
@@ -5910,12 +6089,10 @@ int main(int argc, char **argv)
   openStatisticsStream(&sim_params, stats_stream);
   initStatistics(sm);
 
-#if 0
   if (sim_params.lcP.dramSimEnable == FALSE)
   {
     dram_config_init(&(l3cache.dram_info));
   }
-#endif
 
   cout << endl << "Running for " << cache_count << " iterations" << endl;
 
@@ -5951,6 +6128,14 @@ int main(int argc, char **argv)
       }
 
       set_cache_params(&params, &(sim_params.lcP), cache_sizes[c_cache], cache_ways[c_way], cache_set);
+
+      l3cache.set_evct = new ub8[params.num_sets];
+      assert(l3cache.set_evct);
+      
+      for (ub4 set = 0; set < params.num_sets; set++)
+      {
+        l3cache.set_evct[set] = 0;
+      }
 
       /* Allocate per stream per way evict histogram */
       for (ub4 i = 0; i <= TST; i++)
@@ -6080,6 +6265,14 @@ int main(int argc, char **argv)
 
   /* Close statistics stream */
   closeStatisticsStream(stats_stream);
+  
+  /* Dump PC wise stats */
+  dump_pc_table(&l3cache);
+
+  /* Dump blocks for a PC */
+  dump_pc_blocks(&l3cache, 134819977);
+  
+  /* Dump overall stats */
   dumpOverallStats(&l3cache, total_cycle, l3cache.cachecycle, l3cache.dramcycle);
 
   printf("\n");

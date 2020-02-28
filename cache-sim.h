@@ -1,3 +1,22 @@
+/*
+ * Copyright (C) 2014  Siddharth Rai
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301,
+ * USA.
+ */
+
 #ifndef CACHE_SIM_H
 #define CACHE_SIM_H
 
@@ -308,6 +327,7 @@ struct cachesim_cache
   ub8                   remap_count;                              /* # remap */
   ub1                   dramsim_trace;                            /* TRUE, if memory trace is DRAM access trace */
   map<ub8, cs_mshr*>    mshr;                                     /* MSHR storage */
+  ub8                  *set_evct;                                 /* Per-set evict */
   ub8                   access[TST + 1];                          /* Per stream access */
   ub8                   miss[TST + 1];                            /* Per stream miss */
   ub1                   speedup_enabled;                          /* True if DRAM considers speedup hints */
@@ -326,7 +346,22 @@ struct cachesim_cache
   map<ub8, ub8>         dramsim_channels;                         /* Per-rank per-bank open rows */
   map<ub8, ub8>         dramsim_row_set;                          /* Set of rows used for dynamic row mapping */
   stream_row            per_stream_row[NUM_CHANS][NUM_BANKS];     /* Row stats of all streams */ 
+  map<ub8, ub8>         pc_table;                                 /* Table to track per PC stats */
 };
+
+/* Per PC data used for statistics collection */
+typedef struct pc_data
+{
+  ub4 id;                       /* Id given to the PC data */
+  ub8 pc;                       /* Program counter */
+  ub8 access_count;             /* Times pc was at the head */
+  ub8 evct_count;               /* Times pc was at the head */
+  ub8 stat_access_llc;          /* # LLC access */
+  ub8 stat_miss_llc;            /* # LLC miss */
+  ub8 fill_op;                  /* # times last operation was fill */
+  ub8 hit_op;                   /* # times last operation was hit */
+  map<ub8, ub8> blocks;         /* Blocks accessed by this PC */
+}pc_data;
 
 typedef struct cachesim_cache cachesim_cache;
 
