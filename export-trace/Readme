@@ -1,0 +1,56 @@
+README:
+-------
+
+The header file export.h can be used to parse the memory trace files.
+
+Each access can be read using structure memory_trace. Description of each field of the structure is written
+along with the definition of the structure. Most of the data members except stream and sap_stream can be 
+understood by their name. Stream and sap_stream refer to a set of constant values defined in same header file. 
+Stream can take any of the constants (CS, ZS, TS, BS etc.) whereas sap_stream can take any of the constant 
+defined sap_stream enum.
+
+
+Test program:
+-------------
+
+This package also provides a test program reader.c to illustrate how to  read a trace entry.
+Program can be compiled using following compile line.
+
+gcc -O3 -o reader reader.c -lz
+
+Trace files:
+-----------
+
+Trace files are located in tracefile directory. It contains one directory for each graphics application.
+Top levle directory again contain a directory for each test and which finally contain trace file memory-trace.gz.
+
+Test directory name identifies the GPU application frames and CPU application of the trace. First part of the 
+name is the test name for example in the name hetero_baseline_4_bank_speedup_sdpsimple-253-5-zeusmp, 
+hetero_baseline_4_bank_speedup_sdpsimple is the test name after that 253-5 represents that trace belongs to 5 
+GPU frames starting from frame number 253 and final part zeusmp represents CPU application ZEUSMP. 
+
+CPU, GPU mix
+-------------
+
+Following is the complete list of CPU and GPU applications used for the traces
+
+--------------------------
+CPUWorkload   GPUWorkload |
+--------------------------
+ZEUSMP        COR         | 	
+LQUANTUM      DOOM3       |
+BWAVES        QUAKE4      |
+LESLIE3D      NFS         |
+LBM           COD2        |
+GCC           HL2         |
+LQUANTUM      L4D         |
+SOPLEX        UT4         | 
+ZEUSMP        UT3         |
+MCF           CRYSIS      |
+WRF           3DMGT1      |
+--------------------------
+OMNETPP       3DMGT2
+LBM           3DMHDR1
+SPHINX3       3DMHDR2
+
+ 
