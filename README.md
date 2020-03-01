@@ -5,9 +5,8 @@ Olinc is a functional memory hierarchy simulator for last-level cache (LLC) and 
 Usage:
 ------
 Simulator expects a configuration file describing cache configuration and DRAM timing 
-parameters and an input memory trace for execution.  Memory trace format supported by 
-the simulator can be found in the export-trace/export.h header file. A reader utility 
-present in the "export-trace" directory can be used to read a valid trace file.
+parameters and an input memory trace for execution. Memory trace format recognized is
+described in the <bold>export-trace/export.h</bold> header file. A reader utility present in the "export-trace" directory can be used to read a valid trace file.
 
 Configuration files:
 -------------------
